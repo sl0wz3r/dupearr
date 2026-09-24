@@ -59,7 +59,8 @@ User guides live in [`docs/user/`](docs/user/): [requirements](docs/user/require
 [Docker](docs/user/installation-docker.md) · [native](docs/user/installation-native.md) ·
 [configuration](docs/user/configuration.md) · [profiles](docs/user/profiles.md) ·
 [safety](docs/user/safety.md) · [webhooks](docs/user/webhooks.md) ·
-[troubleshooting](docs/user/troubleshooting.md) · [FAQ](docs/user/faq.md).
+[dashboards](docs/user/dashboards.md) · [troubleshooting](docs/user/troubleshooting.md) ·
+[FAQ](docs/user/faq.md).
 
 ## Screenshots
 

@@ -2,7 +2,7 @@
 
 Short answers with links to the full guides: [configuration](configuration.md) ·
 [profiles](profiles.md) · [safety](safety.md) · [webhooks](webhooks.md) ·
-[troubleshooting](troubleshooting.md).
+[dashboards](dashboards.md) · [troubleshooting](troubleshooting.md).
 
 - [Deleting and undoing](#deleting-and-undoing)
 - [Why is this group …?](#why-is-this-group-)
