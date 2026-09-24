@@ -1,0 +1,32 @@
+# Hand-verified VTS IFO (PAL, MPEG-2, 16:9): AC-3 5.1 "en", DTS 5.1 "de", sub-picture "fr";
+# program chains 1:45:30.05 (12 programs) and 0:02:00.00 (1 program).
+
+# 0x000 VTSI_MAT
+44 56 44 56 49 44 45 4F 2D 56 54 53   # "DVDVIDEO-VTS"
+00*192                  # up to 0x0CC
+00 00 00 01             # 0x0CC VTS_PGCIT start sector = 1 (byte 0x800)
+00*304                  # up to 0x200
+5C 00                   # 0x200 video: MPEG-2 (01) PAL (01) 16:9 (11) | picture size 0 (720x576)
+00 02                   # 0x202 two audio streams
+04 05 65 6E 00 01 00 00 # 0x204 AC-3 (000), lang type 1 | 6 channels (5), "en", normal
+C4 05 64 65 00 01 00 00 # 0x20C DTS (110), lang type 1 | 6 channels, "de"
+00*65                   # 6 unused audio attributes + 17 bytes, up to 0x255
+01                      # 0x255 one sub-picture stream
+01 00 66 72 00 01       # 0x256 type 1 (language), "fr"
+00*1444                 # up to 0x800
+
+# 0x800 VTS_PGCIT
+00 02                   # two program chains
+00 00                   # reserved
+00 00 01 EF             # end address (relative)
+81 00 00 00 00 00 00 18 # PGC 1 at +0x18
+82 00 00 00 00 00 01 04 # PGC 2 at +0x104 (0x18 + 0xEC)
+# 0x818 PGC 1
+00 00 0C 0E             # zero, 12 programs, 14 cells
+01 45 30 45             # 01:45:30, frames 05 at 25 fps (01 in the top bits)
+00*228                  # rest of the PGC (0xEC bytes in all)
+# 0x904 PGC 2
+00 00 01 01             # zero, 1 program, 1 cell
+00 02 00 40             # 00:02:00, frames 00 at 25 fps
+00*228
+# 0x9F0 end

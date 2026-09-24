@@ -1,0 +1,80 @@
+# Dupearr with docker compose (TRaSH Guides layout: one /data tree shared by every app).
+#
+#   cp .env.example .env    # then edit it
+#   docker compose up -d
+#   open http://<host>:3873/
+#
+# Needs Docker Engine 20.10+ (25.0+ recommended: older engines ignore the image's 5-second
+# start-up health probe and report "healthy" after about 30 s) and Docker Compose v2
+# (`docker compose`). The image runs on any x86-64 CPU (no AVX needed) or arm64. Full list:
+# docs/user/requirements.md.
+#
+# Mount /data exactly like your Plex and Radarr/Sonarr containers do (same host path, same
+# container path), so every app reports the same file paths and Dupearr can see hardlinks.
+# The filesystem deletion method, the recycle bin and hardlink detection also need a Plex path
+# mapping in Dupearr (Settings -> Media Management); with identical paths, map the folder to
+# itself (/data/media -> /data/media). Media only mounted as e.g. /movies and /tv in Plex? Keep
+# /data here and map /movies -> /data/..., see docs/user/configuration.md#path-mappings.
+
+services:
+  dupearr:
+    # Pin what you run: a version tag plus the image digest from its release notes, e.g.
+    #   DUPEARR_IMAGE=ghcr.io/sl0wz3r/dupearr:0.2.0@sha256:<digest>
+    # Docker then checks every byte it pulls against the digest, whatever the transport. ":latest"
+    # follows new releases but runs whatever the registry serves.
+    # Without a registry: `make docker-save` on a build machine writes
+    # dist/dupearr_<version>_linux-amd64.tar.gz; here `docker load -i` that file and set
+    #   DUPEARR_IMAGE=dupearr:<version>-amd64
+    # Compose's default pull policy ("missing") then runs the loaded image and pulls nothing
+    # (unraid/README.md, "Install without a registry").
+    image: ${DUPEARR_IMAGE:-ghcr.io/sl0wz3r/dupearr:latest}
+    container_name: dupearr
+    restart: unless-stopped
+    # Least privilege. The entrypoint starts as root only to chown Dupearr's files in /config
+    # (CHOWN, DAC_OVERRIDE), switch to PUID:PGID with su-exec (SETUID, SETGID) and let tini
+    # forward signals to the app (KILL); Dupearr itself runs without capabilities, and nothing in
+    # the container can gain privileges later (setuid binaries, file capabilities).
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - KILL
+      - SETGID
+      - SETUID
+    # Optional: read-only root filesystem. Dupearr only writes to /config, /data and /tmp, but the
+    # entrypoint then cannot add a user entry for PUID and logs a warning at every start.
+    # read_only: true
+    # tmpfs:
+    #   - /tmp
+    ports:
+      - "${DUPEARR_PORT:-3873}:3873"
+    environment:
+      # Must be able to delete your media (use the ids that own your /data tree).
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - UMASK=${UMASK:-002}
+      - TZ=${TZ:-Etc/UTC}
+      # Behind a reverse proxy: its address(es) (IP or CIDR), so Dupearr believes the client address
+      # in its X-Forwarded-For and, with External authentication, trusts only requests it relays.
+      # Optional: host names Dupearr may be addressed by (e.g. dupearr.example.com).
+      # See docs/SECURITY.md#deployment-hardening-guide.
+      - DUPEARR__AUTH__TRUSTEDPROXIES=${DUPEARR_TRUSTED_PROXIES:-}
+      - DUPEARR__AUTH__ALLOWEDHOSTS=${DUPEARR_ALLOWED_HOSTS:-}
+    volumes:
+      # config.xml, SQLite database, logs, backups. Local disk only (no NFS/SMB for SQLite).
+      - ${DOCKERCONFDIR:-/docker/appdata}/dupearr:/config
+      # The same host path your Plex and Radarr/Sonarr containers use for /data.
+      - ${DOCKERSTORAGEDIR:-/data}:/data
+    # Health: the image's HEALTHCHECK applies (`dupearr healthcheck`, which reads the port and URL
+    # base from config.xml and the DUPEARR__SERVER__* variables), so none is repeated here. It
+    # probes every 5 s while starting (Docker Engine 25.0+; older engines every 30 s).
+    # Give an in-flight removal time to finish on `docker compose down`/restart.
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

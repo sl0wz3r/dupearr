@@ -1,0 +1,66 @@
+# Local test environment: Dupearr + a fake Plex / Radarr / Radarr 4K / Sonarr (tools/fakemedia).
+# Nothing here touches real media — the fake library is a tree of sparse dummy files in a Docker
+# volume. Start it with `make test-env` (builds, starts and pre-configures everything), then open
+# http://localhost:3873. See deploy/test-env/README.md.
+name: dupearr-test
+
+services:
+  # Named volumes start root-owned; hand them to the PUID/PGID both containers run as.
+  init-perms:
+    image: alpine:3.22
+    command: ["sh", "-c", "chown 1000:1000 /data /config"]
+    volumes:
+      - media:/data
+      - config:/config
+    restart: "no"
+
+  fakemedia:
+    build:
+      context: ../..
+      dockerfile: docker/fakemedia.Dockerfile
+    image: dupearr-fakemedia:test-env
+    # Same uid/gid as Dupearr so Dupearr can move files into its recycle bin (same volume).
+    user: "1000:1000"
+    # The media tree is reset to the scenario on every (re)start of this container.
+    command: ["-data", "/data", "-host", "0.0.0.0", "-scenario", "default", "-lenient-accept"]
+    volumes:
+      - media:/data
+    # Loopback-only host ports so you can poke the fakes with curl (not needed by Dupearr).
+    ports:
+      - "127.0.0.1:42400:32400" # Plex
+      - "127.0.0.1:47878:7878"  # Radarr
+      - "127.0.0.1:47879:7879"  # Radarr 4K
+      - "127.0.0.1:48989:8989"  # Sonarr
+    depends_on:
+      init-perms:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  dupearr:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: dupearr:test-env
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      UMASK: "002"
+      TZ: "America/New_York"
+      # Uncomment to skip the login page while testing (only trusted for localhost/private hosts):
+      # DUPEARR__AUTH__METHOD: "None"
+    ports:
+      - "3873:3873"
+    volumes:
+      - config:/config
+      # The same /data the fake Plex and *arrs "see", so path mappings are identity mappings.
+      - media:/data
+    depends_on:
+      init-perms:
+        condition: service_completed_successfully
+      fakemedia:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  media:
+  config:

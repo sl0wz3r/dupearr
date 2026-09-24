@@ -1,0 +1,47 @@
+# Keep the build context small; the Docker build compiles the web UI and the binary itself.
+# Patterns are relative to the repository root; "**/" matches at any depth.
+.git
+.gitea
+.github
+.claude
+.idea
+.vscode
+**/.DS_Store
+
+# Packaging files that do not go into the image (changing them must not bust the build cache)
+Dockerfile
+.dockerignore
+deploy/
+unraid/
+# Maintainer tooling (public export, sanitization scan)
+scripts/
+docker/test-image.sh
+docker/check-go-version.sh
+
+# Documentation is not compiled in (LICENSE is kept: the image ships it next to the binary)
+docs/
+*.md
+
+# Build output / local data (never bake a data directory into the image: API key, DB, logs)
+.env
+**/.env
+bin/
+dist/
+dupearr
+dupearr.exe
+cmd/dupearr/dupearr
+cmd/dupearr/dupearr.exe
+tmp/
+.data/
+coverage*
+**/*.test
+**/*.db
+**/*.db-*
+config.xml
+logs/
+Backups/
+
+# Web UI: dependencies are installed in the image; dist is rebuilt (placeholder kept for go:embed)
+**/node_modules/
+web/dist/*
+!web/dist/.gitkeep

@@ -1,0 +1,4 @@
+# Your own LAN/registry values and everything rendered locally. The public repository must hold
+# exactly one Dupearr template (unraid/dupearr.xml): CA scans every .xml file in it.
+/private.env
+/out/

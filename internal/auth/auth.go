@@ -1,0 +1,931 @@
+// Package auth implements Dupearr's authentication (docs/DECISIONS.md D1, D8):
+//
+//   - API key: the X-Api-Key header, accepted on every /api path and on /initialize.json and
+//     /backup/…. It is never accepted in the URL: a request with an apikey query parameter is
+//     refused (a key in a URL ends up in proxy logs, browser history and download lists); only the
+//     webhook routes take a query credential (the webhook token). The web UI never holds the key
+//     (it uses its session). Keys are compared in constant time.
+//   - Webhook token (webhook.go): a separate secret for /api/v1/webhook/*, useless anywhere else.
+//   - Forms: an HMAC-SHA256 signed session cookie (CookieName) holding the user id, the expiry
+//     and the "remember me" flag. Sessions last 7 days (browser-session cookie) or 14 days when
+//     "remember me" was ticked, and slide: once half of the lifetime has passed the cookie is
+//     re-issued. Sessions can be revoked (session.go): logout revokes its session (every token of
+//     it, renewals included), a password change or "log out all sessions" every session — which
+//     also replaces the signing key, so a leaked key stops working too.
+//   - External: authentication is left to a reverse proxy, which is only trusted when the TCP
+//     peer is one of the TrustedProxies and/or the request names one of the AllowedHosts
+//     (network.go); without either list only requests that name this server by a private host
+//     (DNS-rebinding guard, as for None). Other requests need a session or the API key.
+//   - None: no authentication (config.xml / env only) — but only for requests that name this
+//     server by an IP literal or a private host name (IsPrivateHost), so that a DNS-rebinding page
+//     cannot use it; other requests need the API key.
+//
+// HTTP Basic is not supported: a stored "Basic" is migrated to Forms by internal/config.
+//
+// AuthenticationRequired "DisabledForLocalAddresses" lets local clients (loopback, RFC 1918,
+// link-local, IPv6 ULA) in without credentials (IsLocalRequest, LocalAccessAllowed). Forwarding
+// headers only count when the TCP peer is a trusted proxy, and any forwarding header naming a
+// non-local (or unknown) client makes a request non-local. The request must also name this
+// server by a local IP literal or a private host name, which defeats DNS rebinding in browsers;
+// non-browser clients choose the Host header freely, so this setting must only be used where the
+// port cannot be reached from the internet.
+//
+// First-run setup additionally requires a one-time setup code that is printed in the log at
+// startup (SetupCode), so that a remote client that appears with a local address (Docker's
+// userland proxy, NAT loopback, a proxy without forwarding headers) cannot claim the account.
+//
+// Failed logins are throttled per client address and per username (limiter.go), and password
+// hashing runs in a bounded number of slots. State-changing requests that are not authenticated
+// by the X-Api-Key header must be same-origin (Origin/Referer check), which protects cookie
+// sessions and the local-address bypass against cross-site requests.
+package auth
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+	"unicode"
+	"unicode/utf8"
+
+	"golang.org/x/crypto/bcrypt"
+
+	"github.com/sl0wz3r/dupearr/internal/audit"
+	"github.com/sl0wz3r/dupearr/internal/config"
+	"github.com/sl0wz3r/dupearr/internal/models"
+	"github.com/sl0wz3r/dupearr/internal/store"
+)
+
+// CookieName is the Forms session cookie (over HTTPS: "__Host-DupearrAuth", or
+// "__Secure-DupearrAuth" under a UrlBase).
+const CookieName = "DupearrAuth"
+
+const (
+	// SessionLifetime is the server-side lifetime of a session without "remember me" (the cookie
+	// itself is a browser-session cookie).
+	SessionLifetime = 7 * 24 * time.Hour
+	// RememberLifetime is the lifetime of a "remember me" session (persistent cookie).
+	RememberLifetime = 14 * 24 * time.Hour
+
+	// BcryptCost is the bcrypt work factor used by HashPassword.
+	BcryptCost = 12
+	// MaxPasswordBytes is the longest password bcrypt can hash.
+	MaxPasswordBytes = 72
+	// MinPasswordLength is the shortest accepted new password (in characters). Existing shorter
+	// passwords keep working; they just cannot be set again.
+	MinPasswordLength = 8
+	// MaxUsernameLength is the longest accepted username (in characters).
+	MaxUsernameLength = 256
+
+	// MaskedPassword is the placeholder returned instead of a stored password; sending it back
+	// means "unchanged" (docs/API.md). It is never hashed.
+	MaskedPassword = "********"
+
+	// Settings values (store.SettingsRepo) owned by this package.
+	sessionKeySetting = "auth.sessionKey" // sessionKeyPrefix + hex HMAC key
+	userIDSetting     = "auth.userId"     // id of the single user (UserRepo has no "get the user")
+
+	sessionKeyBytes = 32
+	// sessionKeyPrefix marks a session key generated by a build that never writes it into a
+	// backup and rotates it on every "log out all sessions". A key without it (from an older
+	// build, which put it into every backup archive) is replaced once at start: whoever holds such
+	// an archive could otherwise mint session cookies for as long as the key lives.
+	sessionKeyPrefix = "v2:"
+	maxCookieLength  = 512
+	tokenVersion     = "v3"
+
+	// maxLoggedUsername bounds a username written to the log.
+	maxLoggedUsername = 64
+)
+
+// Errors.
+var (
+	// ErrInvalidCredentials is returned by Login for a wrong username/password.
+	ErrInvalidCredentials = errors.New("invalid username or password")
+	// ErrTooManyAttempts is wrapped by *ThrottledError when a client must wait before trying again.
+	ErrTooManyAttempts = errors.New("too many failed login attempts")
+	// ErrSetupNotRequired is returned by Setup once authentication has been set up.
+	ErrSetupNotRequired = errors.New("authentication is already set up")
+	// ErrNoUser is returned (wrapping store.ErrNotFound) by User when no account exists.
+	ErrNoUser = fmt.Errorf("no user account: %w", store.ErrNotFound)
+	// ErrLockedDown is returned by Login and Setup while authentication is being reset
+	// (Lockdown).
+	ErrLockedDown = errors.New("authentication is being reset; try again in a moment")
+)
+
+// ThrottledError is returned by Login while the client is in its backoff window.
+type ThrottledError struct {
+	RetryAfter time.Duration
+}
+
+// Error implements error.
+func (e *ThrottledError) Error() string {
+	secs := int((e.RetryAfter + time.Second - 1) / time.Second)
+	return fmt.Sprintf("%s; try again in %d second(s)", ErrTooManyAttempts.Error(), max(secs, 1))
+}
+
+// Unwrap returns ErrTooManyAttempts.
+func (e *ThrottledError) Unwrap() error { return ErrTooManyAttempts }
+
+// Service enforces authentication. It is safe for concurrent use.
+type Service struct {
+	cfg *config.Manager
+	st  store.Store
+	log *slog.Logger
+
+	now         func() time.Time
+	limiter     *limiter // per client address (and per device cookie)
+	userLimiter *limiter // per typed username
+
+	setupMu   sync.Mutex // serialises Setup / UpdateUser
+	setupCode string     // guarded by setupMu; "" when none was issued
+
+	dummyOnce sync.Once
+	dummyHash []byte // compared against for unknown usernames (constant-ish login time)
+
+	noneHostWarned      atomic.Bool                    // warnNoneHost logged its warning
+	externalWarned      atomic.Bool                    // warnExternal logged its warning
+	webhookMasterWarned atomic.Bool                    // warnWebhookMasterKey logged its warning
+	webhookMasterUsed   atomic.Int64                   // when a webhook last used the master API key (unix ns; 0: never since start or the last key change)
+	logSample           logSampler                     // client-triggerable warnings (warnSampled)
+	untrustedFwd        atomic.Pointer[forwardingSeen] // last forwarding header from an untrusted local peer (proxyhint.go)
+
+	trust networkTrustState
+
+	// signing is the session signing key and generation, replaced as a unit by RevokeSessions
+	// (see session.go). Never nil after New.
+	signing   atomic.Pointer[signingState]
+	rotateMu  sync.Mutex       // serialises RevokeSessions (persist, then swap)
+	revokedMu sync.Mutex       // guards revoked and orders the swap of signing against revocation checks
+	revoked   map[string]int64 // revoked session id → expiry (unix)
+	persistMu sync.Mutex       // orders writes of the revocation list (revokeSession)
+
+	webhookMu    sync.RWMutex
+	webhookToken string
+
+	changedMu sync.Mutex
+	changed   chan struct{} // closed on the next credential change
+
+	failures failureAudit // failed sign-ins not recorded in the history yet (audit.go)
+
+	// lockedDown refuses every credential until the process exits (Lockdown).
+	lockedDown atomic.Bool
+}
+
+// Lockdown refuses every credential from now on — API key, sessions, webhook token, the
+// local-address bypass, External and None, logins and first-run setup — until the process exits,
+// and ends live-update streams. The server calls it when `dupearr reset-auth` asks it to reset
+// authentication (GAP-13): it restarts right after, and nothing may use the old credentials in the
+// meantime.
+func (s *Service) Lockdown() {
+	if s.lockedDown.CompareAndSwap(false, true) {
+		s.log.Warn("Auth-Lockdown: every credential is refused until Dupearr restarts")
+		s.notifyCredentialsChanged()
+	}
+}
+
+// LockedDown reports whether Lockdown was called.
+func (s *Service) LockedDown() bool { return s.lockedDown.Load() }
+
+// New loads/creates the session signing key (settings value "auth.sessionKey"), the session
+// generation and revocation list, and the webhook token. When first-run setup is pending it
+// issues a setup code and logs it.
+func New(cfg *config.Manager, st store.Store, log *slog.Logger) (*Service, error) {
+	if cfg == nil {
+		return nil, errors.New("auth: config manager is required")
+	}
+	if st == nil {
+		return nil, errors.New("auth: store is required")
+	}
+	if log == nil {
+		log = slog.New(slog.DiscardHandler)
+	}
+	ctx := context.Background()
+	key, err := loadSessionKey(ctx, st)
+	if err != nil {
+		return nil, err
+	}
+	gen, err := loadGeneration(ctx, st)
+	if err != nil {
+		return nil, err
+	}
+	s := &Service{
+		cfg:         cfg,
+		st:          st,
+		log:         log,
+		now:         time.Now,
+		limiter:     newLimiter(),
+		userLimiter: newLimiterWith(userPolicy),
+		revoked:     loadRevoked(ctx, st),
+		changed:     make(chan struct{}),
+	}
+	s.signing.Store(&signingState{key: key, generation: gen})
+	s.trust.source = envTrustSource()
+	if s.webhookToken, err = loadWebhookToken(ctx, s); err != nil {
+		return nil, err
+	}
+	cfg.OnChange(func(old, next config.Config) {
+		if old.ApiKey != next.ApiKey {
+			s.webhookMasterUsed.Store(0) // webhook URLs with the old key stop working
+		}
+		if old.ApiKey != next.ApiKey || old.AuthenticationMethod != next.AuthenticationMethod ||
+			old.AuthenticationRequired != next.AuthenticationRequired || old.UrlBase != next.UrlBase {
+			s.notifyCredentialsChanged()
+		}
+	})
+	if s.SetupRequired(ctx) {
+		s.setupMu.Lock()
+		s.issueSetupCodeLocked()
+		s.setupMu.Unlock()
+	}
+	return s, nil
+}
+
+// loadSessionKey reads the HMAC key, generating and persisting a new one when missing, invalid or
+// written by an older build (no sessionKeyPrefix; see there).
+func loadSessionKey(ctx context.Context, st store.Store) ([]byte, error) {
+	v, ok, err := st.Settings().GetValue(ctx, sessionKeySetting)
+	if err != nil {
+		return nil, fmt.Errorf("auth: read session key: %w", err)
+	}
+	if hexKey, current := strings.CutPrefix(strings.TrimSpace(v), sessionKeyPrefix); ok && current {
+		if key, err := hex.DecodeString(hexKey); err == nil && len(key) >= sessionKeyBytes {
+			return key, nil
+		}
+	}
+	return newSessionKey(ctx, st)
+}
+
+// newSessionKey generates a session key and persists it (replacing any stored one).
+func newSessionKey(ctx context.Context, st store.Store) ([]byte, error) {
+	key := make([]byte, sessionKeyBytes)
+	if _, err := rand.Read(key); err != nil {
+		return nil, fmt.Errorf("auth: generate session key: %w", err)
+	}
+	if err := st.Settings().SetValue(ctx, sessionKeySetting, sessionKeyPrefix+hex.EncodeToString(key)); err != nil {
+		return nil, fmt.Errorf("auth: save session key: %w", err)
+	}
+	return key, nil
+}
+
+// sessionKey returns the current session HMAC key.
+func (s *Service) sessionKey() []byte { return s.signing.Load().key }
+
+// bcryptCost is a variable so this package's tests can use a cheaper cost.
+var bcryptCost = BcryptCost
+
+// HashPassword returns a bcrypt hash (cost 12) of pw. Empty passwords, passwords longer than
+// MaxPasswordBytes and the MaskedPassword placeholder are refused. It waits for a free hashing
+// slot (see bcryptSlots).
+func HashPassword(pw string) (string, error) {
+	switch {
+	case pw == "":
+		return "", errors.New("auth: hash password: empty password")
+	case pw == MaskedPassword:
+		return "", errors.New("auth: hash password: refusing to hash the password mask")
+	case len(pw) > MaxPasswordBytes:
+		return "", fmt.Errorf("auth: hash password: longer than %d bytes", MaxPasswordBytes)
+	}
+	release, _ := acquireBcrypt(context.Background(), 0)
+	defer release()
+	h, err := bcrypt.GenerateFromPassword([]byte(pw), bcryptCost)
+	if err != nil {
+		return "", fmt.Errorf("auth: hash password: %w", err)
+	}
+	return string(h), nil
+}
+
+// CheckPassword reports whether pw matches hash. It does not take a hashing slot; request
+// handlers use Login or VerifyPassword, which do (and are throttled).
+func CheckPassword(hash, pw string) bool {
+	if hash == "" || pw == "" {
+		return false
+	}
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(pw)) == nil
+}
+
+// ValidateCredentials checks a username/password pair for a new account or a password change
+// (property names "username" and "password"). It returns nil when both are acceptable.
+func ValidateCredentials(username, password string) []config.ValidationError {
+	var errs []config.ValidationError
+	if msg := usernameProblem(username); msg != "" {
+		errs = append(errs, config.ValidationError{PropertyName: "username", ErrorMessage: msg})
+	}
+	if msg := passwordProblem(password); msg != "" {
+		errs = append(errs, config.ValidationError{PropertyName: "password", ErrorMessage: msg})
+	}
+	return errs
+}
+
+func usernameProblem(username string) string {
+	u := strings.TrimSpace(username)
+	switch {
+	case u == "":
+		return "Username is required"
+	case utf8.RuneCountInString(u) > MaxUsernameLength:
+		return fmt.Sprintf("Username must be at most %d characters", MaxUsernameLength)
+	case strings.IndexFunc(u, unicode.IsControl) >= 0:
+		return "Username must not contain control characters"
+	}
+	return ""
+}
+
+func passwordProblem(password string) string {
+	switch {
+	case password == "":
+		return "Password is required"
+	case password == MaskedPassword:
+		return "Enter a new password"
+	case utf8.RuneCountInString(password) < MinPasswordLength:
+		return fmt.Sprintf("Password must be at least %d characters", MinPasswordLength)
+	case len(password) > MaxPasswordBytes:
+		return fmt.Sprintf("Password must be at most %d bytes", MaxPasswordBytes)
+	case strings.IndexFunc(password, unicode.IsControl) >= 0:
+		return "Password must not contain control characters"
+	}
+	return ""
+}
+
+// ---------------------------------------------------------------------------
+// Users
+// ---------------------------------------------------------------------------
+
+// User returns the single local account, or an error wrapping store.ErrNotFound (ErrNoUser)
+// when none exists.
+func (s *Service) User(ctx context.Context) (*models.User, error) {
+	n, err := s.st.Users().Count(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("auth: count users: %w", err)
+	}
+	if n == 0 {
+		return nil, ErrNoUser
+	}
+	if v, ok, err := s.st.Settings().GetValue(ctx, userIDSetting); err == nil && ok {
+		if id, perr := strconv.ParseInt(strings.TrimSpace(v), 10, 64); perr == nil && id > 0 {
+			u, err := s.st.Users().GetByID(ctx, id)
+			if err == nil {
+				return u, nil
+			}
+			if !errors.Is(err, store.ErrNotFound) {
+				return nil, fmt.Errorf("auth: get user: %w", err)
+			}
+		}
+	}
+	// The recorded id is missing or stale (e.g. `dupearr reset-auth` followed by a setup through
+	// another path): probe the first ids. UserRepo keeps at most one row.
+	const probe = 1024
+	for id := int64(1); id <= probe; id++ {
+		u, err := s.st.Users().GetByID(ctx, id)
+		if err == nil {
+			s.rememberUserID(ctx, u.ID)
+			return u, nil
+		}
+		if !errors.Is(err, store.ErrNotFound) {
+			return nil, fmt.Errorf("auth: get user: %w", err)
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+	}
+	return nil, ErrNoUser
+}
+
+func (s *Service) rememberUserID(ctx context.Context, id int64) {
+	if err := s.st.Settings().SetValue(ctx, userIDSetting, strconv.FormatInt(id, 10)); err != nil {
+		s.log.Warn("Failed to record the user id", "error", err)
+	}
+}
+
+// UpdateUser creates the account or changes its username and/or password (Settings → General).
+// An empty password keeps the current one (an account must then exist). The password mask is
+// never hashed. Invalid input yields config.ValidationErrors. A password change revokes every
+// session and device cookie (capture the caller's with CurrentSession and use KeepSession to keep
+// them signed in).
+func (s *Service) UpdateUser(ctx context.Context, username, password string) (*models.User, error) {
+	s.setupMu.Lock()
+	defer s.setupMu.Unlock()
+
+	username = strings.TrimSpace(username)
+	var errs []config.ValidationError
+	if msg := usernameProblem(username); msg != "" {
+		errs = append(errs, config.ValidationError{PropertyName: "username", ErrorMessage: msg})
+	}
+	var hash string
+	if password == "" || password == MaskedPassword {
+		current, err := s.User(ctx)
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			errs = append(errs, config.ValidationError{PropertyName: "password", ErrorMessage: "Password is required"})
+		case err != nil:
+			return nil, err
+		default:
+			hash = current.PasswordHash
+		}
+	} else if msg := passwordProblem(password); msg != "" {
+		errs = append(errs, config.ValidationError{PropertyName: "password", ErrorMessage: msg})
+	}
+	if len(errs) > 0 {
+		return nil, config.ValidationErrors(errs)
+	}
+	passwordChanged := hash == ""
+	if passwordChanged {
+		h, err := HashPassword(password)
+		if err != nil {
+			return nil, err
+		}
+		hash = h
+	}
+	u, err := s.st.Users().Upsert(ctx, username, hash)
+	if err != nil {
+		return nil, fmt.Errorf("auth: save user: %w", err)
+	}
+	s.rememberUserID(ctx, u.ID)
+	s.setupCode = ""
+	s.log.Info("Auth-Credentials updated", "username", u.Username, "passwordChanged", passwordChanged)
+	s.audit(ctx, audit.KindCredentialsChanged, "Account credentials changed", "username", u.Username, "passwordChanged", passwordChanged)
+	if passwordChanged {
+		if err := s.RevokeSessions(ctx); err != nil {
+			s.log.Warn("Could not revoke sessions after the password change", "error", err)
+		}
+	} else {
+		s.notifyCredentialsChanged()
+	}
+	return u, nil
+}
+
+// ---------------------------------------------------------------------------
+// First-run setup
+// ---------------------------------------------------------------------------
+
+// setupCodeAlphabet has no easily confused characters (0/O, 1/I).
+const setupCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+// setupCodeLength is the number of code characters (5 bits each: 100 bits).
+const setupCodeLength = 20
+
+// SetupRequired reports whether first-run setup is pending: the method is Forms and no user
+// exists. It fails closed (false) when the store cannot be read.
+func (s *Service) SetupRequired(ctx context.Context) bool {
+	if s.method() != config.AuthForms {
+		return false
+	}
+	n, err := s.st.Users().Count(ctx)
+	if err != nil {
+		s.log.Warn("Cannot determine whether authentication setup is required", "error", err)
+		return false
+	}
+	return n == 0
+}
+
+// issueSetupCodeLocked creates a new setup code and logs it. setupMu must be held.
+func (s *Service) issueSetupCodeLocked() {
+	b := make([]byte, setupCodeLength)
+	_, _ = rand.Read(b)
+	var sb strings.Builder
+	for i, c := range b {
+		if i > 0 && i%5 == 0 {
+			sb.WriteByte('-')
+		}
+		sb.WriteByte(setupCodeAlphabet[int(c)%len(setupCodeAlphabet)])
+	}
+	s.setupCode = sb.String()
+	// Without the code setup is impossible, so it is logged at Error when the log level hides
+	// warnings (e.g. DUPEARR__LOG__LEVEL=error).
+	ctx := context.Background()
+	level := slog.LevelWarn
+	if !s.log.Enabled(ctx, level) {
+		level = slog.LevelError
+	}
+	// The message must not look like a secret to the log redaction (no "token", no "code:x").
+	s.log.Log(ctx, level, "First-run setup is pending. Open Dupearr from your local network and enter this setup code "+
+		"when asked: "+s.setupCode+" (it is valid until setup is completed, and a new one is issued at every start)",
+		"setupCode", s.setupCode)
+}
+
+// SetupCode returns the pending first-run setup code ("" when setup is not required), e.g. to
+// print it prominently at startup.
+func (s *Service) SetupCode() string {
+	s.setupMu.Lock()
+	defer s.setupMu.Unlock()
+	return s.setupCode
+}
+
+// normalizeSetupCode upper-cases a typed code and drops separators.
+func normalizeSetupCode(code string) string {
+	var sb strings.Builder
+	for _, r := range strings.ToUpper(code) {
+		if r == '-' || r == ' ' || r == '\t' {
+			continue
+		}
+		sb.WriteRune(r)
+	}
+	return sb.String()
+}
+
+// CheckSetupCode reports whether code is the pending first-run setup code (case-insensitive,
+// dashes and spaces ignored, constant time). When setup became required after startup and no code
+// exists yet, one is issued (and logged) and false is returned.
+func (s *Service) CheckSetupCode(code string) bool {
+	s.setupMu.Lock()
+	defer s.setupMu.Unlock()
+	if s.setupCode == "" {
+		if !s.SetupRequired(context.Background()) {
+			return false
+		}
+		s.issueSetupCodeLocked()
+		return false
+	}
+	want := normalizeSetupCode(s.setupCode)
+	got := normalizeSetupCode(code)
+	return len(got) == len(want) && subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+}
+
+// Setup creates the user and sets the authentication method/requirement (first run only).
+// Only Forms can be set up; required is Enabled (default) or DisabledForLocalAddresses. It
+// returns ErrSetupNotRequired once an account exists and config.ValidationErrors for bad input.
+// Callers must only offer it to local clients that present the setup code (LocalAccessAllowed,
+// CheckSetupCode).
+func (s *Service) Setup(ctx context.Context, method, required, username, password string) error {
+	s.setupMu.Lock()
+	defer s.setupMu.Unlock()
+
+	if s.LockedDown() {
+		return ErrLockedDown
+	}
+	if !s.SetupRequired(ctx) {
+		return ErrSetupNotRequired
+	}
+	var errs []config.ValidationError
+	m := strings.TrimSpace(method)
+	if m == "" {
+		m = config.AuthForms
+	}
+	if !strings.EqualFold(m, config.AuthForms) {
+		errs = append(errs, config.ValidationError{PropertyName: "authenticationMethod", ErrorMessage: "Only Forms authentication can be set up"})
+	}
+	forced := s.EnvForcedAuth()
+	req := strings.TrimSpace(required)
+	switch {
+	case req == "" && forced["authenticationRequired"] != "":
+		req = forced["authenticationRequired"] // nothing chosen: what the environment sets
+	case req == "" || strings.EqualFold(req, config.AuthRequiredEnabled):
+		req = config.AuthRequiredEnabled
+	case strings.EqualFold(req, config.AuthRequiredDisabledForLocal):
+		req = config.AuthRequiredDisabledForLocal
+	default:
+		errs = append(errs, config.ValidationError{PropertyName: "authenticationRequired",
+			ErrorMessage: fmt.Sprintf("Must be one of: %s, %s", config.AuthRequiredEnabled, config.AuthRequiredDisabledForLocal)})
+	}
+	// A choice the environment overrides would be discarded by the save while the setup reports
+	// success (GAP-07): the admin must know which requirement is really in effect.
+	if env := forced["authenticationRequired"]; env != "" && len(errs) == 0 && req != env {
+		errs = append(errs, config.ValidationError{PropertyName: "authenticationRequired",
+			ErrorMessage: fmt.Sprintf("Authentication Required is set to %s by the %s environment variable; "+
+				"change or remove that variable to choose %s", env, EnvAuthRequired, req)})
+	}
+	errs = append(errs, ValidateCredentials(username, password)...)
+	if len(errs) > 0 {
+		return config.ValidationErrors(errs)
+	}
+
+	hash, err := HashPassword(password)
+	if err != nil {
+		return err
+	}
+	u, err := s.st.Users().Upsert(ctx, strings.TrimSpace(username), hash)
+	if err != nil {
+		return fmt.Errorf("auth: setup: create user: %w", err)
+	}
+	s.rememberUserID(ctx, u.ID)
+	saved, err := s.cfg.Update(func(c *config.Config) {
+		c.AuthenticationMethod = config.AuthForms
+		c.AuthenticationRequired = req
+	})
+	if err != nil {
+		return fmt.Errorf("auth: setup: save configuration: %w", err)
+	}
+	s.setupCode = ""
+	// The effective values (after environment overrides), never the requested ones.
+	s.log.Info("Auth-Setup completed", "username", u.Username, "authenticationMethod", saved.AuthenticationMethod,
+		"authenticationRequired", saved.AuthenticationRequired)
+	s.audit(ctx, AuditSetup, "Account created by first-run setup",
+		"username", u.Username, "authenticationRequired", saved.AuthenticationRequired)
+	return nil
+}
+
+// Environment variables that force authentication settings (config.xml's are then ignored).
+const (
+	EnvAuthMethod   = "DUPEARR__AUTH__METHOD"
+	EnvAuthRequired = "DUPEARR__AUTH__REQUIRED"
+)
+
+// EnvForcedAuth returns the authentication settings that environment variables force, by
+// HostConfig JSON name ("authenticationMethod", "authenticationRequired") with their effective
+// values; settings config.xml controls are absent. The first-run setup shows them read-only.
+func (s *Service) EnvForcedAuth() map[string]string {
+	out := map[string]string{}
+	c := s.cfg.Get()
+	for _, k := range s.cfg.EnvOverrides() {
+		switch k {
+		case "authenticationMethod":
+			out[k] = c.AuthenticationMethod
+		case "authenticationRequired":
+			out[k] = c.AuthenticationRequired
+		}
+	}
+	return out
+}
+
+// ---------------------------------------------------------------------------
+// Login / logout
+// ---------------------------------------------------------------------------
+
+// attempt is one throttled password check (see limiter.go).
+type attempt struct {
+	s                *Service
+	addrKey, userKey string // limiter keys; userKey "" when not counted per username
+	scope            string // for logs: "device" or "address"
+}
+
+// startAttempt counts a password check against the client's device cookie when it carries a
+// valid one for username, else against its address and the username. It returns a
+// *ThrottledError while any of them is backing off (nothing is counted then).
+func (s *Service) startAttempt(r *http.Request, username string, now time.Time) (*attempt, error) {
+	a := &attempt{s: s}
+	if dev := s.deviceKey(r, username); dev != "" {
+		a.addrKey, a.scope = dev, "device"
+	} else {
+		a.addrKey, a.scope = limiterKey(s.ClientIP(r)), "address"
+		if username != "" {
+			a.userKey = userLimiterKey(username)
+		}
+	}
+	if wait := s.limiter.begin(a.addrKey, now); wait > 0 {
+		s.logThrottled(r, a.scope, wait)
+		return nil, &ThrottledError{RetryAfter: wait}
+	}
+	if a.userKey != "" {
+		if wait := s.userLimiter.begin(a.userKey, now); wait > 0 {
+			s.limiter.abort(a.addrKey)
+			s.logThrottled(r, "username", wait)
+			return nil, &ThrottledError{RetryAfter: wait}
+		}
+	}
+	return a, nil
+}
+
+// abort undoes the counting (the attempt could not be evaluated).
+func (a *attempt) abort() {
+	a.s.limiter.abort(a.addrKey)
+	if a.userKey != "" {
+		a.s.userLimiter.abort(a.userKey)
+	}
+}
+
+// succeed resets the counters.
+func (a *attempt) succeed() {
+	a.s.limiter.reset(a.addrKey)
+	if a.userKey != "" {
+		a.s.userLimiter.reset(a.userKey)
+	}
+}
+
+func (s *Service) logThrottled(r *http.Request, scope string, wait time.Duration) {
+	// Throttled attempts cost the client nothing: sampled, so they cannot flood the log.
+	s.warnSampled("throttled", "Auth-Throttled", append(s.clientAttrs(r), "scope", scope, "retryAfter", wait.Round(time.Second).String())...)
+}
+
+// checkPassword compares pw with hash in a hashing slot (ErrBusy when none frees up in time).
+func (s *Service) checkPassword(ctx context.Context, hash, pw string) (bool, error) {
+	release, ok := acquireBcrypt(ctx, bcryptWait)
+	if !ok {
+		return false, ErrBusy
+	}
+	defer release()
+	return CheckPassword(hash, pw), nil
+}
+
+// wellFormedCredentials reports whether a typed username/password can possibly be valid; other
+// input is refused without a lookup or a hash (but still counted).
+func wellFormedCredentials(username, password string) bool {
+	return username != "" && password != "" && len(password) <= MaxPasswordBytes &&
+		utf8.RuneCountInString(username) <= MaxUsernameLength && strings.IndexFunc(username, unicode.IsControl) < 0
+}
+
+// Login verifies credentials and sets the session cookie (remember = persistent cookie) and the
+// device cookie. It returns ErrInvalidCredentials for a wrong username/password, a
+// *ThrottledError (wrapping ErrTooManyAttempts) while the client or the username is backing off
+// after repeated failures, and ErrBusy when no password-hashing slot frees up in time.
+func (s *Service) Login(w http.ResponseWriter, r *http.Request, username, password string, remember bool) error {
+	if s.LockedDown() {
+		return ErrLockedDown
+	}
+	now := s.now()
+	username = strings.TrimSpace(username)
+	wellFormed := wellFormedCredentials(username, password)
+	userForLimit := ""
+	if wellFormed {
+		userForLimit = username
+	}
+	a, err := s.startAttempt(r, userForLimit, now)
+	if err != nil {
+		return err
+	}
+
+	var user *models.User
+	if wellFormed {
+		u, err := s.st.Users().GetByUsername(r.Context(), username)
+		switch {
+		case err == nil:
+			user = u
+		case errors.Is(err, store.ErrNotFound):
+		default:
+			a.abort()
+			return fmt.Errorf("auth: login: %w", err)
+		}
+	}
+	ok := false
+	switch {
+	case user != nil:
+		ok, err = s.checkPassword(r.Context(), user.PasswordHash, password)
+	case wellFormed:
+		err = s.compareDummy(r.Context(), password) // response time independent of whether the user exists
+	}
+	if err != nil {
+		a.abort()
+		return err
+	}
+	if !ok {
+		// Never log what was typed for an unknown user: it may be a password in the wrong field.
+		loggedUser := "(unknown)"
+		if user != nil {
+			loggedUser = truncateUsername(user.Username)
+		}
+		attrs := append(s.clientAttrs(r), "username", loggedUser)
+		// Sampled: each source is throttled, but many sources (an IPv6 prefix) must not be able
+		// to rotate the log history away with failures either.
+		s.warnSampled("failure", "Auth-Failure", attrs...)
+		s.auditFailedLogin(r, loggedUser, now)
+		return ErrInvalidCredentials
+	}
+	a.succeed()
+	s.setSessionCookie(w, r, user, remember, now, "")
+	s.setDeviceCookie(w, r, user.Username, now)
+	s.log.Info("Auth-Success", append(s.clientAttrs(r), "username", user.Username)...)
+	s.flushFailedLogins(r)
+	s.audit(r.Context(), audit.KindLogin, "Signed in", append(s.clientAttrs(r), "username", user.Username)...)
+	return nil
+}
+
+// VerifyPassword checks the account's current password (e.g. before a credential change), with
+// the same throttling as Login. It returns ErrInvalidCredentials, a *ThrottledError or ErrBusy.
+func (s *Service) VerifyPassword(r *http.Request, password string) error {
+	u, err := s.User(r.Context())
+	if err != nil {
+		return err
+	}
+	a, err := s.startAttempt(r, u.Username, s.now())
+	if err != nil {
+		return err
+	}
+	ok := false
+	if password != "" && len(password) <= MaxPasswordBytes {
+		if ok, err = s.checkPassword(r.Context(), u.PasswordHash, password); err != nil {
+			a.abort()
+			return err
+		}
+	}
+	if !ok {
+		s.log.Warn("Auth-Failure: wrong current password", append(s.clientAttrs(r), "username", u.Username)...)
+		return ErrInvalidCredentials
+	}
+	a.succeed()
+	return nil
+}
+
+// compareDummy spends about as long as a real password check.
+func (s *Service) compareDummy(ctx context.Context, password string) error {
+	s.dummyOnce.Do(func() {
+		b := make([]byte, 24)
+		_, _ = rand.Read(b)
+		h, err := bcrypt.GenerateFromPassword([]byte(hex.EncodeToString(b)), bcryptCost)
+		if err == nil {
+			s.dummyHash = h
+		}
+	})
+	if s.dummyHash == nil {
+		return nil
+	}
+	release, ok := acquireBcrypt(ctx, bcryptWait)
+	if !ok {
+		return ErrBusy
+	}
+	defer release()
+	pw := password
+	if len(pw) > MaxPasswordBytes {
+		pw = pw[:MaxPasswordBytes]
+	}
+	_ = bcrypt.CompareHashAndPassword(s.dummyHash, []byte(pw))
+	return nil
+}
+
+// Logout clears the session cookie and revokes the session it carried (a copy of the cookie
+// stops working too).
+func (s *Service) Logout(w http.ResponseWriter, r *http.Request) {
+	sess, ok := s.verifySession(r)
+	if ok {
+		s.revokeSession(r.Context(), sess)
+	}
+	s.clearSessionCookies(w, r)
+	if !ok {
+		// /logout is public: only a real sign-out is worth an Info line.
+		s.log.Debug("Auth-Logout without a valid session", s.clientAttrs(r)...)
+		return
+	}
+	s.log.Info("Auth-Logout", s.clientAttrs(r)...)
+}
+
+// ---------------------------------------------------------------------------
+// Configuration helpers
+// ---------------------------------------------------------------------------
+
+// method returns the effective authentication method: None, External or Forms (anything else,
+// including a legacy "Basic", is treated as Forms — fail closed).
+func (s *Service) method() string {
+	switch m := s.cfg.Get().AuthenticationMethod; {
+	case strings.EqualFold(m, config.AuthNone):
+		return config.AuthNone
+	case strings.EqualFold(m, config.AuthExternal):
+		return config.AuthExternal
+	default:
+		return config.AuthForms
+	}
+}
+
+// Method returns the effective authentication method (None, External or Forms).
+func (s *Service) Method() string { return s.method() }
+
+func (s *Service) cookiePath() string {
+	if base := s.cfg.Get().UrlBase; base != "" {
+		return base
+	}
+	return "/"
+}
+
+// secureRequest reports whether the client reached Dupearr over TLS (directly, or through a
+// reverse proxy — a local peer or a trusted proxy — that says so with X-Forwarded-Proto).
+func (s *Service) secureRequest(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	if peer := peerIP(r); !IsLocalAddress(peer) && !s.isTrustedProxy(peer) {
+		return false
+	}
+	proto := r.Header.Get("X-Forwarded-Proto")
+	if i := strings.IndexByte(proto, ','); i >= 0 {
+		proto = proto[:i]
+	}
+	return strings.EqualFold(strings.TrimSpace(proto), "https")
+}
+
+// warnNoneHost logs a request refused by the None host rule: once as a warning (so the reason
+// for the 401s is visible), then at debug level.
+func (s *Service) warnNoneHost(r *http.Request) {
+	attrs := append(s.clientAttrs(r), "host", truncateHost(r.Host), "path", truncatePath(r.URL.Path))
+	if s.noneHostWarned.CompareAndSwap(false, true) {
+		s.log.Warn("Refused an unauthenticated request that names Dupearr by a public host name: authentication "+
+			"method None only trusts requests to an IP address or a local host name (DNS-rebinding guard). "+
+			"Use Forms authentication, send the API key, or use External behind an authenticating reverse proxy", attrs...)
+		return
+	}
+	s.log.Debug("Auth-Unauthorized: None does not trust a public host name", attrs...)
+}
+
+// warnExternal logs a request that External did not trust: once as a warning, then at debug level.
+func (s *Service) warnExternal(r *http.Request, reason string) {
+	attrs := append(s.clientAttrs(r), "host", truncateHost(r.Host), "path", truncatePath(r.URL.Path), "reason", reason)
+	if s.externalWarned.CompareAndSwap(false, true) {
+		s.log.Warn("Refused an unauthenticated request under External authentication: the reverse proxy is only "+
+			"trusted for requests it relays. Set "+EnvTrustedProxies+" to the proxy's address (and "+EnvAllowedHosts+
+			" to the host names it serves), and make Dupearr's port reachable only through the proxy", attrs...)
+		return
+	}
+	s.log.Debug("Auth-Unauthorized: External does not trust this request", attrs...)
+}
+
+// truncateUsername bounds a username for logging.
+func truncateUsername(u string) string {
+	if utf8.RuneCountInString(u) <= maxLoggedUsername {
+		return u
+	}
+	return string([]rune(u)[:maxLoggedUsername]) + "…"
+}

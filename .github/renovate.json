@@ -1,0 +1,30 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Keeps the digest-pinned base images (Dockerfile, docker/fakemedia.Dockerfile) and the SHA-pinned actions (the workflow directories) current. Renovate reads this file wherever it runs; on GitHub, install the Renovate app for the repository (it only opens pull requests: nothing is merged automatically). Go modules and npm packages are updated by hand (go get, npm update) and gated in CI by govulncheck and npm audit; on GitHub, Dependabot security updates (a repository setting, no dependabot.yml) cover them, so the two bots never propose the same update.",
+  "extends": [
+    "config:recommended",
+    "docker:pinDigests",
+    "helpers:pinGitHubActionDigestsToSemver"
+  ],
+  "enabledManagers": ["dockerfile", "github-actions"],
+  "packageRules": [
+    {
+      "description": "Go and Node: stay on the minor and major lines the project targets (go.mod, the CI workflows); only patch releases and digests are proposed.",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["golang", "node"],
+      "matchUpdateTypes": ["major", "minor"],
+      "enabled": false
+    },
+    {
+      "description": "New base image digests carry security fixes: group them in one pull request.",
+      "matchDatasources": ["docker"],
+      "matchUpdateTypes": ["digest", "patch", "pinDigest"],
+      "groupName": "base image digests"
+    },
+    {
+      "description": "Supply chain: propose a new action release only once it has been public for 3 days, so a compromised or retracted tag is usually caught before it is pinned here.",
+      "matchManagers": ["github-actions"],
+      "minimumReleaseAge": "3 days"
+    }
+  ]
+}

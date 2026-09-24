@@ -1,0 +1,58 @@
+# Hand-verified MPLS: one PlayItem, clip 00055, 2 h feature, 3 entry marks.
+# Byte offsets on the left; every length field was counted by hand (see comments).
+# Format: hex bytes; "XX*N" repeats XX N times; "#" starts a comment.
+
+# 0x00 header
+4D 50 4C 53             # "MPLS"
+30 32 30 30             # "0200"
+00 00 00 3A             # PlayList_start      = 0x3A (58)
+00 00 00 A6             # PlayListMark_start  = 0xA6 (166)
+00 00 00 00             # ExtensionData_start = 0
+00*20                   # reserved, up to 0x28
+
+# 0x28 AppInfoPlayList
+00 00 00 0E             # length 14
+00 01 00 00             # reserved, playback_type 1 (sequential), playback_count
+00*8                    # UO mask
+00 00                   # flags
+
+# 0x3A PlayList
+00 00 00 68             # length 0x68 (104) = 0xA6 - 0x3E
+00 00                   # reserved
+00 01                   # number_of_PlayItems = 1
+00 00                   # number_of_SubPaths  = 0
+
+# 0x44 PlayItem
+00 60                   # length 0x60 (96) = 0xA6 - 0x46
+30 30 30 35 35          # Clip_Information_file_name "00055"
+4D 32 54 53             # Clip_codec_identifier "M2TS"
+00 01                   # 11 bits reserved, is_multi_angle 0, connection_condition 1
+00                      # ref_to_STC_id
+00 00 00 00             # IN_time  = 0
+13 4F D9 00             # OUT_time = 324 000 000 ticks = 7 200 s at 45 kHz
+00*8                    # UO mask
+00                      # random access flag + reserved
+00                      # still mode
+00 00                   # still time
+
+# 0x66 STN_table
+00 3E                   # length 0x3E (62) = 0xA6 - 0x68
+00 00                   # reserved
+01 01 01 00 00 00 00 00 # video 1, audio 1, PG 1, IG 0, sec audio 0, sec video 0, PiP PG 0, DV 0
+00 00 00 00             # 4 reserved bytes (the research's correction)
+# 0x76 primary video
+09 01 10 11 00*6        # stream_entry: length 9, type 1, PID 0x1011, padding
+05 1B 61 00 00 00       # attributes: length 5, H.264, format 6 (1080p) | rate 1 (23.976)
+# 0x86 primary audio
+09 01 11 00 00*6        # PID 0x1100
+05 86 61 65 6E 67       # DTS-HD MA, format 6 (multichannel) | rate 1 (48 kHz), "eng"
+# 0x96 presentation graphics
+09 01 12 00 00*6        # PID 0x1200
+05 90 65 6E 67 00       # PG, "eng", padding
+# 0xA6 PlayListMark
+00 00 00 2C             # length 44 = 2 + 3 * 14
+00 03                   # 3 marks
+00 01 00 00 00 00 00 00 FF FF 00 00 00 00   # entry mark, item 0, time 0
+00 01 00 00 00 A4 CB 80 FF FF 00 00 00 00   # entry mark, time 10 800 000 (240 s)
+00 01 00 00 01 49 97 00 FF FF 00 00 00 00   # entry mark, time 21 600 000 (480 s)
+# 0xD6 end (214 bytes)

@@ -1,0 +1,209 @@
+@import 'tailwindcss';
+
+/*
+ * Dupearr theme.
+ * Raw palette lives in --dp-* variables (switched by <html data-theme="dark|light">), and is mapped
+ * to Tailwind v4 tokens below (`bg-page`, `bg-card`, `text-fg`, `text-muted`, `border-border`,
+ * `bg-accent`, `text-danger`, …). Components should only use the Tailwind tokens.
+ */
+
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --dp-page: #202020;
+  --dp-header: #2a2a2a;
+  --dp-header-fg: #e1e2e3;
+  --dp-sidebar: #262626;
+  --dp-sidebar-fg: #e1e2e3;
+  --dp-sidebar-hover: #333333;
+  --dp-sidebar-active: #333333;
+  --dp-sidebar-accent: #a78bfa;
+  --dp-toolbar: #262626;
+  --dp-toolbar-fg: #e1e2e3;
+  --dp-card: #2a2a2a;
+  --dp-card-hover: #313131;
+  --dp-card-alt: #252525;
+  --dp-input: #333333;
+  --dp-input-border: #4a4a4a;
+  --dp-border: #3a3a3a;
+  --dp-border-strong: #4d4d4d;
+  --dp-text: #cccccc;
+  --dp-text-strong: #eeeeee;
+  --dp-text-muted: #909293;
+  --dp-text-subtle: #6f7071;
+  --dp-row-hover: rgb(255 255 255 / 0.05);
+  --dp-row-selected: rgb(139 92 246 / 0.14);
+  --dp-overlay: rgb(0 0 0 / 0.6);
+  --dp-shadow: 0 10px 30px rgb(0 0 0 / 0.45);
+
+  --dp-accent: #8b5cf6;
+  --dp-accent-hover: #7c4dea;
+  --dp-accent-soft: #a78bfa;
+  --dp-accent-fg: #ffffff;
+
+  --dp-primary: #5d9cec;
+  --dp-success: #27c24c;
+  --dp-warning: #ffa500;
+  --dp-danger: #f05050;
+  --dp-info: #5bc0de;
+  --dp-pink: #ff69b4;
+  --dp-neutral: #6b6f75;
+  --dp-scrollbar: #4a4a4a;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --dp-page: #f5f7fa;
+  --dp-header: #3a3f51;
+  --dp-header-fg: #ffffff;
+  --dp-sidebar: #3a3f51;
+  --dp-sidebar-fg: #e1e2e3;
+  --dp-sidebar-hover: #4a5064;
+  --dp-sidebar-active: #505669;
+  --dp-sidebar-accent: #c4b5fd;
+  --dp-toolbar: #ffffff;
+  --dp-toolbar-fg: #3a3f51;
+  --dp-card: #ffffff;
+  --dp-card-hover: #f3f4f6;
+  --dp-card-alt: #fafbfc;
+  --dp-input: #ffffff;
+  --dp-input-border: #c7ccd4;
+  --dp-border: #e3e6ea;
+  --dp-border-strong: #cfd4da;
+  --dp-text: #515253;
+  --dp-text-strong: #1f2125;
+  --dp-text-muted: #7a7d80;
+  --dp-text-subtle: #a0a3a6;
+  --dp-row-hover: rgb(0 0 0 / 0.035);
+  --dp-row-selected: rgb(139 92 246 / 0.1);
+  --dp-overlay: rgb(15 18 25 / 0.45);
+  --dp-shadow: 0 10px 30px rgb(15 18 25 / 0.18);
+
+  --dp-accent: #8b5cf6;
+  --dp-accent-hover: #7c3aed;
+  --dp-accent-soft: #7c3aed;
+  --dp-accent-fg: #ffffff;
+
+  --dp-primary: #3b82d6;
+  --dp-success: #1f9e3d;
+  --dp-warning: #e08f00;
+  --dp-danger: #e0393e;
+  --dp-info: #2fa3c4;
+  --dp-pink: #e0529c;
+  --dp-neutral: #8a8f96;
+  --dp-scrollbar: #c3c7cd;
+}
+
+@theme inline {
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans',
+    sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+
+  --color-page: var(--dp-page);
+  --color-header: var(--dp-header);
+  --color-header-fg: var(--dp-header-fg);
+  --color-sidebar: var(--dp-sidebar);
+  --color-sidebar-fg: var(--dp-sidebar-fg);
+  --color-sidebar-hover: var(--dp-sidebar-hover);
+  --color-sidebar-active: var(--dp-sidebar-active);
+  --color-sidebar-accent: var(--dp-sidebar-accent);
+  --color-toolbar: var(--dp-toolbar);
+  --color-toolbar-fg: var(--dp-toolbar-fg);
+  --color-card: var(--dp-card);
+  --color-card-hover: var(--dp-card-hover);
+  --color-card-alt: var(--dp-card-alt);
+  --color-input: var(--dp-input);
+  --color-input-border: var(--dp-input-border);
+  --color-border: var(--dp-border);
+  --color-border-strong: var(--dp-border-strong);
+  --color-fg: var(--dp-text);
+  --color-fg-strong: var(--dp-text-strong);
+  --color-muted: var(--dp-text-muted);
+  --color-subtle: var(--dp-text-subtle);
+  --color-row-hover: var(--dp-row-hover);
+  --color-row-selected: var(--dp-row-selected);
+  --color-overlay: var(--dp-overlay);
+
+  --color-accent: var(--dp-accent);
+  --color-accent-hover: var(--dp-accent-hover);
+  --color-accent-soft: var(--dp-accent-soft);
+  --color-accent-fg: var(--dp-accent-fg);
+
+  --color-primary: var(--dp-primary);
+  --color-success: var(--dp-success);
+  --color-warning: var(--dp-warning);
+  --color-danger: var(--dp-danger);
+  --color-info: var(--dp-info);
+  --color-pink: var(--dp-pink);
+  --color-neutral: var(--dp-neutral);
+
+  --shadow-popover: var(--dp-shadow);
+}
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--dp-border);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--dp-page);
+    color: var(--dp-text);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.52857;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  a {
+    color: var(--dp-accent-soft);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--dp-accent);
+    outline-offset: 1px;
+  }
+
+  ::selection {
+    background: rgb(139 92 246 / 0.35);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--dp-scrollbar) transparent;
+  }
+}
+
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@keyframes dp-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
+
+@utility animate-indeterminate {
+  animation: dp-indeterminate 1.4s ease-in-out infinite;
+}

@@ -1,0 +1,6 @@
+node_modules/
+*.tsbuildinfo
+coverage/
+# Build output (embedded by web/embed.go). Keep the placeholder so `go:embed all:dist` always compiles.
+dist/*
+!dist/.gitkeep

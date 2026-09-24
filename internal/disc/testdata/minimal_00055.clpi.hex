@@ -1,0 +1,51 @@
+# Hand-verified CLPI: H.264 1080p/23.976 + TrueHD eng, one STC sequence of 7 200 s.
+
+# 0x00 header
+48 44 4D 56             # "HDMV"
+30 32 30 30             # "0200"
+00 00 00 DC             # SequenceInfo_start_address = 0xDC
+00 00 00 F6             # ProgramInfo_start_address  = 0xF6
+00 00 01 14             # CPI_start_address          = 0x114
+00 00 01 18             # ClipMark_start_address     = 0x118
+00 00 00 00             # ExtensionData_start_address
+00*12                   # reserved, up to 0x28
+
+# 0x28 ClipInfo
+00 00 00 B0             # length 0xB0 (176) = 0xDC - 0x2C
+00 00                   # reserved
+01                      # Clip_stream_type 1
+01                      # application_type 1 (main TS of a movie)
+00 00 00 00             # 31 bits reserved, is_ATC_delta 0
+02 FA F0 80             # TS_recording_rate = 50 000 000
+00 0F 42 40             # number_of_source_packets = 1 000 000
+00*128                  # reserved, up to 0xBC
+00 1E                   # TS_type_info_block length 30
+80 48 44 4D 56 00*25    # validity, "HDMV", rest; up to 0xDC
+
+# 0xDC SequenceInfo
+00 00 00 16             # length 22
+00                      # reserved
+01                      # number_of_ATC_sequences
+00 00 00 00             # SPN_ATC_start
+01                      # number_of_STC_sequences
+00                      # offset_STC_id
+10 01                   # PCR_PID
+00 00 00 00             # SPN_STC_start
+00 01 5F 90             # presentation_start_time = 90 000
+13 51 38 90             # presentation_end_time   = 324 090 000 (duration 324 000 000)
+
+# 0xF6 ProgramInfo
+00 00 00 1A             # length 26 = 1 + 1 + 4 + 2 + 1 + 1 + 2 * 8
+00                      # reserved
+01                      # number_of_programs
+00 00 00 00             # SPN_program_sequence_start
+01 00                   # program_map_PID
+02                      # number_of_streams_in_ps
+00                      # number_of_groups
+10 11 05 1B 61 30 00 00 # PID 0x1011, coding info length 5: H.264, 1080p | 23.976, aspect 16:9
+11 00 05 83 61 65 6E 67 # PID 0x1100, length 5: TrueHD, multichannel | 48 kHz, "eng"
+
+# 0x114 CPI (empty) and 0x118 ClipMark (empty)
+00 00 00 00
+00 00 00 00
+# 0x11C end (284 bytes)

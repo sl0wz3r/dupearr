@@ -1,0 +1,53 @@
+# Build output
+/bin/
+/dist/
+# A plain `go build` in the repository root or in cmd/dupearr (use `make build` → bin/)
+/dupearr
+/dupearr.exe
+/cmd/dupearr/dupearr
+/cmd/dupearr/dupearr.exe
+
+# Web UI (web/dist is embedded by web/embed.go; keep the placeholder so go:embed compiles)
+web/node_modules/
+web/dist/*
+!web/dist/.gitkeep
+
+# Runtime data — never commit a data dir (API key, database, logs, backups)
+# docker compose .env files next to deploy/docker-compose.yml (deploy/.env.example is the template)
+.env
+.env.*
+!.env.example
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+config.xml
+logs/
+Backups/
+/tmp/
+/data/
+/.data/
+
+# Tests / coverage
+coverage.out
+coverage.html
+*.coverprofile
+*.test
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Local agent/editor tooling
+/.claude/
+
+# Python bytecode (maintainer scripts)
+__pycache__/
+*.pyc
+
+# A public export copied back in by mistake (exports are created outside the repository)
+/dupearr-public-*/
+/dupearr-public-*.report.md

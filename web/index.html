@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <!--DUPEARR_HEAD-->
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#2a2a2a" />
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Dupearr</title>
+    <script>
+      // Apply the saved theme before first paint (no flash of the wrong theme).
+      (function () {
+        try {
+          var prefs = JSON.parse(window.localStorage.getItem('dupearr.ui') || '{}');
+          if (prefs && (prefs.theme === 'light' || prefs.theme === 'dark')) {
+            document.documentElement.setAttribute('data-theme', prefs.theme);
+          }
+        } catch (e) {
+          /* storage unavailable: keep the default dark theme */
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>Dupearr needs JavaScript enabled to run.</noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

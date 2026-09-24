@@ -1,0 +1,64 @@
+# Dupearr systemd unit (Servarr wiki conventions: binary in /opt/Dupearr, data in /var/lib/dupearr,
+# dedicated "dupearr" user in the shared "media" group). Install: see deploy/systemd/README.md.
+#
+#   sudo cp dupearr.service /etc/systemd/system/
+#   sudo systemctl -q daemon-reload && sudo systemctl enable --now -q dupearr
+
+[Unit]
+Description=Dupearr Daemon
+After=syslog.target network-online.target
+Wants=network-online.target
+
+[Service]
+User=dupearr
+Group=media
+# 0002: the recycle bin and restored folders stay writable for the shared media group. Dupearr's
+# secrets do not depend on it: config.xml, the database and backups are always created 0600.
+UMask=0002
+Type=simple
+ExecStart=/opt/Dupearr/dupearr --nobrowser --data=/var/lib/dupearr
+TimeoutStopSec=20
+KillMode=process
+Restart=on-failure
+
+# Sandboxing. The whole file system is read-only for Dupearr except its data directory
+# (StateDirectory: /var/lib/dupearr, created for the service user). The filesystem deletion
+# method, the recycle bin and a restore need your media folders writable too; add them with a
+# drop-in (`sudo systemctl edit dupearr`, see README.md):
+#   [Service]
+#   ReadWritePaths=/srv/data/media
+# Media under /home also needs ProtectHome=read-only (reading) or ProtectHome=no (deleting).
+# `systemd-analyze security dupearr` shows what is left.
+StateDirectory=dupearr
+StateDirectoryMode=0750
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+# HTTP(S) to Plex/*arr/notification services, SMTP, and the web UI. No netlink: Dupearr does not
+# enumerate network interfaces.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+# A system call outside the filter fails with EPERM instead of killing the service.
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target
