@@ -142,7 +142,11 @@ keys, tokens or passwords. [SUPPORT.md](SUPPORT.md#sharing-logs-safely) has the 
 
 ## Releasing (maintainers)
 
-1. Move the *Unreleased* changelog entries under the new version and date.
+1. Move the *Unreleased* changelog entries under the new version and date. Add the same version
+   at the top of `<Changes>` in `unraid/ca/dupearr.xml.tmpl` (a few user-facing lines: it is the
+   change log Community Applications shows), set `VERSION` and `RELEASE_DATE` in
+   `unraid/ca/publish.env`, and run `make ca-template`. `go test ./deploy/` fails until all three
+   agree.
 2. Tag: `git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0`.
 3. `.github/workflows/release.yml` tests, pushes `ghcr.io/sl0wz3r/dupearr:0.1.0`, `:v0.1.0`, `:0.1` and
    `:latest` (a pre-release tag such as `v0.2.0-rc.1` pushes only its own tags) for linux/amd64

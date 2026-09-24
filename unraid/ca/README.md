@@ -50,7 +50,7 @@ render.
 | `REGISTRY_URL` | `https://github.com/OWNER/REPO/pkgs/container/dupearr` (Docker Hub: `https://hub.docker.com/r/owner/dupearr`) | `<Registry>` |
 | `SUPPORT_URL` | `PUBLIC_REPO_URL/issues` until you set the forum thread | `<Support>`, profile text |
 | `FORUM_URL` | empty (line dropped) | profile `<Forum>` |
-| `VERSION`, `RELEASE_DATE` | from `publish.env` | `<Changes>` heading, `<Date>` |
+| `VERSION`, `RELEASE_DATE` | from `publish.env` | `<Date>`; the newest `<Changes>` entry (written in the `.tmpl`) must name them, like the newest `CHANGELOG.md` release (`deploy/unraid_changes_test.go`) |
 | `REQUIRES_EXTRA` | empty | appended to `<Requires>` (LAN variant only) |
 | `ENV_NAME` | the env file names | header comment |
 

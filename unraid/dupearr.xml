@@ -31,8 +31,13 @@ Arr-style web UI and API on port 3873: login, API key, scheduled scans, backups,
   <License>GPL-3.0-or-later</License>
   <Beta>true</Beta>
   <MinVer>6.12</MinVer>
-  <Date>2026-09-23</Date>
-  <Changes>### 0.1.0 (2026-09-23)&#xD;
+  <Date>2026-09-24</Date>
+  <Changes>### 0.1.1 (2026-09-24)&#xD;
+- No changes to the app itself: updating is optional.&#xD;
+- New one-command demo with fake media (deploy/demo in the GitHub repository), README screenshots, support and roadmap pages.&#xD;
+- Releases now smoke-test the demo against the freshly built image.&#xD;
+&#xD;
+### 0.1.0 (2026-09-23)&#xD;
 - First release in Community Applications.&#xD;
 - Safe defaults: dry run and manual approval on, 7-day minimum age, at most 25 files or 500 GB per run.&#xD;
 - Extra Parameters: no-new-privileges and only the capabilities the entrypoint needs.&#xD;
