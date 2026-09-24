@@ -121,6 +121,12 @@ still needs a design.
 - **Goal:** read the video attributes inside disc images, and support season discs in TV
   libraries. The rules are in [docs/user/profiles.md](docs/user/profiles.md#full-disc-backups)
   and [docs/user/safety.md](docs/user/safety.md#full-disc-backups). This is a `safety` item.
+- **Research and design:** [docs/research/disc-images-and-tv-discs.md](docs/research/disc-images-and-tv-discs.md).
+  Recommendation: build a first slice. Read the attributes inside `.iso`/`.img` images with a small
+  in-tree UDF reader (no new dependency); unreadable images stay protected, and groups that hold an
+  image stay out of bulk approval at first. Show season discs next to their episodes but always
+  keep them: removing them needs a keeper rule that spans a whole show, because a disc's episodes
+  cannot be proven from its names or structure. AVCHD, BDAV and HD DVD stay protect-only.
 
 ## Translations (i18n)
 
