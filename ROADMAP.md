@@ -104,6 +104,14 @@ still needs a design.
 - **Care:** reading every byte of a large library is slow, so the I/O has to be bounded and
   scheduled. The design must also say how Dupearr checks a file that Plex does not know about
   before it removes anything, the way it checks every keeper today. This is a `safety` item.
+- **Research and design:** [docs/research/hash-based-detection.md](docs/research/hash-based-detection.md).
+  Recommendation: build a first slice, report only. An opt-in hash scan reads a file only when its
+  exact size equals a file Plex lists (so the I/O follows the duplicates, not the library, and is
+  capped per scan), confirms copies with SHA-256 from the standard library, and shows each
+  identical copy with the reason it can or cannot be removed. It removes nothing. Removal comes
+  later, under narrow conditions (byte-for-byte identical to a Plex-listed copy that stays, a
+  person's approval, the recycle bin), and only after contributors have checked how Unraid's user
+  shares report inodes, links and change times on live arrays.
 
 ## Several Plex servers
 
