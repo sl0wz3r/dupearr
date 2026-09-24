@@ -36,13 +36,16 @@ const resetWatchInterval = time.Second
 // resetAuthWait is how long `dupearr reset-auth` waits for a running server to apply a request.
 var resetAuthWait = 60 * time.Second
 
-// resetAuth is `dupearr reset-auth`, the recovery for a lost password or a suspected compromise:
-// it switches authentication to Forms with authentication required, deletes the user (the next
-// visit to the web UI shows first-run setup) and replaces every stored credential that a previous
-// holder may still have: the API key, the webhook token and the session signing key (every session
-// and device cookie is signed out). Settings forced by DUPEARR__ environment variables are left in
-// config.xml as they are — the environment would override them anyway — and the message says which
-// stay in effect.
+// resetAuth is `dupearr reset-auth`, the recovery for a lost password, a lockout or a suspected
+// compromise: it switches authentication to Forms with authentication required, deletes the user
+// (the next visit to the web UI shows first-run setup), clears the reverse-proxy trust lists (a
+// wrong trusted proxy can make the admin's own browser non-local and so block that setup, and a
+// compromise may have widened them) unless clearing them would trust more clients under an
+// authentication the environment keeps (keepTrustLists), and replaces every stored credential that
+// a previous holder may still have: the API key, the webhook token and the session signing key
+// (every session and device cookie is signed out). Settings forced by DUPEARR__ environment
+// variables are left in config.xml as they are — the environment would override them anyway — and
+// the message says which stay in effect.
 //
 // With the data directory's lock free (no server runs), the reset is made here, holding the lock
 // so that no server starts meanwhile. While a server holds it, the reset is handed to that server
@@ -119,7 +122,10 @@ func handResetToServer(dataDir string, stdout io.Writer) error {
 		if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
 			fmt.Fprintln(stdout, "Authentication was reset: the API key, the webhook token and the session signing key were replaced, "+
 				"every session was signed out and the account was deleted (unless environment variables force the API key or the "+
-				"authentication settings). Update the API key in your scripts and the webhook URLs in Radarr, Sonarr and Plex.")
+				"authentication settings). The trusted proxies and allowed hosts in config.xml were cleared, except where "+
+				"environment variables set them or keep External or Disabled for Local Addresses in effect (Dupearr's log says "+
+				"which were kept). Update the API key in your scripts and the webhook URLs in Radarr, Sonarr and Plex, and set "+
+				"the trusted proxies again in Settings → General if you use a reverse proxy.")
 			fmt.Fprintln(stdout, "Open the web UI to create new credentials (the setup code is printed in Dupearr's log).")
 			return nil
 		}
@@ -161,20 +167,70 @@ func removeResetRequest(dataDir string) error {
 	return nil
 }
 
-// authResetResult says what a reset could not change (environment overrides), for the messages.
+// authResetResult says what a reset could not change (environment overrides) and what it did with
+// the reverse-proxy trust lists, for the messages.
 type authResetResult struct {
 	envMethod, envRequired, envAPIKey bool
+	envProxies, envHosts              bool // the trust lists are set by the environment (kept)
+	// The trust lists config.xml held: cleared, or kept because clearing them would trust more
+	// clients under the authentication the environment keeps (keepTrustLists).
+	clearedProxies, clearedHosts bool
+	keptProxies, keptHosts       bool
+	method, required             string // the authentication in effect after the reset
+}
+
+// keepTrustLists says which trust lists reset-auth keeps because clearing them would trust more
+// clients, not fewer, under the authentication in effect after the reset (Forms and Enabled,
+// unless environment variables force a method or requirement):
+//   - External: the lists decide which requests the reverse proxy vouches for; without them
+//     External trusts every request that names Dupearr by an IP address or a local host name —
+//     anyone on the network, without credentials.
+//   - Forms with DisabledForLocalAddresses: a trusted proxy that names no client is not local;
+//     without the list, that proxy's internet clients would get the local-address bypass.
+//
+// Anywhere else a trusted proxy grants no access, and allowed hosts only widen trust (they count
+// as local names), so clearing them is safe.
+func keepTrustLists(method, required string) (proxies, hosts bool) {
+	switch {
+	case method == config.AuthExternal:
+		return true, true
+	case method == config.AuthForms && required == config.AuthRequiredDisabledForLocal:
+		return true, false
+	}
+	return false, false
+}
+
+// trustListNames names the trust lists for the reset-auth messages.
+func trustListNames(proxies, hosts bool) string {
+	switch {
+	case proxies && hosts:
+		return "trusted proxies and allowed hosts"
+	case proxies:
+		return "trusted proxies"
+	}
+	return "allowed hosts"
 }
 
 // resetAuthState resets authentication in config.xml (cfg) and the database (st): Forms,
-// authentication required, a new API key (unless environment variables force them), no user,
-// and new stored credentials (session signing key, webhook token, session generation).
+// authentication required, a new API key and no trusted proxies or allowed hosts (unless
+// environment variables force them, or keep an authentication the lists narrow: keepTrustLists),
+// no user, and new stored credentials (session signing key, webhook token, session generation).
 func resetAuthState(ctx context.Context, cfg *config.Manager, st store.Store) (authResetResult, error) {
 	env := map[string]bool{}
 	for _, k := range cfg.EnvOverrides() {
 		env[k] = true
 	}
-	res := authResetResult{envMethod: env["authenticationMethod"], envRequired: env["authenticationRequired"], envAPIKey: env["apiKey"]}
+	res := authResetResult{envMethod: env["authenticationMethod"], envRequired: env["authenticationRequired"], envAPIKey: env["apiKey"],
+		envProxies: env["trustedProxies"], envHosts: env["allowedHosts"],
+		method: config.AuthForms, required: config.AuthRequiredEnabled}
+	eff := cfg.Get()
+	if res.envMethod {
+		res.method = eff.AuthenticationMethod
+	}
+	if res.envRequired {
+		res.required = eff.AuthenticationRequired
+	}
+	keepProxies, keepHosts := keepTrustLists(res.method, res.required)
 	if _, err := cfg.Update(func(c *config.Config) {
 		if !res.envMethod {
 			c.AuthenticationMethod = config.AuthForms
@@ -184,6 +240,20 @@ func resetAuthState(ctx context.Context, cfg *config.Manager, st store.Store) (a
 		}
 		if !res.envAPIKey {
 			c.ApiKey = config.GenerateAPIKey()
+		}
+		if !res.envProxies && c.TrustedProxies != "" {
+			if keepProxies {
+				res.keptProxies = true
+			} else {
+				c.TrustedProxies, res.clearedProxies = "", true
+			}
+		}
+		if !res.envHosts && c.AllowedHosts != "" {
+			if keepHosts {
+				res.keptHosts = true
+			} else {
+				c.AllowedHosts, res.clearedHosts = "", true
+			}
 		}
 	}); err != nil {
 		return res, fmt.Errorf("update config: %w", err)
@@ -223,6 +293,28 @@ func (res authResetResult) print(stdout io.Writer, cfg *config.Manager) {
 	} else {
 		fmt.Fprintln(stdout, "Replaced the API key: scripts and tools using the old key stop working (Settings → General shows the new one after you sign in).")
 	}
+	if res.clearedProxies || res.clearedHosts {
+		fmt.Fprintf(stdout, "Cleared the %s: set them again in Settings → General if you use a reverse proxy.\n",
+			trustListNames(res.clearedProxies, res.clearedHosts))
+	}
+	switch {
+	case !res.keptProxies && !res.keptHosts:
+	case res.method == config.AuthExternal:
+		fmt.Fprintf(stdout, "Kept the %s in config.xml: authentication stays External (%s), and without them External would "+
+			"trust every request that names Dupearr by an IP address or a local host name. Review them in Settings → General, "+
+			"or in config.xml while Dupearr is stopped.\n", trustListNames(res.keptProxies, res.keptHosts), authMethodEnv)
+	default: // Forms with DisabledForLocalAddresses
+		fmt.Fprintf(stdout, "Kept the trusted proxies in config.xml: Authentication Required stays Disabled for Local Addresses "+
+			"(%s), and without them the clients of a reverse proxy that does not name them would count as local. If first-run "+
+			"setup refuses your computer, remove the range that covers its address from <TrustedProxies> in config.xml while "+
+			"Dupearr is stopped.\n", auth.EnvAuthRequired)
+	}
+	if res.envProxies {
+		fmt.Fprintln(stdout, "The trusted proxies are set by the "+auth.EnvTrustedProxies+" environment variable and were not changed.")
+	}
+	if res.envHosts {
+		fmt.Fprintln(stdout, "The allowed hosts are set by the "+auth.EnvAllowedHosts+" environment variable and were not changed.")
+	}
 	fmt.Fprintln(stdout, "Replaced the webhook token: update the webhook URLs in Radarr, Sonarr and Plex (Settings → Connections → Webhooks).")
 	fmt.Fprintln(stdout, "Every session was signed out (new session signing key).")
 }
@@ -243,7 +335,9 @@ func (a *app) applyRequestedAuthReset(ctx context.Context) error {
 	// Error: the operator must see it whatever the log level.
 	a.log.Error("Authentication was reset by dupearr reset-auth: the API key, the webhook token and the session key were "+
 		"replaced, every session was signed out and the account was deleted; open the web UI to create new credentials",
-		"apiKeyKept", res.envAPIKey, "methodKept", res.envMethod, "requirementKept", res.envRequired)
+		"apiKeyKept", res.envAPIKey, "methodKept", res.envMethod, "requirementKept", res.envRequired,
+		"trustedProxiesCleared", res.clearedProxies, "allowedHostsCleared", res.clearedHosts,
+		"trustedProxiesKept", res.envProxies || res.keptProxies, "allowedHostsKept", res.envHosts || res.keptHosts)
 	audit.Record(ctx, a.db, a.log, audit.KindAuthReset, "Authentication reset by dupearr reset-auth", "while", "running")
 	return nil
 }

@@ -609,19 +609,23 @@ func (c *Checker) checkWebhookAPIKey(_ context.Context, _ *snapshot) []result {
 // checkExternalAuth checks External authentication. Dupearr trusts a request as authenticated by
 // the reverse proxy only when its TCP peer is one of the trusted proxies; without trusted proxies
 // it trusts every request that names it by an IP address or a private host name (only the
-// DNS-rebinding guard of None), so anyone who reaches the port directly gets full access
-// (warning). With trusted proxies the port must still only be reachable through the proxy
-// (notice).
+// DNS-rebinding guard of None) — or, with allowed hosts, by one of those — so anyone who reaches
+// the port directly gets full access (warning). With trusted proxies the port must still only be
+// reachable through the proxy (notice).
 func (c *Checker) checkExternalAuth(_ context.Context, s *snapshot) []result {
 	if s.cfg == nil || !strings.EqualFold(s.cfg.AuthenticationMethod, config.AuthExternal) {
 		return nil
 	}
 	if c.d.ProxyTrust != nil {
-		if proxies, _ := c.d.ProxyTrust(); proxies == 0 {
+		if proxies, hosts := c.d.ProxyTrust(); proxies == 0 {
+			named := "addresses it by an IP address or a local host name"
+			if hosts > 0 {
+				named = "names one of the allowed hosts" // any client can send that Host header
+			}
 			return []result{*issue(SourceExternalAuth, "", models.HealthWarning,
 				"Authentication is left to an external reverse proxy (External), but no trusted proxy is configured: "+
-					"anyone who reaches Dupearr's port directly and addresses it by an IP address or a local host name "+
-					"gets full access, without credentials. Set DUPEARR__AUTH__TRUSTEDPROXIES to the address of your "+
+					"anyone who reaches Dupearr's port directly and "+named+" gets full access, without credentials. Set "+
+					"Trusted Proxies in Settings → General (or DUPEARR__AUTH__TRUSTEDPROXIES) to the address of your "+
 					"authenticating reverse proxy, and do not publish Dupearr's port.")}
 		}
 	}
@@ -645,8 +649,9 @@ func (c *Checker) checkReverseProxy(_ context.Context, _ *snapshot) []result {
 	return []result{*issue(SourceReverseProxy, "", models.HealthWarning,
 		"Requests with forwarding headers (X-Forwarded-For, Forwarded or X-Real-IP) come from "+peer+
 			" (last at "+last.UTC().Format(time.RFC3339)+"), which is not a trusted proxy. If that is your reverse proxy, "+
-			"add its address to DUPEARR__AUTH__TRUSTEDPROXIES: until then Dupearr ignores those headers, so every client "+
-			"behind the proxy shares one login-throttling limit and cannot be told apart.")}
+			"add its address to Trusted Proxies in Settings → General (Show Advanced), or set DUPEARR__AUTH__TRUSTEDPROXIES: "+
+			"until then Dupearr ignores those headers, so every client behind the proxy shares one login-throttling limit "+
+			"and cannot be told apart.")}
 }
 
 func (c *Checker) checkLastScan(ctx context.Context, _ *snapshot) []result {

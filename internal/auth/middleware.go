@@ -192,30 +192,46 @@ func (s *Service) authenticate(w http.ResponseWriter, r *http.Request) (Info, bo
 }
 
 // externalTrusted reports whether External authentication may trust the request, i.e. whether
-// it was relayed (and therefore authenticated) by the reverse proxy:
+// it was relayed (and therefore authenticated) by the reverse proxy (see externalTrustedBy).
+func (s *Service) externalTrusted(r *http.Request) bool {
+	ok, reason := externalTrustedBy(r, s.NetworkTrust())
+	if !ok {
+		s.warnExternal(r, reason)
+	}
+	return ok
+}
+
+// Reasons externalTrustedBy gives for a request External does not trust.
+const (
+	externalPublicHost  = "public host name (set the trusted proxies / allowed hosts)"
+	externalNotRelayed  = "not relayed by a trusted proxy"
+	externalHostRefused = "host name not allowed"
+)
+
+// externalTrustedBy reports whether External authentication may trust the request with the
+// reverse-proxy configuration t, and if not, why (one of the external* reasons):
 //   - with TrustedProxies set, the TCP peer must be one of them;
 //   - with AllowedHosts set, the Host header and every X-Forwarded-Host entry must be allowed;
 //   - with neither, the request must name this server by a private host (the DNS-rebinding guard
 //     of None). That stops a rebinding page, but not a client on the network that reaches the
 //     port directly — set TrustedProxies.
-func (s *Service) externalTrusted(r *http.Request) bool {
-	t := s.NetworkTrust()
+//
+// It decides with the one snapshot t, so a change of the lists in the middle of a decision cannot
+// mix the old and the new ones.
+func externalTrustedBy(r *http.Request, t NetworkTrust) (ok bool, reason string) {
 	if !t.Configured() {
-		if !s.privateHosts(r) {
-			s.warnExternal(r, "public host name (set the trusted proxies / allowed hosts)")
-			return false
+		if !privateHostsBy(r, t) {
+			return false, externalPublicHost
 		}
-		return true
+		return true, ""
 	}
-	if len(t.TrustedProxies) > 0 && !s.trustedPeer(r) {
-		s.warnExternal(r, "not relayed by a trusted proxy")
-		return false
+	if len(t.TrustedProxies) > 0 && !t.trustsProxy(peerIP(r)) {
+		return false, externalNotRelayed
 	}
-	if len(t.AllowedHosts) > 0 && !requestHostsAll(r, s.hostAllowed) {
-		s.warnExternal(r, "host name not allowed")
-		return false
+	if len(t.AllowedHosts) > 0 && !requestHostsAll(r, t.allowsHost) {
+		return false, externalHostRefused
 	}
-	return true
+	return true, ""
 }
 
 // Authenticated reports whether the request carries valid credentials (or needs none: method

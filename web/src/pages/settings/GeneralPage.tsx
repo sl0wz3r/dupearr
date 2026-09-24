@@ -19,7 +19,13 @@ import {
   SettingsSection,
   useSettingsForm,
 } from '@/components/page';
-import { hasErrors, mergeFieldErrors, summarizeSaveError, type FieldErrors } from '@/components/settings/connections/connectionUtils';
+import {
+  CORRECT_FIELDS_MESSAGE,
+  hasErrors,
+  mergeFieldErrors,
+  summarizeSaveError,
+  type FieldErrors,
+} from '@/components/settings/connections/connectionUtils';
 import { ApiKeyField, passwordProtected } from '@/components/settings/connections/ApiKeyField';
 import {
   credentialChanged,
@@ -68,6 +74,9 @@ const HOST_FORM_FIELDS: readonly string[] = [
   'sslKeyPath',
   'authenticationMethod',
   'authenticationRequired',
+  'trustedProxies',
+  'allowedHosts',
+  'confirmTrustChange',
   'username',
   'password',
   'passwordConfirmation',
@@ -157,6 +166,12 @@ export default function GeneralPage() {
   /** Write-only: confirms credential changes (not part of the form, never cached). */
   const [currentPassword, setCurrentPassword] = useState('');
   const [keepApiKey, setKeepApiKey] = useState(false);
+  /**
+   * The server refused trust lists that stop trusting this browser (confirmTrustChange): its
+   * explanation, and whether the user confirmed saving them anyway. Write-only, like keepApiKey.
+   */
+  const [trustWarning, setTrustWarning] = useState<string | null>(null);
+  const [confirmTrustChange, setConfirmTrustChange] = useState(false);
   const [confirmRevoke, setConfirmRevoke] = useState(false);
 
   const [clientErrors, setClientErrors] = useState<FieldErrors>({});
@@ -181,12 +196,24 @@ export default function GeneralPage() {
   const summary = summarizeSaveError(saveError, HOST_FORM_FIELDS, settingsFieldLabel);
   const errors = mergeFieldErrors(clientErrors, summary.fields);
   const errorsFor = (k: string) => errors[k];
+  // A refusal that asks to confirm a trust change highlights no field: say where to confirm it.
+  const saveMessages = summary.fields.confirmTrustChange?.length
+    ? [
+        'This change stops trusting this browser: confirm it under Security (Save this change anyway), or correct it.',
+        ...summary.messages.filter((m) => m !== CORRECT_FIELDS_MESSAGE || Object.keys(summary.fields).length > 1),
+      ]
+    : summary.messages;
 
   const setHost = <K extends keyof HostConfig>(key: K, value: HostConfig[K]) => {
     hostForm.setField(key, value);
     setEditedHost((prev) => (prev.has(key) ? prev : new Set([...prev, key])));
     setClientErrors((e) => (e[key as string]?.length ? { ...e, [key]: [] } : e));
     setSaveError(null);
+    if (key === 'trustedProxies' || key === 'allowedHosts' || key === 'authenticationMethod') {
+      // A confirmation covers the change it was given for: the server checks an edited one again.
+      setTrustWarning(null);
+      setConfirmTrustChange(false);
+    }
   };
   const setSetting = <K extends keyof Settings>(key: K, value: Settings[K]) => {
     settingsForm.setField(key, value);
@@ -202,7 +229,9 @@ export default function GeneralPage() {
     let errs: FieldErrors = {};
     if (hostForm.dirty && v && server) errs = validateHostConfig(v, server);
     if (needCurrentPassword && !currentPassword) {
-      errs.currentPassword = ['Enter your current password to change the username, password or authentication settings'];
+      errs.currentPassword = [
+        'Enter your current password to change the username, password, authentication or reverse-proxy settings',
+      ];
     }
     if (settingsForm.dirty && s) {
       // The server's limits: 0 turns scheduled backups off / keeps every backup.
@@ -232,6 +261,7 @@ export default function GeneralPage() {
         const payload = hostConfigPayload(overlayEdits(fresh, v, editedHost), fresh);
         if (needCurrentPassword) payload.currentPassword = currentPassword;
         if (passwordChanged(v, server) && keepApiKey) payload.keepApiKey = true;
+        if (trustWarning && confirmTrustChange) payload.confirmTrustChange = true;
         const response = await updateHost.mutateAsync(payload);
         const keyReplaced = !!response && passwordChanged(v, server) && !keepApiKey && !env.has('apiKey');
         let saved: HostConfig;
@@ -247,6 +277,8 @@ export default function GeneralPage() {
         setEditedHost(new Set());
         setCurrentPassword('');
         setKeepApiKey(false);
+        setTrustWarning(null);
+        setConfirmTrustChange(false);
         if (keyReplaced) {
           toast.info('API key replaced', 'Changing the password also replaced the API key: update your scripts (Security → API Key).');
         }
@@ -265,6 +297,9 @@ export default function GeneralPage() {
       toast.success('Settings saved');
     } catch (e) {
       setSaveError(e);
+      // Refused because the new trust lists would stop trusting this browser: offer to confirm.
+      const warning = summarizeSaveError(e, HOST_FORM_FIELDS).fields.confirmTrustChange;
+      if (warning?.length) setTrustWarning(warning.join(' '));
     } finally {
       setSaving(false);
     }
@@ -279,6 +314,8 @@ export default function GeneralPage() {
     setSaveError(null);
     setCurrentPassword('');
     setKeepApiKey(false);
+    setTrustWarning(null);
+    setConfirmTrustChange(false);
   };
 
   const doRevokeSessions = () => {
@@ -521,9 +558,20 @@ export default function GeneralPage() {
           )}
           {method === 'External' && (
             <Alert kind="warning" title="External authentication" className="mb-3">
-              Dupearr accepts every request and relies on a reverse proxy (e.g. Authelia, Authentik, oauth2-proxy)
-              to authenticate users — including API calls. Only use this when Dupearr is reachable exclusively
-              through that proxy. Webhooks still need the webhook token, and scripts send the API key.
+              Dupearr trusts requests relayed by the trusted proxies and relies on a reverse proxy (e.g. Authelia,
+              Authentik, oauth2-proxy) to authenticate users — including API calls. Only use this when Dupearr is
+              reachable exclusively through that proxy. Webhooks still need the webhook token, and scripts send the
+              API key.
+            </Alert>
+          )}
+          {method === 'External' && !(v.trustedProxies ?? '').trim() && (
+            <Alert kind="warning" title="No trusted proxy" className="mb-3">
+              Without trusted proxies, anyone who reaches Dupearr&apos;s port directly and{' '}
+              {(v.allowedHosts ?? '').trim()
+                ? 'names one of the allowed hosts (any client can send that host name)'
+                : 'addresses it by an IP address or a local host name'}{' '}
+              gets full access, without credentials. Enter the address of your authenticating reverse proxy under
+              Trusted Proxies, and do not publish Dupearr&apos;s port.
             </Alert>
           )}
           {method !== 'None' && (
@@ -542,6 +590,57 @@ export default function GeneralPage() {
                 {...envProps('authenticationRequired')}
               />
             </FormGroup>
+          )}
+          <FormGroup
+            label="Trusted Proxies"
+            htmlFor={id('trustedProxies')}
+            advanced={method !== 'External' && !v.trustedProxies && !server.trustedProxies}
+            labelSuffix={envSuffix('trustedProxies')}
+            errors={errorsFor('trustedProxies')}
+            helpText="Your reverse proxy's address as Dupearr sees it (IP or CIDR, comma-separated; not the Docker gateway). Ranges outside private space must be at least /16 (IPv4) or /48 (IPv6)."
+          >
+            <TextInput
+              id={id('trustedProxies')}
+              value={v.trustedProxies ?? ''}
+              placeholder="172.18.0.10"
+              onChange={(e) => setHost('trustedProxies', e.target.value)}
+              invalid={!!errorsFor('trustedProxies')?.length}
+              spellCheck={false}
+              {...envProps('trustedProxies')}
+            />
+          </FormGroup>
+          <FormGroup
+            label="Allowed Hosts"
+            htmlFor={id('allowedHosts')}
+            advanced={method !== 'External' && !v.allowedHosts && !server.allowedHosts}
+            labelSuffix={envSuffix('allowedHosts')}
+            errors={errorsFor('allowedHosts')}
+            helpText="Host names Dupearr is reached by through the proxy (*.example.com for sub-domains). With External only these names are trusted; they also count as local names for None and Disabled for Local Addresses, so list only names you control."
+          >
+            <TextInput
+              id={id('allowedHosts')}
+              value={v.allowedHosts ?? ''}
+              placeholder="dupearr.example.com"
+              onChange={(e) => setHost('allowedHosts', e.target.value)}
+              invalid={!!errorsFor('allowedHosts')?.length}
+              spellCheck={false}
+              {...envProps('allowedHosts')}
+            />
+          </FormGroup>
+          {trustWarning && (
+            <div className="mb-4">
+              <Alert kind="warning" title="This change stops trusting this browser" className="mb-2">
+                {trustWarning}
+              </Alert>
+              <Checkbox
+                checked={confirmTrustChange}
+                onChange={(c) => {
+                  setConfirmTrustChange(c);
+                  setSaveError(null);
+                }}
+                label="Save this change anyway"
+              />
+            </div>
           )}
           {method === 'Forms' && (
             <>
@@ -596,7 +695,7 @@ export default function GeneralPage() {
               label="Current Password"
               htmlFor={id('currentPassword')}
               errors={errorsFor('currentPassword')}
-              helpText="Required to change the username, password or authentication settings."
+              helpText="Required to change the username, password, authentication or reverse-proxy settings."
             >
               <PasswordInput
                 id={id('currentPassword')}
@@ -757,11 +856,11 @@ export default function GeneralPage() {
           onSave={() => void save()}
           onReset={reset}
           error={
-            summary.messages.length > 0 || hasErrors(clientErrors) ? (
+            saveMessages.length > 0 || hasErrors(clientErrors) ? (
               <>
-                {summary.messages.length > 0
-                  ? summary.messages.map((m, i) => <div key={i}>{m}</div>)
-                  : 'Please correct the highlighted fields.'}
+                {saveMessages.length > 0
+                  ? saveMessages.map((m, i) => <div key={i}>{m}</div>)
+                  : CORRECT_FIELDS_MESSAGE}
               </>
             ) : undefined
           }

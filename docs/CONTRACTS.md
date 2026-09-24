@@ -48,6 +48,8 @@ type Config struct {
     ApiKey                 string // 32 lowercase hex
     AuthenticationMethod   string // Auth*
     AuthenticationRequired string // AuthRequired*
+    TrustedProxies         string // added (issue #1): reverse proxies (IPs / CIDR ranges), "a, b"; checked by internal/auth
+    AllowedHosts           string // added (issue #1): host names ("*.example.com": sub-domains), "a, b"
     LogLevel               string // trace|debug|info|warn|error
     LogSizeLimit           int    // MB per log file
     InstanceName           string
@@ -72,6 +74,8 @@ type ValidationError struct{ PropertyName, ErrorMessage string }
 type ValidationErrors []ValidationError                 // added: error type of a failed Update
 func Normalize(c Config) Config                         // added: canonical form (Basic → Forms, UrlBase "/x", …)
 func NormalizeURLBase(s string) string                  // added
+func NormalizeList(s string) string                     // added: a list setting as "a, b" (TrustedProxies, AllowedHosts)
+func SplitList(s string) []string                       // added: its entries (commas, semicolons, white space separate)
 func LookupEnv(name string) (string, bool)              // added: env override lookup exactly as Load does it (healthcheck)
 ```
 
@@ -693,6 +697,21 @@ func (s *Service) Audit(ctx context.Context, r *http.Request, kind, title string
 func (s *Service) Lockdown(); func (s *Service) LockedDown() bool // refuse every credential until exit (reset-auth)
 var ErrLockedDown error
 const EnvAuthMethod, EnvAuthRequired = "DUPEARR__AUTH__METHOD", "DUPEARR__AUTH__REQUIRED"
+// Reverse-proxy trust (network.go; DECISIONS "Reverse-proxy trust"). The lists are
+// config.Config.TrustedProxies / AllowedHosts (Settings → General, config.xml), overridden by
+// EnvTrustedProxies / EnvAllowedHosts through internal/config, and read on every use (no restart).
+const EnvTrustedProxies, EnvAllowedHosts = "DUPEARR__AUTH__TRUSTEDPROXIES", "DUPEARR__AUTH__ALLOWEDHOSTS"
+type NetworkTrust struct { TrustedProxies []netip.Prefix; AllowedHosts []string }
+func (t NetworkTrust) Configured() bool
+func ParseNetworkTrust(proxies, hosts string) (NetworkTrust, error) // skips invalid entries, returns them as the error
+func ValidateNetworkTrust(proxies, hosts string) []config.ValidationError // added (issue #1): what the API refuses, per entry
+func (s *Service) NetworkTrust() NetworkTrust                        // effective lists (cached parse, invalid entries logged)
+func (s *Service) SetNetworkTrust(fn func() (trustedProxies, allowedHosts string)) // tests; nil = the configuration
+// added (issue #1): why r, as it is authenticated now (Via external / none / localAddress), would
+// stop being trusted with these lists under method External or None ("" when it stays trusted,
+// keeps a login form (Forms) or a credential (session, API key)).
+func (s *Service) TrustChangeProblem(r *http.Request, method, proxies, hosts string) string
+func (s *Service) UntrustedProxySeen() (time.Time, string) // ReverseProxyCheck; zero once that peer is trusted
 ```
 
 ## internal/audit

@@ -36,11 +36,21 @@ var fields = [...]field{
 	{xml: "ApiKey", json: "apiKey", env: "DUPEARR__AUTH__APIKEY", str: func(c *Config) *string { return &c.ApiKey }},
 	{xml: "AuthenticationMethod", json: "authenticationMethod", env: "DUPEARR__AUTH__METHOD", str: func(c *Config) *string { return &c.AuthenticationMethod }},
 	{xml: "AuthenticationRequired", json: "authenticationRequired", env: "DUPEARR__AUTH__REQUIRED", str: func(c *Config) *string { return &c.AuthenticationRequired }},
+	{xml: "TrustedProxies", json: "trustedProxies", env: "DUPEARR__AUTH__TRUSTEDPROXIES", optional: true, str: func(c *Config) *string { return &c.TrustedProxies }},
+	{xml: "AllowedHosts", json: "allowedHosts", env: "DUPEARR__AUTH__ALLOWEDHOSTS", optional: true, str: func(c *Config) *string { return &c.AllowedHosts }},
 	{xml: "LogLevel", json: "logLevel", env: "DUPEARR__LOG__LEVEL", str: func(c *Config) *string { return &c.LogLevel }},
 	{xml: "LogSizeLimit", json: "logSizeLimit", env: "DUPEARR__LOG__SIZELIMIT", num: func(c *Config) *int { return &c.LogSizeLimit }},
 	{xml: "InstanceName", json: "instanceName", env: "DUPEARR__APP__INSTANCENAME", str: func(c *Config) *string { return &c.InstanceName }},
 	{xml: "LaunchBrowser", json: "launchBrowser", flag: func(c *Config) *bool { return &c.LaunchBrowser }},
 	{xml: "Branch", json: "branch", str: func(c *Config) *string { return &c.Branch }},
+}
+
+// SplitList splits a list setting (TrustedProxies, AllowedHosts) into its entries: commas,
+// semicolons and white space all separate entries, and empty entries are dropped.
+func SplitList(s string) []string {
+	return strings.FieldsFunc(s, func(r rune) bool {
+		return r == ',' || r == ';' || r == ' ' || r == '\t' || r == '\n' || r == '\r'
+	})
 }
 
 // fieldIndexByXML returns the index of the field whose element name matches name

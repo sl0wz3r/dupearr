@@ -430,19 +430,22 @@ Command status: `queued | started | completed | failed | aborted`; trigger `manu
 - `config.xml` root `<Config>` elements: `BindAddress` (`*`), `Port` (3873), `UrlBase`,
   `EnableSsl`, `SslPort` (9873), `SslCertPath`, `SslKeyPath`, `ApiKey` (32 hex), `AuthenticationMethod`
   (`None|Forms|External`; a legacy `Basic` is read as `Forms`), `AuthenticationRequired` (`Enabled|DisabledForLocalAddresses`),
-  `LogLevel` (`trace|debug|info|warn|error`), `LogSizeLimit` (MB, 1), `InstanceName` (Dupearr),
-  `LaunchBrowser` (False), `Branch` (main).
+  `TrustedProxies` and `AllowedHosts` (reverse-proxy trust lists, empty; stored as `"a, b"`; invalid
+  entries are skipped and logged by `internal/auth`, never a reason not to start; see
+  docs/SECURITY.md), `LogLevel` (`trace|debug|info|warn|error`), `LogSizeLimit` (MB, 1),
+  `InstanceName` (Dupearr), `LaunchBrowser` (False), `Branch` (main).
 - Env overrides: `DUPEARR__SERVER__BINDADDRESS|PORT|URLBASE|ENABLESSL|SSLPORT|SSLCERTPATH|SSLKEYPATH`,
-  `DUPEARR__AUTH__APIKEY|METHOD|REQUIRED`, `DUPEARR__LOG__LEVEL|SIZELIMIT`, `DUPEARR__APP__INSTANCENAME`;
-  environment-only: `DUPEARR__AUTH__TRUSTEDPROXIES|ALLOWEDHOSTS` (reverse-proxy trust, read by
-  `internal/auth`; see docs/SECURITY.md).
+  `DUPEARR__AUTH__APIKEY|METHOD|REQUIRED|TRUSTEDPROXIES|ALLOWEDHOSTS`, `DUPEARR__LOG__LEVEL|SIZELIMIT`,
+  `DUPEARR__APP__INSTANCENAME`.
 - Permissions: the data dir is `0700` when created and loses group write / other access at every
   start; `config.xml`, `dupearr.db*`, backups and logs are `0600` (logs dir `0700`).
 - Docker: `PUID` (1000; Unraid 99), `PGID` (1000; Unraid 100), `UMASK` (002), `TZ`; volumes
   `/config` and (recommended, same as Plex/*arrs) `/data`.
 - CLI: `dupearr [--data DIR] [--nobrowser]`, `dupearr healthcheck` (exit 0 when `/ping` OK),
   `dupearr version`, `dupearr reset-auth` (resets authentication to Forms with no user, forcing
-  first-run setup with a new setup code, and replaces the API key, the webhook token and the
-  session signing key). While a server runs with the data directory, reset-auth hands the reset to
+  first-run setup with a new setup code, clears the trusted proxies and allowed hosts in
+  `config.xml` — except where environment variables keep External or Disabled for Local Addresses,
+  which the lists narrow — and replaces the API key, the webhook token and the session signing
+  key). While a server runs with the data directory, reset-auth hands the reset to
   it (`<data>/.reset-auth-requested`): the server refuses every credential at once, restarts and
   resets before it accepts requests again, so a held credential is locked out at once.

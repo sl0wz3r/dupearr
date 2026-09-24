@@ -6,6 +6,32 @@ All notable changes to Dupearr are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Trusted proxies and allowed host names in *Settings → General* and `config.xml`
+  (`<TrustedProxies>`, `<AllowedHosts>`), not only as environment variables (#1). A change takes
+  effect with the next request, without a restart. The environment variables
+  `DUPEARR__AUTH__TRUSTEDPROXIES` / `DUPEARR__AUTH__ALLOWEDHOSTS` still override them and show as
+  read-only in the UI; to manage a list in the UI, clear the variable. The range rule is unchanged
+  and shared by every source: a trusted-proxy range must lie inside private address space or be
+  at least /16 (IPv4) or /48 (IPv6). Settings → General refuses an invalid entry and names it;
+  `config.xml` and the environment skip and log it, as before. Changing either list needs the
+  current password when a Forms account exists, and a change of the lists or a switch to External
+  that would stop trusting the browser making it (External, None) must be confirmed.
+
+### Changed
+
+- `dupearr reset-auth` also clears the trusted proxies and allowed hosts in `config.xml` (values
+  from environment variables stay and are reported), so it recovers from a wrong list too (#1).
+  It keeps them where clearing them would trust more clients: both while `DUPEARR__AUTH__METHOD`
+  keeps External, the trusted proxies while `DUPEARR__AUTH__REQUIRED` keeps Disabled for Local
+  Addresses.
+- A backup restore never changes the trusted proxies or allowed hosts, even when the security
+  settings are restored; the review lists them as kept (#1).
+- An existing `config.xml` gains empty `<TrustedProxies>` and `<AllowedHosts>` elements on the
+  first start, and both lists are stored as `a, b` whatever separators were typed (#1).
+- `ReverseProxyCheck` clears as soon as the reported proxy is trusted, without a restart (#1).
+
 ## [0.1.1] - 2026-09-24
 
 ### Added

@@ -136,9 +136,13 @@ function ExternalAuthUntrusted({ checking, onRetry }: { checking: boolean; onRet
         <ul className="m-0 flex list-disc flex-col gap-1 pl-5 text-fg">
           <li>Open Dupearr through the address of your reverse proxy.</li>
           <li>
-            If you are the administrator: set <code>DUPEARR__AUTH__TRUSTEDPROXIES</code> to the proxy&apos;s IP address
-            (and <code>DUPEARR__AUTH__ALLOWEDHOSTS</code> to Dupearr&apos;s host name behind it) and restart Dupearr.
-            Without them, External only trusts requests that open Dupearr by its IP address or a local host name.
+            If you are the administrator: set <strong>Trusted Proxies</strong> to the proxy&apos;s IP address (and{' '}
+            <strong>Allowed Hosts</strong> to Dupearr&apos;s host name behind it) in Settings → General from an address
+            Dupearr trusts, or through the API with the API key (<code>PUT /api/v1/config/host</code>). In{' '}
+            <code>config.xml</code> (<code>&lt;TrustedProxies&gt;</code>, <code>&lt;AllowedHosts&gt;</code>, edited while
+            Dupearr is stopped) or with <code>DUPEARR__AUTH__TRUSTEDPROXIES</code> and{' '}
+            <code>DUPEARR__AUTH__ALLOWEDHOSTS</code> they take effect at the next start. Without them, External only
+            trusts requests that open Dupearr by its IP address or a local host name.
           </li>
           <li>
             Or switch to <strong>Forms</strong> (Dupearr&apos;s own login page) in <code>config.xml</code> or with{' '}

@@ -16,8 +16,10 @@ given here. All paths below are relative to `{UrlBase}`; a request outside the U
   `/backup/*` → `401 {"message":"Unauthorized"}`. A present but wrong API key is always a 401 (no
   other credential rescues it). With `AuthenticationMethod` `External` a request counts as
   authenticated by the reverse proxy only when its TCP peer is one of the **trusted proxies**
-  (`DUPEARR__AUTH__TRUSTEDPROXIES`) and, when **allowed hosts** are set
-  (`DUPEARR__AUTH__ALLOWEDHOSTS`), the `Host` and every `X-Forwarded-Host` is one of them; with
+  (`HostConfig.trustedProxies`: Settings → General, `<TrustedProxies>` or
+  `DUPEARR__AUTH__TRUSTEDPROXIES`) and, when **allowed hosts** are set (`allowedHosts`,
+  `<AllowedHosts>`, `DUPEARR__AUTH__ALLOWEDHOSTS`), the `Host` and every `X-Forwarded-Host` is one
+  of them; the lists take effect with the next request after a change; with
   neither list only requests that name Dupearr by a private host are trusted (like `None`, and
   `ExternalAuthCheck` warns). Other requests need a session of a local account or the API key
   (401). The webhooks always need the webhook token. With `None` only requests
@@ -85,9 +87,9 @@ given here. All paths below are relative to `{UrlBase}`; a request outside the U
     be a local address (behind NAT or Docker's userland proxy, internet clients can arrive with a
     local peer address and the public IP as `Host`).
   Opening Dupearr by a public DNS name (or a public IP) always needs a login or the API key; setup
-  must be opened by a local IP or local name (403 otherwise). Trusted proxies and allowed host
-  names can be set with `DUPEARR__AUTH__TRUSTEDPROXIES` / `DUPEARR__AUTH__ALLOWEDHOSTS`
-  (README → Known limitations). A URL base on a host name shared with other apps (path-based
+  must be opened by a local IP or local name (403 otherwise). Allowed host names
+  (`HostConfig.allowedHosts`) count as private hosts for all three, so list only names you
+  control. A URL base on a host name shared with other apps (path-based
   routing) is **not** an isolation boundary: they share the browser origin, so give Dupearr its own
   host name.
 - **Response headers**: every response carries `X-Content-Type-Options: nosniff`,
@@ -147,7 +149,7 @@ credentials through `PUT /config/host`, reveal or regenerate the API key, or dow
 | DELETE | `/api/v1/system/backup/{id}` | 200 `{}` |
 | POST | `/api/v1/system/backup/restore/{id}` | **stages** the backup for review → 200 `RestoreStaged` (nothing is replaced, no restart); 400 for an invalid archive; 404 unknown backup |
 | POST | `/api/v1/system/backup/restore/upload` | multipart `file` (a Dupearr backup `.zip`, ≤ 512 MiB) → same as above; 400 not a zip / invalid backup, 413 too large, 415 not a `.zip` file name |
-| POST | `/api/v1/system/backup/restore/confirm` | applies the staged restore: 200 `{"restartRequired":true}` then restarts; 404 when nothing is staged; 409 when the security settings (authentication, API key, account, webhook token, listener) changed since staging — the staged restore is discarded, stage it again |
+| POST | `/api/v1/system/backup/restore/confirm` | applies the staged restore: 200 `{"restartRequired":true}` then restarts; 404 when nothing is staged; 409 when the security settings (authentication, API key, account, webhook token, listener, trust lists) changed since staging — the staged restore is discarded, stage it again |
 | DELETE | `/api/v1/system/backup/restore` | discards the staged restore → 200 `{}` (a restart discards an unconfirmed one too) |
 | POST | `/api/v1/system/backup/download/{id}` | the backup zip (`Content-Disposition: attachment`, `Cache-Control: no-store`). Body `{"currentPassword"}` — required whenever a Forms account exists, however the request is authenticated (a backup holds the API key, the password hash, the webhook token and every connection secret: a session alone must never yield them); 400 on `currentPassword` when missing or wrong, 429/503 like the login; 403 while first-run setup is pending (without the API key); 404 unknown backup. Recorded in the history |
 | GET | `/backup/{type}/{name}` | zip download for **API-key** callers and instances no password protects (None/External without an account); 403 for a browser session or the local-address bypass when a Forms account exists — use `POST /api/v1/system/backup/download/{id}`. `Backup.path` names this URL |
@@ -167,8 +169,8 @@ on first use; warning when inside a library folder without a `.plexignore` "*"),
 `External`: warning when no trusted proxy is configured — any client that reaches the port directly
 is trusted —, otherwise a notice that the port must only be reachable through the authenticating
 reverse proxy), `ReverseProxyCheck` (warning: a local-network peer that is not a trusted proxy sent
-`X-Forwarded-For`/`Forwarded`/`X-Real-IP` — a reverse proxy missing from
-`DUPEARR__AUTH__TRUSTEDPROXIES`; its clients share one login-throttling limit),
+`X-Forwarded-For`/`Forwarded`/`X-Real-IP` — a reverse proxy missing from the trusted proxies; its
+clients share one login-throttling limit; it clears once that peer is trusted),
 `WebhookApiKeyCheck` (warning: a webhook authenticated with the master API key since start or the
 last key change — webhook URLs must carry the webhook token), `DiscDetectionUnavailable` (notice:
 `detectDiscs` is on, but no folder of an enabled movie library maps to a local path, so the scan
@@ -245,7 +247,27 @@ change of the username, password, API key, authentication method or requirement 
 set in `config.xml` or with `DUPEARR__AUTH__METHOD` (400 otherwise). `restartRequired` is true when
 the bind address, a port, SSL or the URL base changed.
 
-Every change of credentials, authentication, the listener or the log level (`PUT /config/host`,
+`trustedProxies` and `allowedHosts` are comma-separated lists (commas, semicolons or white space
+separate entries; responses use `", "`); `""` clears a list, an absent or `null` field keeps it.
+They count as credentials: a change needs `currentPassword` whenever a Forms account exists, and is
+refused (403) while first-run setup is pending for callers without the API key. A **changed** list
+is validated entry by entry — 400 on `trustedProxies` / `allowedHosts`, one message per invalid
+entry naming it (at most 10), and at most 100 entries: a trusted proxy is an IP address or a CIDR
+range that lies inside private space (RFC 1918, CGNAT, loopback, link-local, `fc00::/7`) or is at
+least /16 (IPv4) or /48 (IPv6); an allowed host is a host name (`*.example.com` for sub-domains, no
+wildcard over an IP address). `config.xml` and the environment use the same rule but only skip and
+log invalid entries, and an unchanged list is not validated, so an old bad entry never blocks an
+unrelated save. When a change of the lists or of `authenticationMethod` would stop trusting the
+request making it — a request trusted without a credential (`via: external`, `none` or
+`localAddress`) that the new method (`External` or `None`) with the new lists no longer trusts,
+e.g. a proxy typo, or a switch to `External` from the local-address bypass — the PUT answers 400
+on `confirmTrustChange` with an explanation naming the request's peer or host, unless
+`confirmTrustChange: true` is sent; API-key and session requests never depend on the lists. A
+change takes effect with the next request (`restartRequired` stays false); open event streams
+re-authenticate (those no longer trusted end), and a `CheckHealth` is queued.
+
+Every change of credentials, authentication, the reverse-proxy trust lists, the listener or the
+log level (`PUT /config/host`,
 the API key and webhook token endpoints, *log out all sessions*), of the removal settings (`PUT
 /config/settings`: dry run, mode, deletion methods, recycle bin, limits, disc settings, history
 retention …), of media servers, applications, libraries, path mappings and notification
@@ -287,12 +309,13 @@ it is moved to the recycle bin as a whole by the filesystem method), `keepPlayab
 HostConfig = { bindAddress, port, urlBase, enableSsl, sslPort, sslCertPath, sslKeyPath, apiKey,
   authenticationMethod:"None"|"Forms"|"External",
   authenticationRequired:"Enabled"|"DisabledForLocalAddresses",
+  trustedProxies: string /* IPs / CIDR ranges, "a, b" */, allowedHosts: string /* host names, "a, b" */,
   username, password /* write-only, masked */, passwordConfirmation /* write-only */,
   logLevel:"trace"|"debug"|"info"|"warn"|"error", logSizeLimit, instanceName, launchBrowser, branch,
   envOverrides: string[] /* read-only: HostConfig fields forced by DUPEARR__ env vars */,
   restartRequired?: boolean /* PUT response only */,
   webhookToken /* read-only: the credential of the webhook URLs */,
-  currentPassword?, keepApiKey? /* write-only */ }
+  currentPassword?, keepApiKey?, confirmTrustChange? /* write-only */ }
 ```
 
 ## Media servers & libraries

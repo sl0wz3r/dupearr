@@ -21,6 +21,8 @@ const mocks = vi.hoisted(() => ({
   gets: [] as string[],
   updateHostCalls: [] as unknown[],
   updateHostResult: undefined as unknown,
+  /** Thrown by the next host PUTs, in order (then they succeed). */
+  updateHostErrors: [] as unknown[],
   updateSettingsCalls: [] as unknown[],
   /** Thrown by the settings PUT when set. */
   updateSettingsError: undefined as unknown,
@@ -55,6 +57,8 @@ vi.mock('@/api/hooks/useSettings', () => ({
     isPending: false,
     mutateAsync: async (body: unknown) => {
       mocks.updateHostCalls.push(body);
+      const error = mocks.updateHostErrors.shift();
+      if (error) throw error;
       return mocks.updateHostResult ?? body;
     },
   }),
@@ -115,6 +119,8 @@ const HOST: HostConfig = {
   apiKey: MASKED_SECRET,
   authenticationMethod: 'Forms',
   authenticationRequired: 'Enabled',
+  trustedProxies: '',
+  allowedHosts: '',
   username: 'admin',
   password: MASKED_SECRET,
   logLevel: 'info',
@@ -166,6 +172,7 @@ beforeEach(() => {
   mocks.gets = [];
   mocks.updateHostCalls = [];
   mocks.updateHostResult = undefined;
+  mocks.updateHostErrors = [];
   mocks.updateSettingsCalls = [];
   mocks.updateSettingsError = undefined;
   mocks.regenerateCalls = 0;
@@ -535,5 +542,165 @@ describe('GeneralPage — saving', () => {
     expect(mocks.regeneratePasswords).toEqual(['secret']);
     // The new key is shown once (the web UI itself does not use it).
     expect(screen.getByLabelText('API key')).toHaveValue('new-key-ffffffffffffffffffffffff');
+  });
+});
+
+// Issue #1: the reverse-proxy trust lists in Settings → General.
+describe('GeneralPage — trusted proxies and allowed hosts', () => {
+  const EXTERNAL: HostConfig = { ...HOST, authenticationMethod: 'External', username: '', password: '' };
+
+  it('shows the lists for External and keeps them behind Advanced for Forms while empty', async () => {
+    const { unmount } = renderPage();
+    expect(screen.queryByLabelText('Trusted Proxies')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Allowed Hosts')).not.toBeInTheDocument();
+    unmount();
+
+    mocks.host = { ...HOST, allowedHosts: 'dupearr.example.com' };
+    const second = renderPage();
+    expect(screen.getByLabelText('Allowed Hosts')).toHaveValue('dupearr.example.com'); // a value shows it
+    second.unmount();
+
+    mocks.host = { ...EXTERNAL };
+    renderPage();
+    expect(screen.getByLabelText('Trusted Proxies')).toBeEnabled();
+    expect(screen.getByLabelText('Allowed Hosts')).toBeEnabled();
+    // External without a trusted proxy: the same warning as the health check.
+    expect(screen.getByText('No trusted proxy')).toBeInTheDocument();
+  });
+
+  it('drops the warning once a trusted proxy is entered', async () => {
+    const user = userEvent.setup();
+    mocks.host = { ...EXTERNAL };
+    renderPage();
+    await user.type(screen.getByLabelText('Trusted Proxies'), '172.18.0.10');
+    expect(screen.queryByText('No trusted proxy')).not.toBeInTheDocument();
+  });
+
+  it('shows a list set by an environment variable read-only', () => {
+    mocks.host = { ...EXTERNAL, trustedProxies: '172.18.0.5', envOverrides: ['trustedProxies'] };
+    renderPage();
+    const field = screen.getByLabelText('Trusted Proxies');
+    expect(field).toBeDisabled();
+    expect(field).toHaveValue('172.18.0.5');
+    expect(field).toHaveAttribute('title', 'Set by DUPEARR__AUTH__TRUSTEDPROXIES');
+    expect(screen.getAllByText('Set by environment variable')).toHaveLength(1);
+    expect(screen.getByLabelText('Allowed Hosts')).toBeEnabled();
+  });
+
+  it('asks for the current password to change a list when a Forms account exists', async () => {
+    const user = userEvent.setup();
+    mocks.host = { ...HOST, trustedProxies: '172.18.0.5' };
+    renderPage();
+    expect(screen.queryByLabelText('Current Password')).not.toBeInTheDocument();
+    const field = screen.getByLabelText('Trusted Proxies');
+    await user.clear(field);
+    await user.type(field, '172.18.0.6');
+    await user.click(saveButton());
+    expect(screen.getByText(/Enter your current password to change .*reverse-proxy settings/)).toBeInTheDocument();
+    expect(mocks.updateHostCalls).toHaveLength(0);
+    await user.type(screen.getByLabelText('Current Password'), 'pw');
+    await user.click(saveButton());
+    await waitFor(() => expect(mocks.updateHostCalls).toHaveLength(1));
+    expect(mocks.updateHostCalls[0]).toMatchObject({ trustedProxies: '172.18.0.6', currentPassword: 'pw' });
+    expect('confirmTrustChange' in (mocks.updateHostCalls[0] as object)).toBe(false);
+  });
+
+  it("shows the server's refusal of an entry under the field", async () => {
+    const user = userEvent.setup();
+    const { ApiError } = await import('@/api/client');
+    mocks.host = { ...EXTERNAL };
+    mocks.updateHostErrors = [
+      new ApiError('Validation failed', {
+        status: 400,
+        validationErrors: [
+          {
+            propertyName: 'trustedProxies',
+            errorMessage: '"0.0.0.0/0" is too wide: outside private address space a range must be at least /16 (IPv4) or /48 (IPv6)',
+          },
+        ],
+      }),
+    ];
+    renderPage();
+    await user.type(screen.getByLabelText('Trusted Proxies'), '0.0.0.0/0');
+    await user.click(saveButton());
+    expect(await screen.findByText(/"0.0.0.0\/0" is too wide/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Trusted Proxies')).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('offers to confirm a change that would stop trusting this browser, and sends the confirmation', async () => {
+    const user = userEvent.setup();
+    const { ApiError } = await import('@/api/client');
+    const warning =
+      'This request comes from 172.18.0.9, which is not one of the trusted proxies: with External authentication Dupearr stops trusting this browser as soon as you save.';
+    mocks.host = { ...EXTERNAL, trustedProxies: '172.18.0.9' };
+    mocks.updateHostErrors = [
+      new ApiError('Validation failed', {
+        status: 400,
+        validationErrors: [{ propertyName: 'confirmTrustChange', errorMessage: warning }],
+      }),
+    ];
+    renderPage();
+    expect(screen.queryByLabelText(/Save this change anyway/)).not.toBeInTheDocument();
+    const field = screen.getByLabelText('Trusted Proxies');
+    await user.clear(field);
+    await user.type(field, '172.18.0.10');
+    await user.click(saveButton());
+    const confirm = await screen.findByLabelText(/Save this change anyway/);
+    // The server's explanation (it names the peer about to be locked out) is announced, and the
+    // save bar says where to confirm instead of pointing at highlighted fields there are none of.
+    expect(screen.getByText(warning).closest('[role="alert"]')).not.toBeNull();
+    expect(screen.getByText(/This change stops trusting this browser: confirm it under Security/)).toBeInTheDocument();
+    expect(screen.queryByText('Please correct the highlighted fields.')).not.toBeInTheDocument();
+    expect(mocks.updateHostCalls).toHaveLength(1);
+    expect('confirmTrustChange' in (mocks.updateHostCalls[0] as object)).toBe(false);
+
+    await user.click(confirm);
+    await user.click(saveButton());
+    await waitFor(() => expect(mocks.updateHostCalls).toHaveLength(2));
+    expect(mocks.updateHostCalls[1]).toMatchObject({ trustedProxies: '172.18.0.10', confirmTrustChange: true });
+    // Saved: the confirmation is gone and is never sent again.
+    await waitFor(() => expect(screen.queryByLabelText(/Save this change anyway/)).not.toBeInTheDocument());
+  });
+
+  it('drops a confirmation once the lists are edited again', async () => {
+    const user = userEvent.setup();
+    const { ApiError } = await import('@/api/client');
+    mocks.host = { ...EXTERNAL, trustedProxies: '172.18.0.9' };
+    mocks.updateHostErrors = [
+      new ApiError('Validation failed', {
+        status: 400,
+        validationErrors: [{ propertyName: 'confirmTrustChange', errorMessage: 'This request comes from 172.18.0.9.' }],
+      }),
+    ];
+    renderPage();
+    const field = screen.getByLabelText('Trusted Proxies');
+    await user.clear(field);
+    await user.type(field, '172.18.0.10');
+    await user.click(saveButton());
+    await user.click(await screen.findByLabelText(/Save this change anyway/));
+    // A typo made after confirming must reach the server's check again, not a stale confirmation.
+    await user.type(field, '1');
+    expect(screen.queryByLabelText(/Save this change anyway/)).not.toBeInTheDocument();
+    await user.click(saveButton());
+    await waitFor(() => expect(mocks.updateHostCalls).toHaveLength(2));
+    expect(mocks.updateHostCalls[1]).toMatchObject({ trustedProxies: '172.18.0.101' });
+    expect('confirmTrustChange' in (mocks.updateHostCalls[1] as object)).toBe(false);
+  });
+
+  it('shows the allowed hosts set by an environment variable read-only', () => {
+    mocks.host = { ...EXTERNAL, allowedHosts: 'dupearr.example.com', envOverrides: ['allowedHosts'] };
+    renderPage();
+    const field = screen.getByLabelText('Allowed Hosts');
+    expect(field).toBeDisabled();
+    expect(field).toHaveValue('dupearr.example.com');
+    expect(field).toHaveAttribute('title', 'Set by DUPEARR__AUTH__ALLOWEDHOSTS');
+    expect(screen.getByLabelText('Trusted Proxies')).toBeEnabled();
+  });
+
+  it('warns about the allowed hosts when External has no trusted proxy', () => {
+    mocks.host = { ...EXTERNAL, allowedHosts: 'dupearr.example.com' };
+    renderPage();
+    expect(screen.getByText(/names one of the allowed hosts \(any client can send that host name\)/)).toBeInTheDocument();
+    expect(screen.queryByText(/addresses it by an IP address/)).not.toBeInTheDocument();
   });
 });

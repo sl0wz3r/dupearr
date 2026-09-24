@@ -182,23 +182,27 @@ location /dupearr/ {
 
 Caddy (`reverse_proxy dupearr:3873`) and Traefik stream SSE without extra settings.
 
-**Tell Dupearr which proxy to trust.** Set `DUPEARR__AUTH__TRUSTEDPROXIES` to the proxy's address
-as Dupearr sees it — on a user-defined Docker network that is the proxy container's IP (give it a
-fixed one), **not** the network gateway (clients of published ports can arrive with the gateway's
-address). Dupearr then
+**Tell Dupearr which proxy to trust.** Set *Trusted Proxies* in *Settings → General* (or
+`DUPEARR__AUTH__TRUSTEDPROXIES`, which then overrides the field) to the proxy's address as Dupearr
+sees it — on a user-defined Docker network that is the proxy container's IP (give it a fixed one),
+**not** the network gateway (clients of published ports can arrive with the gateway's address).
+Dupearr then
 believes the client address in the proxy's `X-Forwarded-For` (per-client login throttling, logs,
 local-address checks); without it, all clients behind the proxy share one throttling limit and
 *System → Status* shows a `ReverseProxyCheck` warning. The proxy must set or append
-`X-Forwarded-For` (as above), `X-Forwarded-Proto` and pass `Host`. Optionally set
-`DUPEARR__AUTH__ALLOWEDHOSTS=dupearr.example.com`. Prefer a **dedicated host name** over a URL base
+`X-Forwarded-For` (as above), `X-Forwarded-Proto` and pass `Host`. Optionally set *Allowed Hosts*
+(`dupearr.example.com`; or `DUPEARR__AUTH__ALLOWEDHOSTS`). Prefer a **dedicated host name** over a URL base
 on a host shared with other apps: apps on one host name share the browser origin. Set HSTS on the
 proxy, not in Dupearr.
 
 **External authentication.** If your proxy already authenticates users (Authelia, Authentik, …)
-you can set `DUPEARR__AUTH__METHOD=External`. Dupearr then trusts only requests whose TCP peer is
-one of the trusted proxies, so `DUPEARR__AUTH__TRUSTEDPROXIES` is required in practice (without it
-any client that reaches the port directly and uses an IP address or local host name gets full
-access, and `ExternalAuthCheck` warns). Do not publish Dupearr's port at all: put it only on the
+you can choose *External* in *Settings → General* (or set `DUPEARR__AUTH__METHOD=External`).
+Dupearr then trusts only requests whose TCP peer is one of the trusted proxies, so trusted proxies
+are required in practice (without them any client that reaches the port directly and uses an IP
+address or local host name gets full access, and `ExternalAuthCheck` warns). Set them first, while
+you still reach Dupearr directly: with *External* there is no login page to fall back on (the
+[recovery steps](configuration.md#trusted-proxies-and-allowed-hosts) help if a wrong list locks you
+out). Do not publish Dupearr's port at all: put it only on the
 proxy's Docker network. See the [deployment hardening guide](../SECURITY.md#deployment-hardening-guide).
 
 ## Updating and maintenance
@@ -221,7 +225,9 @@ docker exec -it dupearr dupearr reset-auth && docker restart dupearr   # forgot 
 ```
 
 `reset-auth` also replaces the API key, the webhook token and the session signing key (update your
-scripts and the webhook URLs in Radarr/Sonarr/Plex afterwards). After the restart, read the new
+scripts and the webhook URLs in Radarr/Sonarr/Plex afterwards), and clears the trusted proxies and
+allowed hosts in `config.xml` (not while `DUPEARR__AUTH__METHOD` keeps External: without them
+External would trust anyone on the network). After the restart, read the new
 setup code with `docker logs dupearr`.
 
 Backups: *System → Backup* (scheduled weekly, kept 28 days by default) or copy the `/config`

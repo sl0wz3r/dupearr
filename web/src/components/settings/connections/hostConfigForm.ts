@@ -8,7 +8,7 @@ import { isMaskedSecret, type FieldErrors } from './connectionUtils';
 
 export type HostField = Exclude<
   keyof HostConfig,
-  'envOverrides' | 'restartRequired' | 'webhookToken' | 'currentPassword' | 'keepApiKey'
+  'envOverrides' | 'restartRequired' | 'webhookToken' | 'currentPassword' | 'keepApiKey' | 'confirmTrustChange'
 >;
 
 /** Every editable HostConfig property (JSON names). */
@@ -23,6 +23,8 @@ export const HOST_FIELDS: readonly HostField[] = [
   'apiKey',
   'authenticationMethod',
   'authenticationRequired',
+  'trustedProxies',
+  'allowedHosts',
   'username',
   'password',
   'passwordConfirmation',
@@ -45,6 +47,8 @@ const ENV_VAR_FIELDS: Record<string, HostField> = {
   auth__apikey: 'apiKey',
   auth__method: 'authenticationMethod',
   auth__required: 'authenticationRequired',
+  auth__trustedproxies: 'trustedProxies',
+  auth__allowedhosts: 'allowedHosts',
   log__level: 'logLevel',
   log__sizelimit: 'logSizeLimit',
   app__instancename: 'instanceName',
@@ -131,18 +135,39 @@ export function passwordChanged(values: Pick<HostConfig, 'password'>, server: Pi
   return (values.password ?? '') !== (server.password ?? '');
 }
 
-type CredentialFields = Pick<HostConfig, 'username' | 'password' | 'authenticationMethod' | 'authenticationRequired'>;
+/**
+ * A trust list (trusted proxies, allowed hosts) as the server stores what the form sends: trimmed
+ * (hostConfigPayload), then split at exactly the separators of the server's config.SplitList
+ * (comma, semicolon, space, tab, CR, LF — not every Unicode space, which `\s` would match) and
+ * joined by ", ". The entries themselves are checked by the server only, so the rule (e.g. the /16
+ * and /48 minimum outside private space) cannot drift.
+ */
+export function normalizeTrustList(value: string | null | undefined): string {
+  return (value ?? '')
+    .trim()
+    .split(/[,; \t\r\n]+/)
+    .filter(Boolean)
+    .join(', ');
+}
+
+type CredentialFields = Pick<
+  HostConfig,
+  'username' | 'password' | 'authenticationMethod' | 'authenticationRequired' | 'trustedProxies' | 'allowedHosts'
+>;
 
 /**
- * Whether the form changes a credential (username, password, authentication method or requirement):
- * the server then requires the current password whenever a Forms account exists (currentPassword).
+ * Whether the form changes a credential (username, password, authentication method or requirement,
+ * or a reverse-proxy trust list, which widens whom Dupearr trusts): the server then requires the
+ * current password whenever a Forms account exists (currentPassword).
  */
 export function credentialChanged(values: CredentialFields, server: CredentialFields): boolean {
   return (
     passwordChanged(values, server) ||
     (values.username ?? '').trim() !== (server.username ?? '') ||
     values.authenticationMethod !== server.authenticationMethod ||
-    values.authenticationRequired !== server.authenticationRequired
+    values.authenticationRequired !== server.authenticationRequired ||
+    normalizeTrustList(values.trustedProxies) !== normalizeTrustList(server.trustedProxies) ||
+    normalizeTrustList(values.allowedHosts) !== normalizeTrustList(server.allowedHosts)
   );
 }
 
@@ -210,6 +235,8 @@ export function hostConfigPayload(values: HostConfig, server: HostConfig): HostC
     username: (values.username ?? '').trim(),
     sslCertPath: (values.sslCertPath ?? '').trim(),
     sslKeyPath: (values.sslKeyPath ?? '').trim(),
+    trustedProxies: (values.trustedProxies ?? '').trim(),
+    allowedHosts: (values.allowedHosts ?? '').trim(),
   };
   delete out.restartRequired;
   if (!passwordChanged(values, server)) {
@@ -226,5 +253,6 @@ export function stripTransient(cfg: HostConfig, previous?: HostConfig): HostConf
   delete out.passwordConfirmation;
   delete out.currentPassword;
   delete out.keepApiKey;
+  delete out.confirmTrustChange;
   return out;
 }

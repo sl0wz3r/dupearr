@@ -50,6 +50,11 @@ describe('<LoginPage>', () => {
     setup([{ setupRequired: false, authenticationMethod: 'External', authenticated: false }]);
     expect(await screen.findByRole('heading', { name: 'Open Dupearr through your reverse proxy' })).toBeInTheDocument();
     expect(screen.getByText('DUPEARR__AUTH__TRUSTEDPROXIES')).toBeInTheDocument();
+    // Issue #1: the lists are set in Settings → General (or config.xml), not only in the environment.
+    expect(screen.getByText(/in Settings → General from an address Dupearr trusts, or through the API with the API key/)).toBeInTheDocument();
+    expect(screen.getByText('PUT /api/v1/config/host')).toBeInTheDocument(); // the web UI never sends the API key
+    expect(screen.getByText('<TrustedProxies>')).toBeInTheDocument();
+    expect(screen.getAllByText('config.xml').length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: /continue/i })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Check Again' })).toBeInTheDocument();
   });

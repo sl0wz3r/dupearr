@@ -234,14 +234,14 @@ public ntfy server use a long, random topic, and keep *Include File Paths* off.
 
 ## General: host, security, logging, backups
 
-*Settings → General* edits `config.xml` (port, bind address, URL base, SSL, authentication, API
-key, log level, instance name) and the backup schedule. Changes to port, bind address, SSL or URL
-base need a restart (the UI offers it). Fields forced by environment variables are shown
-read-only.
+*Settings → General* edits `config.xml` (port, bind address, URL base, SSL, authentication,
+trusted proxies and allowed hosts, API key, log level, instance name) and the backup schedule.
+Changes to port, bind address, SSL or URL base need a restart (the UI offers it). Fields forced by
+environment variables are shown read-only.
 
 - **Authentication:** *Forms* (login page, default) or *External* (a reverse proxy authenticates;
-  Dupearr then trusts requests whose TCP peer is one of the **trusted proxies** —
-  `DUPEARR__AUTH__TRUSTEDPROXIES`, see below —, so set that and make Dupearr reachable exclusively
+  Dupearr then trusts requests whose TCP peer is one of the **trusted proxies** — see
+  [below](#trusted-proxies-and-allowed-hosts) —, so set them and make Dupearr reachable exclusively
   through the proxy; without trusted proxies it trusts any request that opens it by an IP address
   or local host name and *System → Status* warns; webhooks still need the webhook token). *Authentication required* can be relaxed to
   *Disabled for local addresses* (private/LAN client addresses skip the login when they open
@@ -257,13 +257,20 @@ read-only.
   *Settings → General* until you enter your current password (**Show Key**); **Regenerate** it
   (password required) if it leaked. Changing the password replaces the API key too unless you tick
   *Keep the current API key*. Scripts that change credentials must send `currentPassword`.
+- **Trusted proxies and allowed hosts:** see [below](#trusted-proxies-and-allowed-hosts). They are
+  shown for *External*, or once they hold a value; otherwise under *Show Advanced*.
 - **Webhook token:** the credential of the [webhook URLs](webhooks.md); it can only queue scans.
-- **Current password:** changing the username, password, authentication method or requirement
-  asks for your current password. **Log out all other sessions** signs out every other browser.
+- **Current password:** changing the username, password, authentication method or requirement,
+  or the trusted proxies or allowed hosts, asks for your current password (whenever a Forms account
+  exists, also for scripts using the API key). **Log out all other sessions** signs out every other
+  browser.
 - **Recovery:** `dupearr reset-auth` (with Dupearr stopped; in Docker
-  `docker exec dupearr dupearr reset-auth`, then restart) deletes the account and replaces the API
-  key, the webhook token and the session key, and requires authentication for every address again.
-  Update your scripts and webhook URLs afterwards; the new setup code is printed in the log.
+  `docker exec dupearr dupearr reset-auth`, then restart) deletes the account, replaces the API
+  key, the webhook token and the session key, clears the trusted proxies and allowed hosts in
+  `config.xml` (it keeps the lists that environment variables keep in force: both under *External*,
+  the trusted proxies under *Disabled for Local Addresses*), and requires authentication for every
+  address again. Update your scripts and webhook
+  URLs afterwards; the new setup code is printed in the log.
 - **Logging:** *System → Log Files* shows `logs/dupearr.txt` and rotations; *System → Events*
   shows recent entries. Use `debug` or `trace` temporarily when reporting a problem; secrets are
   redacted.
@@ -273,7 +280,9 @@ read-only.
   A backup is a zip of `config.xml` + `dupearr.db`. Restore from the list or upload a zip:
   Dupearr validates and stages it and shows what it changes (deletion settings, connections, path
   mappings, …) before you confirm; then it restarts. Your authentication, API key, account, webhook
-  token and listener are kept, queued removals are cancelled, and **dry run stays on** after a
+  token and listener are kept (the trusted proxies and allowed hosts are never restored, not even
+  when you choose to restore the security settings), queued removals are cancelled, and **dry run
+  stays on** after a
   restore until you turn it off. Treat backup files as credentials: they contain the connection
   tokens and API keys (and backups made by earlier development builds also the session signing
   key, which Dupearr therefore replaces once when it starts with this version — everyone signs in
@@ -297,19 +306,58 @@ to the file). Empty values count as unset. Write values exactly as shown (for ex
 | `DUPEARR__AUTH__APIKEY` | `ApiKey` | generated (32 hex) |
 | `DUPEARR__AUTH__METHOD` | `AuthenticationMethod` | `Forms` (`Forms`, `External`, `None`) |
 | `DUPEARR__AUTH__REQUIRED` | `AuthenticationRequired` | `Enabled` (or `DisabledForLocalAddresses`) |
+| `DUPEARR__AUTH__TRUSTEDPROXIES` | `TrustedProxies` | *(empty)*: IP addresses / CIDR ranges of your reverse proxies, comma-separated (see below) |
+| `DUPEARR__AUTH__ALLOWEDHOSTS` | `AllowedHosts` | *(empty)*: host names Dupearr is reached by (`dupearr.example.com`, `*.example.com`) |
 | `DUPEARR__LOG__LEVEL` | `LogLevel` | `info` (`trace`, `debug`, `info`, `warn`, `error`) |
 | `DUPEARR__LOG__SIZELIMIT` | `LogSizeLimit` | `1` (MB per file) |
 | `DUPEARR__APP__INSTANCENAME` | `InstanceName` | `Dupearr` |
-| `DUPEARR__AUTH__TRUSTEDPROXIES` | — (environment only) | *(empty)*: IP addresses / CIDR ranges of your reverse proxies, comma-separated. A range must lie inside private space (e.g. `172.16.0.0/12`, `10.0.0.0/8`, `fd00::/8`) or be at least /16 (IPv4) or /48 (IPv6); wider public ranges are refused and logged |
-| `DUPEARR__AUTH__ALLOWEDHOSTS` | — (environment only) | *(empty)*: host names Dupearr is reached by (`dupearr.example.com`, `*.example.com`) |
+
+### Trusted proxies and allowed hosts
+
+Set them in *Settings → General* (*Trusted Proxies*, *Allowed Hosts*), as `<TrustedProxies>` and
+`<AllowedHosts>` in `config.xml`, or with `DUPEARR__AUTH__TRUSTEDPROXIES` and
+`DUPEARR__AUTH__ALLOWEDHOSTS`. Entries are separated by commas (semicolons and spaces work too).
+A change in *Settings → General* takes effect with the next request, without a restart;
+`config.xml` and the environment are read when Dupearr starts. An environment variable wins over
+`config.xml` and makes the field read-only in the UI: to manage a list in the UI, remove the
+variable (or leave it empty — an empty value counts as unset, so the environment cannot clear a
+list).
 
 **Trusted proxies** decide whose forwarding headers (`X-Forwarded-For`, `Forwarded`, `X-Real-IP`,
 `X-Forwarded-Proto`) Dupearr believes: the real client address for login throttling, logs and the
 *Disabled for local addresses* check, and — with *External* authentication — which requests were
 authenticated by the proxy. Use the address Dupearr sees the proxy at (its container IP on a
-user-defined Docker network, not the gateway). **Allowed hosts** additionally restrict *External*
-to those names and count as local names for *None* and the local-address check. Invalid entries are
-ignored and logged. See the [deployment hardening guide](../SECURITY.md#deployment-hardening-guide).
+user-defined Docker network, not the gateway). A range must lie inside private space (e.g.
+`172.16.0.0/12`, `10.0.0.0/8`, `fd00::/8`) or be at least /16 (IPv4) or /48 (IPv6); wider public
+ranges are refused. **Allowed hosts** additionally restrict *External* to those names and count as
+local names for *None* and the local-address check, so list only names you control.
+
+*Settings → General* refuses an invalid entry and names it; in `config.xml` or the environment an
+invalid entry is ignored and logged, and the valid ones still apply, so a typo never stops Dupearr
+from starting. Changing either list asks for your current password when a Forms account exists.
+When a change would stop trusting the browser you make it from (with *External*, a list that no
+longer names the proxy it came through or the host name it used, or a switch to *External* from a
+browser the lists do not cover; with *None*, an allowed host it used), Dupearr explains why and
+saves only once you tick *Save this change anyway*. See the
+[deployment hardening guide](../SECURITY.md#deployment-hardening-guide).
+
+If a wrong list locked you out (with *External* there is no login page to fall back on), any of
+these restores access:
+
+1. Set `DUPEARR__AUTH__TRUSTEDPROXIES` and/or `DUPEARR__AUTH__ALLOWEDHOSTS` to the right value and
+   restart: the environment wins over `config.xml`.
+2. Stop Dupearr, correct or empty `<TrustedProxies>` and `<AllowedHosts>` in `config.xml`, then
+   start it. (A running Dupearr reads the file only at start and rewrites it on every save.)
+3. Send the API key (`<ApiKey>` in `config.xml`): the lists never affect requests with the
+   `X-Api-Key` header, so `PUT /api/v1/config/host` with `{"trustedProxies": "…"}` (plus
+   `currentPassword` when a Forms account exists) fixes them.
+4. Run `dupearr reset-auth`: Forms authentication, lists cleared, a new setup code. While
+   `DUPEARR__AUTH__METHOD` keeps *External* it keeps the lists instead (without them *External*
+   would trust anyone on the network) and says so: use steps 1–3.
+5. Or set `DUPEARR__AUTH__METHOD=Forms` and restart: Dupearr's own login page (or, without an
+   account, first-run setup) replaces the proxy. First-run setup only accepts a local client, so if
+   a trusted-proxy range covers your own computer's address, correct the list first (steps 1–3) or
+   use step 4.
 
 Container-only variables (handled by the image's entrypoint, not by Dupearr):
 

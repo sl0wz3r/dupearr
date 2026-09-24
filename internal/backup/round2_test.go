@@ -39,8 +39,8 @@ func stageArchive(t *testing.T, f *fixture, cfg, db []byte) *RestoreSummary {
 }
 
 // r2-data-files#5: config.xml elements this build does not know are never adopted from an
-// archive (a later build could read them — a trust list — without any review); the live file's
-// own unknown elements are kept.
+// archive (a later build could read them — a security setting — without any review); the live
+// file's own unknown elements are kept.
 func TestRestoreNeverAdoptsUnknownConfigElements(t *testing.T) {
 	f := newFixture(t)
 	cfg, db := validParts(t, f)
@@ -52,8 +52,8 @@ func TestRestoreNeverAdoptsUnknownConfigElements(t *testing.T) {
 	if err := os.WriteFile(f.cfg.Path(), live, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg = bytes.Replace(cfg, []byte("</Config>"), []byte(`  <TrustedProxies>0.0.0.0/0</TrustedProxies>
-  <AllowedHosts>*.attacker.example</AllowedHosts>
+	cfg = bytes.Replace(cfg, []byte("</Config>"), []byte(`  <FutureTrustList>0.0.0.0/0</FutureTrustList>
+  <FutureHostList>*.attacker.example</FutureHostList>
   <!-- planted -->
   <InstanceName>ignored duplicate</InstanceName>
 </Config>`), 1)
@@ -63,7 +63,7 @@ func TestRestoreNeverAdoptsUnknownConfigElements(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, bad := range []string{"TrustedProxies", "AllowedHosts", "attacker", "planted"} {
+	for _, bad := range []string{"FutureTrustList", "FutureHostList", "0.0.0.0/0", "attacker", "planted"} {
 		if bytes.Contains(staged, []byte(bad)) {
 			t.Fatalf("the staged config.xml adopted %q from the archive:\n%s", bad, staged)
 		}
@@ -87,8 +87,76 @@ func TestRestoreNeverAdoptsUnknownConfigElements(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Contains(after, []byte("TrustedProxies")) {
-		t.Fatalf("the live config.xml now carries <TrustedProxies> from the archive:\n%s", after)
+	if bytes.Contains(after, []byte("FutureTrustList")) {
+		t.Fatalf("the live config.xml now carries <FutureTrustList> from the archive:\n%s", after)
+	}
+}
+
+// Issue #1: the reverse-proxy trust lists are never restored, even with the security settings: a
+// widened list would trust whoever planted it, and an archive without the lists (an older build's)
+// must not clear them and lock out an External setup. The summary shows them as kept, and a change
+// of them between staging and confirming makes the staged restore stale.
+func TestRestoreNeverRestoresTrustLists(t *testing.T) {
+	const liveProxies, liveHosts = "172.18.0.5", "dupearr.example.com"
+	f := newFixture(t)
+	if _, err := f.cfg.Update(func(c *config.Config) { c.TrustedProxies, c.AllowedHosts = liveProxies, liveHosts }); err != nil {
+		t.Fatal(err)
+	}
+	cfg, db := validParts(t, f)
+	planted := bytes.Replace(cfg, []byte("<TrustedProxies>"+liveProxies+"</TrustedProxies>"),
+		[]byte("<TrustedProxies>10.0.0.0/8</TrustedProxies>"), 1)
+	planted = bytes.Replace(planted, []byte("<AllowedHosts>"+liveHosts+"</AllowedHosts>"),
+		[]byte("<AllowedHosts>*.attacker.example</AllowedHosts>"), 1)
+	if bytes.Equal(planted, cfg) {
+		t.Fatalf("test setup: the archive holds no trust lists:\n%s", cfg)
+	}
+	// An older build's archive has no trust elements at all.
+	older := bytes.Replace(cfg, []byte("  <TrustedProxies>"+liveProxies+"</TrustedProxies>\n"), nil, 1)
+	older = bytes.Replace(older, []byte("  <AllowedHosts>"+liveHosts+"</AllowedHosts>\n"), nil, 1)
+
+	for _, tc := range []struct {
+		name        string
+		archive     []byte
+		restoreAuth bool
+		backup      string // the archive's trustedProxies, as the summary shows it
+	}{
+		{"planted lists", planted, false, "10.0.0.0/8"},
+		{"planted lists, security settings restored", planted, true, "10.0.0.0/8"},
+		{"archive without the lists", older, false, ""},
+		{"archive without the lists, security settings restored", older, true, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			archive := makeZip(t, zipEntry{name: "config.xml", data: tc.archive}, zipEntry{name: "dupearr.db", data: db})
+			sum, err := f.svc.StageRestoreUpload(context.Background(), bytes.NewReader(archive), int64(len(archive)),
+				RestoreOptions{RestoreSecuritySettings: tc.restoreAuth})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := stagedConfig(t, f); got.TrustedProxies != liveProxies || got.AllowedHosts != liveHosts {
+				t.Fatalf("staged lists = %q / %q, want the live ones", got.TrustedProxies, got.AllowedHosts)
+			}
+			for _, name := range []string{"trustedProxies", "allowedHosts"} {
+				c := changeOf(sum, name)
+				if c == nil || c.Applied || !strings.Contains(c.Message, "never restored") {
+					t.Fatalf("%s change = %+v, want it kept with a message", name, c)
+				}
+			}
+			if c := changeOf(sum, "trustedProxies"); c.Current != liveProxies || c.Backup != tc.backup {
+				t.Errorf("trustedProxies change = %+v, want %q kept over %q", c, liveProxies, tc.backup)
+			}
+			if err := f.svc.DiscardRestore(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+
+	// A trust change after staging makes the staged restore stale.
+	stageArchive(t, f, planted, db)
+	if _, err := f.cfg.Update(func(c *config.Config) { c.TrustedProxies = "172.18.0.6" }); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.ConfirmRestore(context.Background()); !errors.Is(err, ErrStaleRestore) {
+		t.Fatalf("confirm after a trusted-proxy change: %v, want ErrStaleRestore", err)
 	}
 }
 

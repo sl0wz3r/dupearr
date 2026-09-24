@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/sl0wz3r/dupearr/internal/auth"
 	"github.com/sl0wz3r/dupearr/internal/config"
 	"github.com/sl0wz3r/dupearr/internal/database"
 )
@@ -101,5 +104,133 @@ func TestResetAuthReportsEnvironmentAPIKey(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "NOT replaced") {
 		t.Fatalf("output = %q", out.String())
+	}
+}
+
+// Issue #1: reset-auth is the documented recovery from a lockout, including one caused by the
+// reverse-proxy trust lists (a trusted proxy covering the admin's own address makes the browser
+// non-local and blocks first-run setup), so it clears the lists in config.xml. Lists set by the
+// environment stay (the environment would override config.xml anyway) and are reported.
+func TestResetAuthClearsTrustLists(t *testing.T) {
+	t.Setenv(authMethodEnv, "")
+	dir := t.TempDir()
+	writeConfigXML(t, dir, `<Config><AuthenticationMethod>External</AuthenticationMethod>`+
+		`<TrustedProxies>192.168.1.0/24</TrustedProxies><AllowedHosts>*.attacker.example</AllowedHosts></Config>`)
+	seedUser(t, dir)
+	var out bytes.Buffer
+	if err := resetAuth(context.Background(), dir, &out); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := cfg.Get(); c.TrustedProxies != "" || c.AllowedHosts != "" {
+		t.Fatalf("lists after reset-auth = %q / %q, want empty", c.TrustedProxies, c.AllowedHosts)
+	}
+	if !strings.Contains(out.String(), "Cleared the trusted proxies and allowed hosts") {
+		t.Fatalf("output lacks the cleared lists:\n%s", out.String())
+	}
+
+	t.Setenv("DUPEARR__AUTH__TRUSTEDPROXIES", "172.18.0.5")
+	dir = t.TempDir()
+	writeConfigXML(t, dir, `<Config><TrustedProxies>10.0.0.2</TrustedProxies><AllowedHosts>dupearr.example.com</AllowedHosts></Config>`)
+	seedUser(t, dir)
+	out.Reset()
+	if err := resetAuth(context.Background(), dir, &out); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err = config.Load(dir); err != nil {
+		t.Fatal(err)
+	}
+	if f := cfg.File(); f.TrustedProxies != "10.0.0.2" || f.AllowedHosts != "" {
+		t.Fatalf("config.xml lists = %q / %q, want the env-owned one kept and the other cleared", f.TrustedProxies, f.AllowedHosts)
+	}
+	for _, want := range []string{"Cleared the allowed hosts", "set by the DUPEARR__AUTH__TRUSTEDPROXIES environment variable and were not changed"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out.String())
+		}
+	}
+}
+
+// directLANRequestStatus is what the auth middleware of the data directory dir answers to a
+// client on the LAN that opens Dupearr's port directly by its IP address (no reverse proxy).
+func directLANRequestStatus(t *testing.T, dir string) int {
+	t.Helper()
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := database.Open(context.Background(), filepath.Join(dir, dbFileName), slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	svc, err := auth.New(cfg, db, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest(http.MethodGet, "http://192.168.1.10:3873/api/v1/system/status", nil)
+	r.RemoteAddr = "192.168.1.66:50000"
+	rr := httptest.NewRecorder()
+	svc.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })).ServeHTTP(rr, r)
+	return rr.Code
+}
+
+// Issue #1: with DUPEARR__AUTH__METHOD=External, reset-auth cannot change the method, and clearing
+// the lists would make External trust every request that names Dupearr by an IP address — anyone
+// on the LAN, without credentials. So it keeps them and says why.
+func TestResetAuthKeepsTrustListsUnderEnvironmentExternal(t *testing.T) {
+	t.Setenv(authMethodEnv, "External")
+	dir := t.TempDir()
+	writeConfigXML(t, dir, `<Config><TrustedProxies>172.18.0.5</TrustedProxies><AllowedHosts>dupearr.example.com</AllowedHosts></Config>`)
+	seedUser(t, dir)
+	if code := directLANRequestStatus(t, dir); code != http.StatusUnauthorized {
+		t.Fatalf("before reset-auth: a direct LAN request got %d, want 401", code)
+	}
+	var out bytes.Buffer
+	if err := resetAuth(context.Background(), dir, &out); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := cfg.File(); f.TrustedProxies != "172.18.0.5" || f.AllowedHosts != "dupearr.example.com" {
+		t.Fatalf("config.xml lists = %q / %q, want both kept under External", f.TrustedProxies, f.AllowedHosts)
+	}
+	if code := directLANRequestStatus(t, dir); code != http.StatusUnauthorized {
+		t.Fatalf("after reset-auth: a direct LAN request got %d, want 401 (the lists must keep narrowing External)", code)
+	}
+	if s := out.String(); !strings.Contains(s, "Kept the trusted proxies and allowed hosts in config.xml: authentication stays External") ||
+		strings.Contains(s, "Cleared the") {
+		t.Fatalf("output:\n%s", s)
+	}
+}
+
+// With DUPEARR__AUTH__REQUIRED=DisabledForLocalAddresses kept by the environment, the trusted
+// proxies keep a proxy that names no client from counting as local, so they are kept; the allowed
+// hosts only widen the local check and are cleared.
+func TestResetAuthKeepsTrustedProxiesUnderEnvironmentLocalBypass(t *testing.T) {
+	t.Setenv(authMethodEnv, "")
+	t.Setenv(auth.EnvAuthRequired, "DisabledForLocalAddresses")
+	dir := t.TempDir()
+	writeConfigXML(t, dir, `<Config><TrustedProxies>172.18.0.5</TrustedProxies><AllowedHosts>*.attacker.example</AllowedHosts></Config>`)
+	seedUser(t, dir)
+	var out bytes.Buffer
+	if err := resetAuth(context.Background(), dir, &out); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := cfg.File(); f.TrustedProxies != "172.18.0.5" || f.AllowedHosts != "" {
+		t.Fatalf("config.xml lists = %q / %q, want the trusted proxies kept and the allowed hosts cleared", f.TrustedProxies, f.AllowedHosts)
+	}
+	for _, want := range []string{"Cleared the allowed hosts", "Kept the trusted proxies in config.xml: Authentication Required stays Disabled for Local Addresses"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out.String())
+		}
 	}
 }

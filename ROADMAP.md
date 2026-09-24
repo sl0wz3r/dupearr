@@ -22,7 +22,6 @@ your setup and use case to its issue (label `roadmap`), or to open a thread in D
 
 | Item | Stage | How you can help |
 |---|---|---|
-| [Trusted proxies and allowed host names in Settings](#trusted-proxies-and-allowed-host-names-in-settings) | Up next | `help wanted` |
 | [Dashboard widgets (Homepage, Homarr)](#dashboard-widgets-homepage-homarr) | Up next | `good first issue` (docs), `help wanted` |
 | [Jellyfin and Emby](#jellyfin-and-emby) | Planned | `help wanted`: research and design first |
 | [Watch-history criteria (Tautulli, Plex)](#watch-history-criteria-tautulli-plex) | Planned | `help wanted` |
@@ -37,22 +36,6 @@ your setup and use case to its issue (label `roadmap`), or to open a thread in D
 still needs a design.
 
 ---
-
-## Trusted proxies and allowed host names in Settings
-
-- **Today:** trusted reverse proxies and allowed host names can only be set with the
-  `DUPEARR__AUTH__TRUSTEDPROXIES` and `DUPEARR__AUTH__ALLOWEDHOSTS` environment variables (the
-  Unraid template has them as advanced settings). Without them, the *None* and *External*
-  authentication methods only trust requests that open Dupearr by an IP address or a local host
-  name.
-- **Goal:** the same lists in *Settings → General* and `config.xml`. Environment variables keep
-  overriding them and show as read-only in the UI, like every other override.
-- **Where:** `internal/config` (`config.xml` and environment overrides), `internal/auth`, and the
-  *Settings → General* page in `web/`.
-- **Care:** this is security-sensitive. Today's validation must stay: a range must lie inside
-  private address space or be at least /16 (IPv4) or /48 (IPv6), and wider public ranges are
-  refused. Like every authentication change, it needs a regression test (CONTRIBUTING.md, pull
-  requests, step 5).
 
 ## Dashboard widgets (Homepage, Homarr)
 

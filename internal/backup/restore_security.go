@@ -26,7 +26,10 @@ type RestoreOptions struct {
 	// URL base).
 	// Even then, a switch to authentication None or External is refused (it can only be made in
 	// Settings, config.xml or DUPEARR__AUTH__METHOD), and so is anything that would leave Forms
-	// authentication without a user (it would reopen the first-run setup to the network).
+	// authentication without a user (it would reopen the first-run setup to the network). The
+	// reverse-proxy trust lists (trusted proxies, allowed hosts) are never restored: they decide
+	// whom External trusts and which host names count as local, and a backup without them (an
+	// older build's) must not clear them either.
 	RestoreSecuritySettings bool `json:"restoreSecuritySettings"`
 }
 
@@ -58,10 +61,11 @@ type RestoreChange struct {
 
 // securityField is a config.xml setting a restore keeps unless the security settings are restored.
 type securityField struct {
-	name   string // HostConfig JSON property name
-	secret bool
-	get    func(*config.Config) string
-	set    func(dst, src *config.Config)
+	name          string // HostConfig JSON property name
+	secret        bool
+	neverRestored bool // kept even when the security settings are restored
+	get           func(*config.Config) string
+	set           func(dst, src *config.Config)
 }
 
 var securityFields = []securityField{
@@ -69,6 +73,10 @@ var securityFields = []securityField{
 		set: func(d, s *config.Config) { d.AuthenticationMethod = s.AuthenticationMethod }},
 	{name: "authenticationRequired", get: func(c *config.Config) string { return c.AuthenticationRequired },
 		set: func(d, s *config.Config) { d.AuthenticationRequired = s.AuthenticationRequired }},
+	{name: "trustedProxies", neverRestored: true, get: func(c *config.Config) string { return c.TrustedProxies },
+		set: func(d, s *config.Config) { d.TrustedProxies = s.TrustedProxies }},
+	{name: "allowedHosts", neverRestored: true, get: func(c *config.Config) string { return c.AllowedHosts },
+		set: func(d, s *config.Config) { d.AllowedHosts = s.AllowedHosts }},
 	{name: "apiKey", secret: true, get: func(c *config.Config) string { return c.ApiKey },
 		set: func(d, s *config.Config) { d.ApiKey = s.ApiKey }},
 	{name: "bindAddress", get: func(c *config.Config) string { return c.BindAddress },
@@ -151,6 +159,12 @@ func (s *Service) planRestore(data []byte, backupUsers, liveUsers []userRow, opt
 				change.Current, change.Backup = "", ""
 				change.Message = "The backup has a different API key."
 			}
+			if f.neverRestored {
+				// A widened list would trust whoever planted it; a missing one would lock out an
+				// External setup. Only the admin sets them, in the running instance.
+				change.Applied = false
+				change.Message = "Trusted proxies and allowed hosts are never restored from a backup; set them in Settings → General."
+			}
 			if f.name == "authenticationMethod" && change.Applied {
 				switch {
 				case bak == config.AuthNone || bak == config.AuthExternal:
@@ -186,8 +200,8 @@ func (s *Service) planRestore(data []byte, backupUsers, liveUsers []userRow, opt
 	}
 	// Only the known settings come from the archive: the staged file is the live config.xml (its
 	// unknown elements and comments included) with those values. An element this build does not
-	// know is never adopted from a backup — a later build may read it (a trust list, for example)
-	// without the review securityFields gives the settings it knows.
+	// know is never adopted from a backup — a later build may read it (a security setting, for
+	// example) without the review securityFields gives the settings it knows.
 	out, err := config.RenderOnto(s.liveConfigFile(), final)
 	if err != nil {
 		return nil, fmt.Errorf("render the staged %s: %w", configFileName, err)

@@ -49,7 +49,9 @@ func RewriteFile(data []byte, fn func(c *Config)) ([]byte, Config, error) {
 //
 // Backup restores use it to stage a restored configuration without adopting anything but the known
 // settings from the archive: an element this build does not know could be one a later build reads
-// (a trust list, say) and would otherwise be adopted unreviewed.
+// (a security setting, say) and would otherwise be adopted unreviewed. (The known security
+// settings have their own restore rules; the reverse-proxy trust lists, for example, are never
+// restored.)
 func RenderOnto(base []byte, c Config) ([]byte, error) {
 	if len(base) > maxFileSize {
 		return nil, fmt.Errorf("%s is larger than %d bytes", FileName, maxFileSize)

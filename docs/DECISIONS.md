@@ -16,7 +16,8 @@ Severity key from research: C = data loss, H = wrong keeper / re-download loop.
 - Requests to paths without the configured UrlBase get **307** to `{UrlBase}{path}`
   (healthcheck/docs must include the url base).
 - *Security review (2026-09):* External only trusts requests relayed by a **trusted proxy**
-  (`DUPEARR__AUTH__TRUSTEDPROXIES`, optionally `…__ALLOWEDHOSTS`); first-run setup needs a one-time
+  (*Trusted Proxies*, optionally *Allowed Hosts*: Settings → General, `config.xml` or
+  `DUPEARR__AUTH__TRUSTEDPROXIES` / `…__ALLOWEDHOSTS`); first-run setup needs a one-time
   **setup code** from the log; sessions are revocable; the API key is never accepted in a URL and
   never handed to the browser; webhooks use a separate **webhook token**. See
   [Security review decisions](#security-review-decisions-2026-09) and `docs/SECURITY.md`.
@@ -380,8 +381,9 @@ Decisions the implementation made on top of D1–D8 (append-only; the code comme
   login page explains how to open Dupearr instead of looping. Auth classifies both the decoded
   path and the path the router matches (the stricter wins), so encoded `/` or `.` cannot reach a
   protected handler. (Superseded in part by the security review: `TrustedProxies` /
-  `AllowedHosts` now exist as environment variables, and *External* only trusts requests relayed by
-  a trusted proxy — see below.)
+  `AllowedHosts` now exist — `config.xml` settings edited in Settings → General, overridden by
+  environment variables —, and *External* only trusts requests relayed by a trusted proxy — see
+  below.)
 - **Connection re-pointing quarantine.** Changing the URL of a media server or *arr instance
   records the change, sends queued groups involving it to review (cancelling their removals) and
   refuses approvals (409) until a scan that *started* after the change re-read the ids:
@@ -520,15 +522,46 @@ Decisions taken during the full security review (report, issue ids and rationale
 - **Reverse-proxy trust (SEC-001/002/003, SEC-039, GAP-08).** `DUPEARR__AUTH__TRUSTEDPROXIES` (IP
   addresses or CIDR ranges: any range inside non-public space — RFC 1918, CGNAT, loopback,
   link-local, `fc00::/7` —, else at least /16 for IPv4 and /48 for IPv6) and `DUPEARR__AUTH__ALLOWEDHOSTS` (host names, `*.example.com`
-  wildcards); environment variables only for now (a `config.xml` / UI setting is a later
-  addition). Forwarding headers (`X-Forwarded-For`, RFC 7239 `Forwarded`, `X-Real-IP`,
+  wildcards). Since issue #1 they are the `config.xml` settings `<TrustedProxies>` /
+  `<AllowedHosts>`, edited in Settings → General; the environment variables override them like
+  every `DUPEARR__` variable (read-only in the UI; blank counts as unset). Forwarding headers (`X-Forwarded-For`, RFC 7239 `Forwarded`, `X-Real-IP`,
   `X-Forwarded-Proto` for trust) are believed only from a trusted proxy; the client is the
   right-most forwarded address that is not itself a trusted proxy. Local-address checks fail closed
   on any non-local, unknown or unparsable claim, and a trusted proxy that names no client is not
   local. *External* trusts a request only when the TCP peer is a trusted proxy (and the host is
   allowed, when allowed hosts are set); with neither list it only trusts private hosts (the `None`
   rule) and `ExternalAuthCheck` **warns**. A local peer that sends forwarding headers without being
-  trusted raises `ReverseProxyCheck`.
+  trusted raises `ReverseProxyCheck` (until that peer is trusted).
+  - *Settings / `config.xml` (issue #1).* The lists are read from the effective configuration on
+    every use, so a change takes effect with the next request (no restart); open event streams
+    re-authenticate, and those no longer trusted end. One parser decides for every source: `config.xml` and the environment stay lenient
+    (invalid entries are skipped and logged at Warn, never a reason not to start), while `PUT
+    /config/host` refuses a *changed* list with an invalid entry (400 per entry, at most 100
+    entries); an unchanged list is not re-validated, so an old bad entry never blocks an unrelated
+    save.
+  - The lists widen whom Dupearr trusts (*External* trusts the proxies they name; allowed hosts
+    count as private hosts for *None*, the local-address bypass and setup), so they are
+    **credentials**: a change needs the current password whenever a Forms account exists, and is
+    refused while first-run setup is pending (without the API key).
+  - **Lockout guard:** under *External* the login page has no form, so a wrong list locks the
+    browser out. A change of the lists or of the method that would stop trusting the request
+    making it (`auth.Service.TrustChangeProblem`) is refused (400 on `confirmTrustChange`, naming
+    the peer or host) unless `confirmTrustChange: true` is sent. That covers every caller trusted
+    without a credential (`Via external`, `none` or `localAddress`) whose new method is *External*
+    or *None*: a list typo, and a switch to *External* in the same save from the local-address
+    bypass or *None*. With *Forms* the login page remains, and API-key and session callers keep
+    their credential under every method (a session survives a switch to *External*). A
+    confirmation rather than a refusal: an admin who configures *External* from the LAN must be
+    able to give up direct access on purpose; the check catches typos.
+  - **Never restored** from a backup, even with `restoreSecuritySettings` (a widened list would
+    trust whoever planted it; an older archive without them must not clear them); shown as kept.
+  - `dupearr reset-auth` clears them in `config.xml` (not env-owned ones): it is the documented
+    recovery from every lockout, and a wrong trusted proxy can make the admin's browser non-local
+    and so block first-run setup. It never widens trust, though: where the environment keeps
+    *External* it keeps both lists (without them *External* trusts every request to an IP address
+    or local host name), and where it keeps *DisabledForLocalAddresses* it keeps the trusted
+    proxies (a trusted proxy that names no client is not local); it says so, and the lists are
+    fixed in Settings → General, `config.xml` or the environment.
 - **First-run setup code (SEC-003, SEC-036, GAP-07, GAP-10).** While setup is pending Dupearr logs a
   one-time 100-bit code (Warn, or Error when Warn is disabled) at every start; `POST
   /api/v1/auth/setup` requires it on top of the local-client and private-host rules, and it is the

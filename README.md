@@ -375,8 +375,8 @@ as unset.
 | `ApiKey` | generated | `DUPEARR__AUTH__APIKEY` | 32 hex characters |
 | `AuthenticationMethod` | `Forms` | `DUPEARR__AUTH__METHOD` | `Forms`, `External` (reverse-proxy auth) or `None` (only trusted when Dupearr is opened by an IP address or local host name) |
 | `AuthenticationRequired` | `Enabled` | `DUPEARR__AUTH__REQUIRED` | or `DisabledForLocalAddresses` |
-| — | *(empty)* | `DUPEARR__AUTH__TRUSTEDPROXIES` | environment only: your reverse proxy's IP/CIDR; its forwarding headers are believed and, with `External`, only requests it relays are trusted ([security guide](docs/SECURITY.md#deployment-hardening-guide)) |
-| — | *(empty)* | `DUPEARR__AUTH__ALLOWEDHOSTS` | environment only: host names Dupearr is reached by (`dupearr.example.com`, `*.example.com`) |
+| `TrustedProxies` | *(empty)* | `DUPEARR__AUTH__TRUSTEDPROXIES` | your reverse proxy's IP/CIDR (also *Settings → General*); its forwarding headers are believed and, with `External`, only requests it relays are trusted ([security guide](docs/SECURITY.md#deployment-hardening-guide)) |
+| `AllowedHosts` | *(empty)* | `DUPEARR__AUTH__ALLOWEDHOSTS` | host names Dupearr is reached by (`dupearr.example.com`, `*.example.com`; also *Settings → General*) |
 | `LogLevel` | `info` | `DUPEARR__LOG__LEVEL` | `trace`, `debug`, `info`, `warn`, `error` |
 | `LogSizeLimit` | `1` | `DUPEARR__LOG__SIZELIMIT` | MB per log file |
 | `InstanceName` | `Dupearr` | `DUPEARR__APP__INSTANCENAME` | shown in the UI and notifications |
@@ -390,7 +390,7 @@ as unset.
 | `PUID` / `PGID` | `1000` / `1000` | `99` / `100` | User/group Dupearr runs as; must be allowed to delete your media |
 | `UMASK` | `002` | `022` | Permissions of files Dupearr creates |
 | `TZ` | `Etc/UTC` | set by Unraid | Time zone (IANA name) |
-| `DUPEARR__AUTH__TRUSTEDPROXIES` / `…__ALLOWEDHOSTS` | *(empty)* | *Trusted proxies* / *Allowed hosts* (advanced) | Only behind a reverse proxy, see above |
+| `DUPEARR__AUTH__TRUSTEDPROXIES` / `…__ALLOWEDHOSTS` | *(empty)* | *Trusted proxies* / *Allowed hosts* (advanced) | Only behind a reverse proxy, see above; leave empty to set them in *Settings → General* instead |
 
 | Port | Use |
 |---|---|
@@ -398,8 +398,9 @@ as unset.
 | `9873/tcp` | Optional built-in HTTPS (`EnableSsl`) |
 
 Command line: `dupearr [--data DIR] [--nobrowser]`, `dupearr healthcheck`, `dupearr version`,
-`dupearr reset-auth` (forgotten password: resets to a fresh login setup and replaces the API key,
-the webhook token and the session signing key, signing every session out). More in
+`dupearr reset-auth` (forgotten password or a lockout: resets to a fresh login setup, clears the
+trusted proxies and allowed hosts unless environment variables keep External authentication, and
+replaces the API key, the webhook token and the session signing key, signing every session out). More in
 [docs/user/configuration.md](docs/user/configuration.md).
 
 ## How deletion works
@@ -495,8 +496,8 @@ Dupearr holds your Plex **owner** token and \*arr API keys and can delete media,
 an admin console:
 
 - Keep **Forms** authentication (the default). Never port-forward Dupearr's port to the internet;
-  publish it only through a reverse proxy (HTTPS, ideally its own host name) and set
-  `DUPEARR__AUTH__TRUSTEDPROXIES` to the proxy's address.
+  publish it only through a reverse proxy (HTTPS, ideally its own host name) and set *Trusted
+  Proxies* (*Settings → General*, or `DUPEARR__AUTH__TRUSTEDPROXIES`) to the proxy's address.
 - Keep **dry run** on until the results look right, and use a recycle bin.
 - Backups contain every secret — store them like passwords.
 
@@ -521,7 +522,6 @@ it plugs in, and where help is welcome.
 | Decision criteria | File attributes only (resolution, HDR, source, custom-format score, bitrate, audio, codec, size, age, language, library, patterns…). | **Watch history** criteria from Tautulli / Plex (e.g. keep the copy that is actually played, or the one with the user's progress). |
 | Dashboards | `GET /api/v1/duplicate/stats` returns the numbers (group counts, reclaimable and reclaimed space, last scan; API key required), but there is no ready-made widget. | A Homepage `customapi` example, and native **Homepage / Homarr** widgets. |
 | Languages | The web UI is in English only. | Translations (i18n). |
-| Host and proxy trust | Trusted proxies and allowed host names are set with the `DUPEARR__AUTH__TRUSTEDPROXIES` / `DUPEARR__AUTH__ALLOWEDHOSTS` environment variables only. Without them *None* and *External* only trust requests that open Dupearr by an IP address or a local host name (DNS-rebinding guard), and Dupearr's port must only be reachable through the authenticating proxy. | The same lists in *Settings → General* / `config.xml`. |
 | Shared host names | A URL base (`/dupearr`) behind a reverse proxy that serves other apps on the **same host name** (`/radarr`, `/sonarr`, …) is not an isolation boundary: they share one browser origin, so a script flaw (XSS) in any of them can act with your Dupearr session (it cannot read the API key, which the web UI never receives). | Give Dupearr its **own host name** (`dupearr.example.com`) — recommended whenever other apps share the proxy. |
 
 Ideas are welcome in

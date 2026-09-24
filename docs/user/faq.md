@@ -113,7 +113,11 @@ missing file and may download it again.
 **The setup screen says it is only available from the local network.**
 Creating the first login only works when you open Dupearr by IP address or local host name
 (`http://192.168.x.y:3873/`, `http://localhost:3873/`), not through a public domain name. Open it
-that way once, or run `dupearr reset-auth` to start over.
+that way once, or run `dupearr reset-auth` to start over. (A trusted proxy that covers your own
+computer's address also makes it count as a proxy rather than a local client; `reset-auth` clears
+the trusted proxies too, unless an environment variable keeps External authentication or
+*Disabled for Local Addresses* — then remove that range from `<TrustedProxies>` in `config.xml`
+while Dupearr is stopped.)
 
 **I forgot my password.**
 `docker exec -it dupearr dupearr reset-auth` (natively: `dupearr reset-auth --data <dir>`, as the

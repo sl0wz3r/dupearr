@@ -38,6 +38,9 @@ func (s *Server) audited(kind, title string, h http.HandlerFunc) http.HandlerFun
 	}
 }
 
+// maxAuditedList bounds a trust list recorded in the history.
+const maxAuditedList = 200
+
 // logLevelRank orders the log levels from the most to the least verbose.
 var logLevelRank = map[string]int{"trace": 0, "debug": 1, "info": 2, "warn": 3, "error": 4}
 
@@ -58,6 +61,15 @@ func (s *Server) auditHostChanges(r *http.Request, old, saved config.Config, use
 	add("enableSsl", old.EnableSsl, saved.EnableSsl)
 	add("sslPort", old.SslPort, saved.SslPort)
 	add("logLevel", old.LogLevel, saved.LogLevel)
+	// The lists are compared whole and only shown shortened: a change past the cut still counts.
+	for _, l := range []struct{ name, old, saved string }{
+		{"trustedProxies", old.TrustedProxies, saved.TrustedProxies},
+		{"allowedHosts", old.AllowedHosts, saved.AllowedHosts},
+	} {
+		if l.old != l.saved {
+			changed = append(changed, fmt.Sprintf("%s: %q → %q", l.name, truncate(l.old, maxAuditedList), truncate(l.saved, maxAuditedList)))
+		}
+	}
 	if usernameChanged {
 		changed = append(changed, "username")
 	}

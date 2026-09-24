@@ -17,9 +17,11 @@ import {
   validateHttpUrl,
 } from './connectionUtils';
 import {
+  credentialChanged,
   envOverriddenFields,
   envVarName,
   hostConfigPayload,
+  normalizeTrustList,
   stripTransient,
   validateHostConfig,
 } from './hostConfigForm';
@@ -384,6 +386,8 @@ describe('host config', () => {
     apiKey: 'server-key',
     authenticationMethod: 'Forms',
     authenticationRequired: 'Enabled',
+    trustedProxies: '',
+    allowedHosts: '',
     username: 'admin',
     password: MASKED_SECRET,
     logLevel: 'info',
@@ -401,6 +405,37 @@ describe('host config', () => {
     expect(envOverriddenFields(null).size).toBe(0);
     expect(envVarName('port')).toBe('DUPEARR__SERVER__PORT');
     expect(envVarName('username')).toBeNull();
+  });
+
+  // Issue #1: the reverse-proxy trust lists are settings like any other, overridden by
+  // DUPEARR__AUTH__TRUSTEDPROXIES / DUPEARR__AUTH__ALLOWEDHOSTS.
+  it('handles the trust lists: env overrides, credential changes, payload', () => {
+    expect([...envOverriddenFields(['trustedProxies', 'DUPEARR__AUTH__ALLOWEDHOSTS'])].sort()).toEqual([
+      'allowedHosts',
+      'trustedProxies',
+    ]);
+    expect(envVarName('trustedProxies')).toBe('DUPEARR__AUTH__TRUSTEDPROXIES');
+    expect(envVarName('allowedHosts')).toBe('DUPEARR__AUTH__ALLOWEDHOSTS');
+
+    // A list widens whom Dupearr trusts: changing it needs the current password.
+    expect(credentialChanged({ ...server, trustedProxies: '172.18.0.10' }, server)).toBe(true);
+    expect(credentialChanged({ ...server, allowedHosts: 'dupearr.example.com' }, server)).toBe(true);
+    // Only separators differ: the server stores the same list, so nothing changes.
+    const listed = { ...server, trustedProxies: '10.0.0.2, 10.0.0.3' };
+    expect(credentialChanged({ ...listed, trustedProxies: ' 10.0.0.2;10.0.0.3 ' }, listed)).toBe(false);
+    expect(normalizeTrustList('a,b; c\nd  ')).toBe('a, b, c, d');
+    expect(normalizeTrustList(null)).toBe('');
+    // Only the server's separators split entries: a non-breaking space (pasted from a web page)
+    // keeps one entry, which the server stores as a change (and refuses), so the password is asked.
+    expect(normalizeTrustList('10.0.0.1 10.0.0.2')).toBe('10.0.0.1 10.0.0.2');
+    expect(credentialChanged({ ...listed, trustedProxies: '10.0.0.2 10.0.0.3' }, listed)).toBe(true);
+
+    const payload = hostConfigPayload({ ...server, trustedProxies: ' 172.18.0.10 ', allowedHosts: ' x.example.com\n' }, server);
+    expect(payload.trustedProxies).toBe('172.18.0.10');
+    expect(payload.allowedHosts).toBe('x.example.com');
+    const stripped = stripTransient({ ...server, confirmTrustChange: true, trustedProxies: '10.0.0.2' });
+    expect('confirmTrustChange' in stripped).toBe(false);
+    expect(stripped.trustedProxies).toBe('10.0.0.2');
   });
 
   it('validates ports, SSL, url base and Forms credentials', () => {

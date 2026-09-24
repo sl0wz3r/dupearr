@@ -14,8 +14,10 @@
 //     also replaces the signing key, so a leaked key stops working too.
 //   - External: authentication is left to a reverse proxy, which is only trusted when the TCP
 //     peer is one of the TrustedProxies and/or the request names one of the AllowedHosts
-//     (network.go); without either list only requests that name this server by a private host
-//     (DNS-rebinding guard, as for None). Other requests need a session or the API key.
+//     (network.go; Settings → General, config.xml or DUPEARR__AUTH__TRUSTEDPROXIES /
+//     DUPEARR__AUTH__ALLOWEDHOSTS); without either list only requests that name this server by a
+//     private host (DNS-rebinding guard, as for None). Other requests need a session or the API
+//     key.
 //   - None: no authentication (config.xml / env only) — but only for requests that name this
 //     server by an IP literal or a private host name (IsPrivateHost), so that a DNS-rebinding page
 //     cannot use it; other requests need the API key.
@@ -229,7 +231,7 @@ func New(cfg *config.Manager, st store.Store, log *slog.Logger) (*Service, error
 		changed:     make(chan struct{}),
 	}
 	s.signing.Store(&signingState{key: key, generation: gen})
-	s.trust.source = envTrustSource()
+	s.trust.source = s.configTrustSource()
 	if s.webhookToken, err = loadWebhookToken(ctx, s); err != nil {
 		return nil, err
 	}
@@ -237,11 +239,15 @@ func New(cfg *config.Manager, st store.Store, log *slog.Logger) (*Service, error
 		if old.ApiKey != next.ApiKey {
 			s.webhookMasterUsed.Store(0) // webhook URLs with the old key stop working
 		}
+		// A trust-list change can end the trust of a reverse proxy (External) or of a host name
+		// (None, local access): open live-update streams must authenticate again.
 		if old.ApiKey != next.ApiKey || old.AuthenticationMethod != next.AuthenticationMethod ||
-			old.AuthenticationRequired != next.AuthenticationRequired || old.UrlBase != next.UrlBase {
+			old.AuthenticationRequired != next.AuthenticationRequired || old.UrlBase != next.UrlBase ||
+			old.TrustedProxies != next.TrustedProxies || old.AllowedHosts != next.AllowedHosts {
 			s.notifyCredentialsChanged()
 		}
 	})
+	s.NetworkTrust() // logs invalid config.xml or environment entries at start, not at the first request
 	if s.SetupRequired(ctx) {
 		s.setupMu.Lock()
 		s.issueSetupCodeLocked()
@@ -915,8 +921,9 @@ func (s *Service) warnExternal(r *http.Request, reason string) {
 	attrs := append(s.clientAttrs(r), "host", truncateHost(r.Host), "path", truncatePath(r.URL.Path), "reason", reason)
 	if s.externalWarned.CompareAndSwap(false, true) {
 		s.log.Warn("Refused an unauthenticated request under External authentication: the reverse proxy is only "+
-			"trusted for requests it relays. Set "+EnvTrustedProxies+" to the proxy's address (and "+EnvAllowedHosts+
-			" to the host names it serves), and make Dupearr's port reachable only through the proxy", attrs...)
+			"trusted for requests it relays. Set Trusted Proxies in Settings → General (or "+EnvTrustedProxies+") to the "+
+			"proxy's address (and Allowed Hosts, or "+EnvAllowedHosts+", to the host names it serves), and make "+
+			"Dupearr's port reachable only through the proxy", attrs...)
 		return
 	}
 	s.log.Debug("Auth-Unauthorized: External does not trust this request", attrs...)

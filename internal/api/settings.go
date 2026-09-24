@@ -30,35 +30,44 @@ const reevaluateTimeout = 30 * time.Minute
 
 // hostConfig is the HostConfig resource (config.xml + the local account).
 type hostConfig struct {
-	BindAddress            string   `json:"bindAddress"`
-	Port                   int      `json:"port"`
-	URLBase                string   `json:"urlBase"`
-	EnableSsl              bool     `json:"enableSsl"`
-	SslPort                int      `json:"sslPort"`
-	SslCertPath            string   `json:"sslCertPath"`
-	SslKeyPath             string   `json:"sslKeyPath"`
-	APIKey                 string   `json:"apiKey"`
-	AuthenticationMethod   string   `json:"authenticationMethod"`
-	AuthenticationRequired string   `json:"authenticationRequired"`
-	Username               string   `json:"username"`
-	Password               string   `json:"password"`                       // write-only; masked
-	PasswordConfirmation   string   `json:"passwordConfirmation,omitempty"` // write-only
-	LogLevel               string   `json:"logLevel"`
-	LogSizeLimit           int      `json:"logSizeLimit"`
-	InstanceName           string   `json:"instanceName"`
-	LaunchBrowser          bool     `json:"launchBrowser"`
-	Branch                 string   `json:"branch"`
-	EnvOverrides           []string `json:"envOverrides"`              // read-only
-	RestartRequired        *bool    `json:"restartRequired,omitempty"` // PUT response only
+	BindAddress            string `json:"bindAddress"`
+	Port                   int    `json:"port"`
+	URLBase                string `json:"urlBase"`
+	EnableSsl              bool   `json:"enableSsl"`
+	SslPort                int    `json:"sslPort"`
+	SslCertPath            string `json:"sslCertPath"`
+	SslKeyPath             string `json:"sslKeyPath"`
+	APIKey                 string `json:"apiKey"`
+	AuthenticationMethod   string `json:"authenticationMethod"`
+	AuthenticationRequired string `json:"authenticationRequired"`
+	// TrustedProxies and AllowedHosts are the reverse-proxy trust lists, comma-separated (commas,
+	// semicolons or white space separate entries on input; responses use ", "). They take effect
+	// with the next request.
+	TrustedProxies       string   `json:"trustedProxies"`
+	AllowedHosts         string   `json:"allowedHosts"`
+	Username             string   `json:"username"`
+	Password             string   `json:"password"`                       // write-only; masked
+	PasswordConfirmation string   `json:"passwordConfirmation,omitempty"` // write-only
+	LogLevel             string   `json:"logLevel"`
+	LogSizeLimit         int      `json:"logSizeLimit"`
+	InstanceName         string   `json:"instanceName"`
+	LaunchBrowser        bool     `json:"launchBrowser"`
+	Branch               string   `json:"branch"`
+	EnvOverrides         []string `json:"envOverrides"`              // read-only
+	RestartRequired      *bool    `json:"restartRequired,omitempty"` // PUT response only
 	// WebhookToken is the credential of the webhook URLs (read-only; see
 	// POST /config/host/webhooktoken).
 	WebhookToken string `json:"webhookToken"`
 	// CurrentPassword (write-only) confirms a change of the username, password, authentication
-	// method or requirement, or API key made from a signed-in browser (see needsCurrentPassword).
+	// method or requirement, API key or reverse-proxy trust lists (see needsCurrentPassword).
 	CurrentPassword string `json:"currentPassword,omitempty"`
 	// KeepAPIKey (write-only) keeps the API key when the password changes; by default a password
 	// change also replaces the API key, so a key read by whoever knew the old password stops working.
 	KeepAPIKey bool `json:"keepApiKey,omitempty"`
+	// ConfirmTrustChange (write-only) saves a change of the trust lists or the authentication
+	// method that makes the request making it untrusted (auth.Service.TrustChangeProblem); without
+	// it such a change is refused.
+	ConfirmTrustChange bool `json:"confirmTrustChange,omitempty"`
 }
 
 // hostConfigOf returns the HostConfig resource. The API key is masked unless revealKey (see
@@ -79,6 +88,8 @@ func (s *Server) hostConfigOf(c config.Config, u *models.User, revealKey bool) h
 		APIKey:                 key,
 		AuthenticationMethod:   c.AuthenticationMethod,
 		AuthenticationRequired: c.AuthenticationRequired,
+		TrustedProxies:         c.TrustedProxies,
+		AllowedHosts:           c.AllowedHosts,
 		LogLevel:               c.LogLevel,
 		LogSizeLimit:           c.LogSizeLimit,
 		InstanceName:           c.InstanceName,
@@ -213,10 +224,17 @@ func (s *Server) checkCurrentPasswordBody(w http.ResponseWriter, r *http.Request
 // then match passwordConfirmation. Env-overridden fields cannot be changed. restartRequired is
 // true when the listener (bind address, ports, SSL) or the URL base changed.
 //
-// Credential changes made from a signed-in browser need the current password (currentPassword,
-// see needsCurrentPassword). A password change revokes every session and — unless keepApiKey is
-// true or the key is set by the environment — replaces the API key; so does an API key change.
-// The caller's own session is re-issued.
+// Credential changes need the current password (currentPassword, see needsCurrentPassword). A
+// password change revokes every session and — unless keepApiKey is true or the key is set by the
+// environment — replaces the API key; so does an API key change. The caller's own session is
+// re-issued.
+//
+// The reverse-proxy trust lists count as credentials: they decide whom External trusts and which
+// host names count as local. A changed list must be valid entry by entry (config.xml and the
+// environment only skip invalid entries; an unchanged list is not checked, so an old bad entry
+// never blocks an unrelated save), and a change of the lists or the method that would stop
+// trusting the request making it (TrustChangeProblem) needs confirmTrustChange. The lists take
+// effect with the next request.
 func (s *Server) handleHostConfigUpdate(w http.ResponseWriter, r *http.Request) {
 	if s.d.Auth == nil {
 		s.writeErr(w, r, errUnavailable("Authentication"))
@@ -247,8 +265,11 @@ func (s *Server) handleHostConfigUpdate(w http.ResponseWriter, r *http.Request) 
 	username := strings.TrimSpace(in.Username)
 	passwordChanged := in.Password != "" && in.Password != maskedSecret
 	usernameChanged := u != nil && username != u.Username
+	proxiesChanged, hostsChanged := next.TrustedProxies != old.TrustedProxies, next.AllowedHosts != old.AllowedHosts
+	trustChanged := proxiesChanged || hostsChanged
 	credentialChange := passwordChanged || usernameChanged || next.ApiKey != old.ApiKey ||
-		next.AuthenticationMethod != old.AuthenticationMethod || next.AuthenticationRequired != old.AuthenticationRequired
+		next.AuthenticationMethod != old.AuthenticationMethod || next.AuthenticationRequired != old.AuthenticationRequired ||
+		trustChanged
 	needPassword := credentialChange && s.needsCurrentPassword(r, u)
 	// A password change replaces the API key too (unless asked not to, or the key is env-set).
 	rotateKey := passwordChanged && u != nil && !in.KeepAPIKey && next.ApiKey == old.ApiKey && !env["apiKey"]
@@ -259,7 +280,24 @@ func (s *Server) handleHostConfigUpdate(w http.ResponseWriter, r *http.Request) 
 	}
 	var errs []config.ValidationError
 	if needPassword && in.CurrentPassword == "" {
-		errs = append(errs, invalid("currentPassword", "Enter your current password to change the username, password, API key or authentication settings"))
+		errs = append(errs, invalid("currentPassword", "Enter your current password to change the username, password, API key, authentication or reverse-proxy settings"))
+	}
+	if trustChanged {
+		proxies, hosts := "", ""
+		if proxiesChanged {
+			proxies = next.TrustedProxies
+		}
+		if hostsChanged {
+			hosts = next.AllowedHosts
+		}
+		errs = append(errs, auth.ValidateNetworkTrust(proxies, hosts)...)
+	}
+	// A wrong list, or a switch to External that the lists do not cover, would lock this browser
+	// out where no login form is left to fall back on.
+	if (trustChanged || next.AuthenticationMethod != old.AuthenticationMethod) && !in.ConfirmTrustChange {
+		if msg := s.d.Auth.TrustChangeProblem(r, next.AuthenticationMethod, next.TrustedProxies, next.AllowedHosts); msg != "" {
+			errs = append(errs, invalid("confirmTrustChange", "%s", msg))
+		}
 	}
 	if next.AuthenticationMethod == config.AuthNone && old.AuthenticationMethod != config.AuthNone {
 		errs = append(errs, invalid("authenticationMethod", "None can only be set in config.xml or with DUPEARR__AUTH__METHOD"))
@@ -333,6 +371,10 @@ func (s *Server) handleHostConfigUpdate(w http.ResponseWriter, r *http.Request) 
 	out := s.hostConfigOf(saved, u, needPassword || s.canSeeAPIKey(r, u))
 	out.RestartRequired = &restart
 	s.publish(events.NameSettings, events.ActionUpdated, empty)
+	if saved.TrustedProxies != old.TrustedProxies || saved.AllowedHosts != old.AllowedHosts ||
+		saved.AuthenticationMethod != old.AuthenticationMethod {
+		s.checkHealthLater(ctx, "reverse-proxy trust changed") // ExternalAuthCheck, ReverseProxyCheck
+	}
 	s.writeJSON(w, http.StatusAccepted, out)
 }
 
@@ -391,6 +433,8 @@ func applyHostConfig(c config.Config, h hostConfig, env map[string]bool) config.
 	}
 	set("authenticationMethod", func() { c.AuthenticationMethod = h.AuthenticationMethod })
 	set("authenticationRequired", func() { c.AuthenticationRequired = h.AuthenticationRequired })
+	set("trustedProxies", func() { c.TrustedProxies = h.TrustedProxies })
+	set("allowedHosts", func() { c.AllowedHosts = h.AllowedHosts })
 	set("logLevel", func() { c.LogLevel = h.LogLevel })
 	set("logSizeLimit", func() { c.LogSizeLimit = h.LogSizeLimit })
 	set("instanceName", func() { c.InstanceName = h.InstanceName })

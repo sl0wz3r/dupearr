@@ -23,9 +23,12 @@ func TestEnvOverridesAllKeys(t *testing.T) {
 		"DUPEARR__AUTH__APIKEY":        "ffffffffffffffffffffffffffffffff",
 		"DUPEARR__AUTH__METHOD":        "External",
 		"DUPEARR__AUTH__REQUIRED":      "DisabledForLocalAddresses",
-		"DUPEARR__LOG__LEVEL":          "Debug",
-		"DUPEARR__LOG__SIZELIMIT":      "5",
-		"DUPEARR__APP__INSTANCENAME":   "Dupearr Env",
+		// The trust lists accept the separators of the old environment-only settings.
+		"DUPEARR__AUTH__TRUSTEDPROXIES": "172.18.0.5 ;10.0.0.0/8",
+		"DUPEARR__AUTH__ALLOWEDHOSTS":   "dupearr.example.com",
+		"DUPEARR__LOG__LEVEL":           "Debug",
+		"DUPEARR__LOG__SIZELIMIT":       "5",
+		"DUPEARR__APP__INSTANCENAME":    "Dupearr Env",
 	}
 	for k, v := range env {
 		t.Setenv(k, v)
@@ -41,13 +44,15 @@ func TestEnvOverridesAllKeys(t *testing.T) {
 		BindAddress: "127.0.0.1", Port: 8181, UrlBase: "/dupe", EnableSsl: true, SslPort: 8443,
 		SslCertPath: "/certs/tls.crt", SslKeyPath: "/certs/tls.key", ApiKey: "ffffffffffffffffffffffffffffffff",
 		AuthenticationMethod: AuthExternal, AuthenticationRequired: AuthRequiredDisabledForLocal,
+		TrustedProxies: "172.18.0.5, 10.0.0.0/8", AllowedHosts: "dupearr.example.com",
 		LogLevel: "debug", LogSizeLimit: 5, InstanceName: "Dupearr Env", LaunchBrowser: false, Branch: "main",
 	}
 	if got != want {
 		t.Fatalf("Get() = %+v\nwant %+v", got, want)
 	}
 	wantNames := []string{"bindAddress", "port", "urlBase", "enableSsl", "sslPort", "sslCertPath", "sslKeyPath",
-		"apiKey", "authenticationMethod", "authenticationRequired", "logLevel", "logSizeLimit", "instanceName"}
+		"apiKey", "authenticationMethod", "authenticationRequired", "trustedProxies", "allowedHosts", "logLevel",
+		"logSizeLimit", "instanceName"}
 	if names := m.EnvOverrides(); !slices.Equal(names, wantNames) {
 		t.Fatalf("EnvOverrides() = %v, want %v", names, wantNames)
 	}
@@ -58,6 +63,9 @@ func TestEnvOverridesAllKeys(t *testing.T) {
 		if strings.Contains(file, ">"+strings.TrimRight(v, "/")+"<") {
 			t.Errorf("env value %q written to config.xml:\n%s", v, file)
 		}
+	}
+	if !strings.Contains(file, "<TrustedProxies></TrustedProxies>") || !strings.Contains(file, "<AllowedHosts></AllowedHosts>") {
+		t.Errorf("the trust lists of the environment reached config.xml:\n%s", file)
 	}
 	fromFile := mustLoad(t, dir).Get() // no environment
 	if fromFile.ApiKey == want.ApiKey || !hexKey.MatchString(fromFile.ApiKey) {

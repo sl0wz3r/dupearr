@@ -99,19 +99,31 @@ address — from claiming your fresh instance.
 ### Login answers "Too many failed login attempts" behind a reverse proxy
 
 Dupearr throttles failed logins per client address and per username. When the reverse proxy is
-not listed in `DUPEARR__AUTH__TRUSTEDPROXIES`, Dupearr cannot see the real client addresses, so
-every client behind the proxy shares one limit and *System → Status* shows `ReverseProxyCheck`.
-Add the proxy's address (its container IP on the Docker network, not the gateway) and restart.
-A browser that signed in successfully before keeps working (device cookie).
+not one of the trusted proxies (*Settings → General → Trusted Proxies*, under *Show Advanced*
+while the list is empty, or `DUPEARR__AUTH__TRUSTEDPROXIES`), Dupearr cannot see the real client
+addresses, so every client behind the proxy shares one limit and *System → Status* shows
+`ReverseProxyCheck`. Add the proxy's address (its container IP on the Docker network, not the
+gateway): in *Settings → General* it takes effect at once, the environment variable needs a
+restart. A browser that signed in successfully before keeps working (device cookie).
 
 ### `ExternalAuthCheck`: "no trusted proxy is configured"
 
-With *External* authentication Dupearr trusts the reverse proxy's login. Without
-`DUPEARR__AUTH__TRUSTEDPROXIES` it cannot tell the proxy's requests from anyone else's, so any
-client that reaches the port directly and uses an IP address or local host name gets full
-access. Set the proxy's address and stop publishing Dupearr's port (keep it only on the proxy's
-Docker network). Requests that do not come from the trusted proxy then need a Forms login or the
-API key.
+With *External* authentication Dupearr trusts the reverse proxy's login. Without trusted proxies
+(*Settings → General*, or `DUPEARR__AUTH__TRUSTEDPROXIES`) it cannot tell the proxy's requests from
+anyone else's, so any client that reaches the port directly and uses an IP address or local host
+name gets full access. Set the proxy's address and stop publishing Dupearr's port (keep it only on
+the proxy's Docker network). Requests that do not come from the trusted proxy then need a Forms
+login or the API key.
+
+### Locked out after changing Trusted Proxies or Allowed Hosts
+
+With *External* authentication Dupearr trusts only requests relayed by the trusted proxies (and
+named by the allowed hosts, when set), and there is no login page to fall back on; with *None*, a
+public host name needs to be an allowed host. Settings → General warns before it saves a change of
+the lists, or a switch to *External*, that stops trusting the browser you use, but a confirmed
+change (or a wrong proxy address) can still lock you out. Fix the lists with the environment variables, in `config.xml` while Dupearr is
+stopped, with the API key, or with `dupearr reset-auth`: see the
+[recovery steps](configuration.md#trusted-proxies-and-allowed-hosts).
 
 ### "Cross-site request rejected" when saving behind a reverse proxy
 
@@ -119,7 +131,7 @@ The web UI saves with its session, and Dupearr only accepts such changes when th
 `Origin` names the address Dupearr was reached by. Make the reverse proxy forward the original
 `Host` header (nginx: `proxy_set_header Host $host;` — SWAG, Nginx Proxy Manager, Traefik and Caddy
 do this by default) or set `X-Forwarded-Host`; a proxy that is not on the local network must be
-listed in `DUPEARR__AUTH__TRUSTEDPROXIES`.
+one of the trusted proxies (*Settings → General*, or `DUPEARR__AUTH__TRUSTEDPROXIES`).
 
 ### I forgot my password
 
@@ -131,7 +143,9 @@ sudo -u dupearr /opt/Dupearr/dupearr reset-auth --data=/var/lib/dupearr  # syste
 This resets authentication to *Forms* with no user (authentication required for every address);
 the UI then asks you to create a new login and for the **setup code** printed in the log
 (`docker logs dupearr`). It also replaces the API key, the webhook token and the session key, so
-update your scripts and the webhook URLs in Radarr, Sonarr and Plex afterwards.
+update your scripts and the webhook URLs in Radarr, Sonarr and Plex afterwards, and it clears the
+trusted proxies and allowed hosts in `config.xml` (set them again in *Settings → General* if you use
+a reverse proxy; values from environment variables stay).
 
 When Dupearr is running, the command hands the reset to it: Dupearr refuses every API key,
 session and webhook token at once, restarts by itself and resets authentication before it accepts

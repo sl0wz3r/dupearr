@@ -34,8 +34,9 @@
 //     reachable through the authenticating reverse proxy).
 //   - ReverseProxyCheck (warning): a request with a forwarding header (X-Forwarded-For,
 //     Forwarded, X-Real-IP) came from a local peer that is not one of the trusted proxies — a
-//     reverse proxy missing from DUPEARR__AUTH__TRUSTEDPROXIES (its clients then share one login
-//     throttling key and local-address checks cannot see them).
+//     reverse proxy missing from the trusted proxies (Settings → General or
+//     DUPEARR__AUTH__TRUSTEDPROXIES; its clients then share one login throttling key and
+//     local-address checks cannot see them). It clears once the proxy is trusted.
 //   - LastScanCheck (warning): the most recent scan failed.
 //   - DatabaseCheck (error): the database does not answer.
 //
@@ -153,8 +154,9 @@ type Deps struct {
 	// WebhookMasterKeyUsed reports when a webhook last authenticated with the master API key
 	// (zero: never); WebhookApiKeyCheck warns about it. May be nil.
 	WebhookMasterKeyUsed func() time.Time
-	// ProxyTrust reports how many trusted proxies and allowed hosts are configured
-	// (DUPEARR__AUTH__TRUSTEDPROXIES / DUPEARR__AUTH__ALLOWEDHOSTS); ExternalAuthCheck uses it.
+	// ProxyTrust reports how many trusted proxies and allowed hosts are in effect (Settings →
+	// General / config.xml, or DUPEARR__AUTH__TRUSTEDPROXIES / DUPEARR__AUTH__ALLOWEDHOSTS);
+	// ExternalAuthCheck uses it.
 	// May be nil (ExternalAuthCheck then only gives its notice).
 	ProxyTrust func() (trustedProxies, allowedHosts int)
 	// UntrustedProxySeen reports when a request with a forwarding header last came from a local

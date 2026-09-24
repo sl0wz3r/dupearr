@@ -180,6 +180,9 @@ export function canForceSave(error: unknown): boolean {
   return error.status === 400 || error.status === 422 || error.status >= 500;
 }
 
+/** The save alert's message when every error belongs to a form field. */
+export const CORRECT_FIELDS_MESSAGE = 'Please correct the highlighted fields.';
+
 export interface SaveErrorSummary {
   /** Errors to show under known form fields. */
   fields: FieldErrors;
@@ -199,7 +202,7 @@ export function summarizeSaveError(
   const { fields, general } = splitApiError(error, knownFields, labelFor);
   let messages = general;
   if (messages.length === 0) {
-    messages = Object.keys(fields).length > 0 ? ['Please correct the highlighted fields.'] : ['Unable to save'];
+    messages = Object.keys(fields).length > 0 ? [CORRECT_FIELDS_MESSAGE] : ['Unable to save'];
   }
   return { fields, messages, canForce: canForceSave(error) };
 }

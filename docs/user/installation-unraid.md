@@ -59,8 +59,8 @@ See [Method B in unraid/README.md](../../unraid/README.md#method-b-behave-like-a
 | **Media** (`/data`) | `/mnt/user/data` | The same host folder your Plex/Radarr/Sonarr containers map (see below). Only required for the filesystem deletion method, Dupearr's recycle bin and hardlink detection. |
 | **PUID / PGID** (advanced) | `99` / `100` | `nobody:users`, the owner of Unraid shares. Keep them unless you changed your media ownership. |
 | **UMASK** (advanced) | `022` | Keep. Use `002` if other apps must be able to modify files Dupearr creates in shared folders (its own config, database, backups and logs are always private). |
-| **Trusted proxies** (advanced) | *(empty)* | Only behind a reverse proxy (SWAG, Nginx Proxy Manager): the proxy container's IP on your custom Docker network (give it a fixed IP; not the network's gateway). Required for *External* authentication. |
-| **Allowed hosts** (advanced) | *(empty)* | Optional: the host name(s) you reach Dupearr by through the proxy, e.g. `dupearr.example.com`. |
+| **Trusted proxies** (advanced) | *(empty)* | Only behind a reverse proxy (SWAG, Nginx Proxy Manager): the proxy container's IP on your custom Docker network (give it a fixed IP; not the network's gateway). Required for *External* authentication. You can leave it empty and set *Trusted Proxies* in *Settings → General* instead; a value here overrides that field and makes it read-only. |
+| **Allowed hosts** (advanced) | *(empty)* | Optional: the host name(s) you reach Dupearr by through the proxy, e.g. `dupearr.example.com`. Like trusted proxies, it can also be set in *Settings → General* (leave it empty here then). |
 | **Extra Parameters** (Advanced View) | `--security-opt=no-new-privileges:true --cap-drop=ALL --cap-add=…` | Keep them: the container runs with the least privileges it needs. A container created from an older template keeps its old Extra Parameters; copy them from [unraid/README.md](../../unraid/README.md). |
 
 Unraid passes your server time zone (`TZ`) to every container automatically.

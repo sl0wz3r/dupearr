@@ -60,6 +60,7 @@ services:
       # Behind a reverse proxy: its address(es) (IP or CIDR), so Dupearr believes the client address
       # in its X-Forwarded-For and, with External authentication, trusts only requests it relays.
       # Optional: host names Dupearr may be addressed by (e.g. dupearr.example.com).
+      # Empty: set them in Settings -> General instead (a value here overrides that, read-only).
       # See docs/SECURITY.md#deployment-hardening-guide.
       - DUPEARR__AUTH__TRUSTEDPROXIES=${DUPEARR_TRUSTED_PROXIES:-}
       - DUPEARR__AUTH__ALLOWEDHOSTS=${DUPEARR_ALLOWED_HOSTS:-}

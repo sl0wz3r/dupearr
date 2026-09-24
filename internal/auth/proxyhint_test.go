@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/sl0wz3r/dupearr/internal/config"
 )
 
 // NEW-F (round-1 review): a reverse proxy missing from the TrustedProxies makes every client share
@@ -55,5 +57,24 @@ func TestUntrustedProxySeen(t *testing.T) {
 	send("192.168.1.4:1", map[string]string{"X-Real-IP": "198.51.100.9"})
 	if _, peer := e.svc.UntrustedProxySeen(); peer != "192.168.1.4" {
 		t.Fatalf("peer = %q, want the latest one", peer)
+	}
+}
+
+// Issue #1: once the reported peer is added to the trusted proxies (Settings → General takes
+// effect at once), ReverseProxyCheck no longer reports it — not only after a restart.
+func TestUntrustedProxySeenClearsOnceTrusted(t *testing.T) {
+	e := newTestEnv(t, nil)
+	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	req.RemoteAddr = "192.168.1.4:1"
+	req.Header.Set("X-Forwarded-For", "198.51.100.9")
+	e.svc.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).ServeHTTP(httptest.NewRecorder(), req)
+	if _, peer := e.svc.UntrustedProxySeen(); peer != "192.168.1.4" {
+		t.Fatalf("peer = %q, want 192.168.1.4 recorded", peer)
+	}
+	if _, err := e.cfg.Update(func(c *config.Config) { c.TrustedProxies = "192.168.1.0/24" }); err != nil {
+		t.Fatal(err)
+	}
+	if at, peer := e.svc.UntrustedProxySeen(); !at.IsZero() || peer != "" {
+		t.Fatalf("UntrustedProxySeen = %s %q after trusting the peer, want nothing", at, peer)
 	}
 }

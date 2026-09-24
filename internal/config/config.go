@@ -66,6 +66,8 @@ type Config struct {
 	ApiKey                 string // 32 lowercase hex
 	AuthenticationMethod   string // Auth*
 	AuthenticationRequired string // AuthRequired*
+	TrustedProxies         string // reverse proxies whose forwarding headers are believed: IPs / CIDR ranges, "a, b"
+	AllowedHosts           string // host names Dupearr is addressed by through them ("*.example.com": sub-domains), "a, b"
 	LogLevel               string // trace|debug|info|warn|error
 	LogSizeLimit           int    // MB per log file
 	InstanceName           string
@@ -100,8 +102,8 @@ func (v ValidationErrors) Error() string {
 // missing, fills missing elements with defaults, then applies DUPEARR__SECTION__KEY env overrides
 // in memory (overrides are NOT written back). Unknown XML elements are preserved on save.
 // Env override names (docs/ARCHITECTURE.md §10): DUPEARR__SERVER__BINDADDRESS|PORT|URLBASE|
-// ENABLESSL|SSLPORT|SSLCERTPATH|SSLKEYPATH, DUPEARR__AUTH__APIKEY|METHOD|REQUIRED,
-// DUPEARR__LOG__LEVEL|SIZELIMIT, DUPEARR__APP__INSTANCENAME.
+// ENABLESSL|SSLPORT|SSLCERTPATH|SSLKEYPATH, DUPEARR__AUTH__APIKEY|METHOD|REQUIRED|TRUSTEDPROXIES|
+// ALLOWEDHOSTS, DUPEARR__LOG__LEVEL|SIZELIMIT, DUPEARR__APP__INSTANCENAME.
 //
 // A Manager is safe for concurrent use.
 type Manager struct {
@@ -374,9 +376,9 @@ func (m *Manager) EnvOverrides() []string {
 
 // Normalize returns c in canonical form: trimmed strings, BindAddress "" → "*", UrlBase as ""
 // or "/x" (see NormalizeURLBase), AuthenticationMethod/AuthenticationRequired in PascalCase with
-// the legacy "Basic" migrated to "Forms" (docs/DECISIONS.md D1), LogLevel lower-case ("warning"
-// → "warn", "fatal" → "error") and Branch lower-case. Values it cannot canonicalise are left for
-// Validate to reject.
+// the legacy "Basic" migrated to "Forms" (docs/DECISIONS.md D1), TrustedProxies/AllowedHosts as
+// "a, b" (see NormalizeList), LogLevel lower-case ("warning" → "warn", "fatal" → "error") and
+// Branch lower-case. Values it cannot canonicalise are left for Validate to reject.
 func Normalize(c Config) Config {
 	c.BindAddress = strings.TrimSpace(c.BindAddress)
 	if c.BindAddress == "" {
@@ -388,10 +390,21 @@ func Normalize(c Config) Config {
 	c.ApiKey = strings.TrimSpace(c.ApiKey)
 	c.AuthenticationMethod = canonicalAuthMethod(c.AuthenticationMethod)
 	c.AuthenticationRequired = canonicalAuthRequired(c.AuthenticationRequired)
+	c.TrustedProxies = NormalizeList(c.TrustedProxies)
+	c.AllowedHosts = NormalizeList(c.AllowedHosts)
 	c.LogLevel = canonicalLogLevel(c.LogLevel)
 	c.InstanceName = strings.TrimSpace(c.InstanceName)
 	c.Branch = strings.ToLower(strings.TrimSpace(c.Branch))
 	return c
+}
+
+// NormalizeList returns a list setting (TrustedProxies, AllowedHosts) with its entries (see
+// SplitList) joined by ", ", so that the separator a user typed never counts as a change and
+// Settings → General shows a tidy list. The entries themselves are kept as typed: whoever reads
+// the list checks them (invalid entries in config.xml or the environment are skipped and logged,
+// never a reason not to start).
+func NormalizeList(s string) string {
+	return strings.Join(SplitList(s), ", ")
 }
 
 // NormalizeURLBase returns "" or "/something": surrounding whitespace and leading/trailing

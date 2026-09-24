@@ -150,7 +150,8 @@ files Dupearr removes, but nothing beyond them.
    They act on folders that were opened without following symlinks, on a file that is
    re-identified right before the change, and they never replace an existing file.
 4. A backup archive is untrusted input. It cannot change authentication, the API key, the account,
-   the listener or the webhook token without an explicit opt-in, and it never resumes deletions.
+   the listener or the webhook token without an explicit opt-in, it never changes the reverse-proxy
+   trust lists (trusted proxies, allowed hosts), and it never resumes deletions.
    After a restore, dry run is on, full-disc removal off and a playable copy kept.
 5. Upstream response bodies from free-form URLs are never shown or logged, and outbound requests
    never reach link-local or cloud-metadata addresses.
@@ -417,7 +418,8 @@ Each one has a mitigation or documentation.
 | **A hostile Plex server can choose which of its own library's video files are removed** (after approval) | Plex is the source of truth for the libraries Dupearr manages. Removals stay inside the server's library folders and to video files, need approval (or two stable scans in auto mode), respect the per-run caps and prefer the recycle bin | Keep dry run on until validated; use HTTPS or a trusted network to Plex; use a recycle bin. |
 | **`DisabledForLocalAddresses` trusts clients that appear with a local address** (Docker's userland proxy, NAT loopback, a proxy that is not in the trusted proxies) | The *arr convention; the DNS-rebinding and cross-site guards still apply | Prefer `Enabled`. Use it only when the port cannot be reached from the internet, and configure trusted proxies. |
 | **External or None without trusted proxies trusts any client that reaches the port and uses an IP address or a local host name** | Keeps existing setups working | `ExternalAuthCheck` / `AuthenticationCheck` warnings; the hardening guide says to set trusted proxies and not to publish the port. |
-| **Trusted proxies and allowed hosts are environment variables only** (no `config.xml` or UI setting yet) | Enough for Docker, Unraid and systemd; a UI setting needs more validation and backup handling | Exposed in the Unraid template and the compose file. |
+| **A wrong trust list can lock the browser out under External** (issue #1: the lists are editable in *Settings → General*) | With *External* the proxy signs users in, so Dupearr's login page has no form to fall back on | *Settings → General* explains and asks for a confirmation before it saves a change of the lists, or a switch to External, that stops trusting the browser making it; changes need the current password when a Forms account exists; the API key, the environment variables, `config.xml` and `dupearr reset-auth` restore access ([configuration guide](user/configuration.md#trusted-proxies-and-allowed-hosts)). |
+| **An allowed host counts as a private host name** (for *None*, *Disabled for local addresses* and setup), and a wildcard over a public suffix (`*.com`) is accepted | Allowed hosts exist to name the proxy's public host; refusing single-label wildcards would change what the environment variable accepted before | The help text and the guides say to list only names you control; changes need the current password and are recorded in the history. |
 | **Plain-HTTP deployments share cookies across ports of the same host name** (SEC-024) | Browsers do not scope cookies by port; `__Host-` needs HTTPS | Sessions are revocable and last at most 14 days. Use HTTPS on a dedicated host name, or a URL base. |
 | **Apps behind one host name share an origin** (R2-19) | Same-origin script can act with the session. It can no longer read the API key | Give Dupearr its own host name. |
 | **No HSTS from Dupearr** (SEC-030) | HSTS covers every port of a host name and would break plain-HTTP services next to Dupearr (Unraid UI, *arrs) | Set HSTS on the reverse proxy. |
@@ -448,7 +450,7 @@ plex.tv account) and your *arr API keys, and it can delete media. Treat it like 
 |---|---|---|
 | **Forms, authentication required: Enabled** (default) | Always, unless you have a reason not to | Password of at least 8 characters. Login is throttled per address and per username. *Log out all sessions* is in *Settings → General*. |
 | Forms, **Disabled for local addresses** | A trusted home LAN where Dupearr's port can **never** be reached from the internet | Every device on your LAN (and any process on the Docker host) gets full admin access. Opened by a public host name, a login is still required. The first account is only created with the setup code, and backups, the API key and credential changes still need the password. Don't use it behind a port forward or with guests or IoT devices on the same network. |
-| **External** | An authenticating reverse proxy (Authelia, Authentik, oauth2-proxy, …) protects Dupearr | Set `DUPEARR__AUTH__TRUSTEDPROXIES` to the proxy's address and **do not publish Dupearr's port**; otherwise any client that reaches the port directly gets full access (`ExternalAuthCheck` warns). |
+| **External** | An authenticating reverse proxy (Authelia, Authentik, oauth2-proxy, …) protects Dupearr | Set *Trusted Proxies* (*Settings → General*, or `DUPEARR__AUTH__TRUSTEDPROXIES`) to the proxy's address and **do not publish Dupearr's port**; otherwise any client that reaches the port directly gets full access (`ExternalAuthCheck` warns). |
 | **None** | Never in production (`config.xml` / environment only) | Only requests to an IP address or a local host name are accepted; anyone on your network is admin. |
 
 First-run setup asks for the **setup code** printed in the log at startup (`docker logs dupearr`).
@@ -465,14 +467,21 @@ Do not forward port 3873 (or 9873) on your router. For remote access, in order o
 
 ### 3. Configure the reverse proxy correctly
 
-- Set **`DUPEARR__AUTH__TRUSTEDPROXIES`** to the proxy's address **as Dupearr sees it**: on a
-  user-defined Docker network, the proxy container's IP. Give the proxy a fixed IP. Don't use the
+- Set **Trusted Proxies** (*Settings → General*, `<TrustedProxies>` in `config.xml`, or
+  `DUPEARR__AUTH__TRUSTEDPROXIES`, which overrides both) to the proxy's address **as Dupearr sees
+  it**: on a user-defined Docker network, the proxy container's IP. Give the proxy a fixed IP. Don't use the
   network gateway (`172.x.0.1`), because clients of published ports can arrive from that address.
   CIDR ranges are accepted inside private space (`172.16.0.0/12`, `10.0.0.0/8`, `fd00::/8` …);
   outside it they must be at least /16 (IPv4) or /48 (IPv6), and wider ones are refused (GAP-08). Without it, all clients behind the proxy share one
   login-throttling limit, and *System → Status* shows `ReverseProxyCheck`.
-- Optionally set **`DUPEARR__AUTH__ALLOWEDHOSTS`** to the name(s) you use (`dupearr.example.com`,
-  `*.example.com`).
+- Optionally set **Allowed Hosts** (or `DUPEARR__AUTH__ALLOWEDHOSTS`) to the name(s) you use
+  (`dupearr.example.com`, `*.example.com`). List only names you control: they also count as local
+  names.
+- With *External*, set the lists **before** you switch to it, or while you still reach Dupearr
+  directly: its login page has no form to fall back on. *Settings → General* warns before it saves
+  a change of the lists, or a switch to External, that stops trusting your browser; the
+  [configuration guide](user/configuration.md#trusted-proxies-and-allowed-hosts) lists the recovery
+  steps.
 - The proxy must pass `Host`, and set or append `X-Forwarded-For` and `X-Forwarded-Proto`. It must
   not buffer the event stream. It must allow request bodies up to 512 MiB if you upload backups for
   restore.
@@ -500,7 +509,8 @@ location / {
 ```
 
 ```yaml
-# Dupearr's compose service, behind the proxy on network "proxy" (proxy container: 172.20.0.10)
+# Dupearr's compose service, behind the proxy on network "proxy" (proxy container: 172.20.0.10).
+# The two variables are optional: without them, set the lists in Settings → General.
 environment:
   - DUPEARR__AUTH__TRUSTEDPROXIES=172.20.0.10
   - DUPEARR__AUTH__ALLOWEDHOSTS=dupearr.example.com
@@ -582,8 +592,12 @@ If you think Dupearr, its data folder or a backup was compromised:
 
 1. *Settings → General*: change the password (this rotates the API key and signs everyone out).
    Or run `dupearr reset-auth` (Docker: `docker exec -it dupearr dupearr reset-auth`), which also
-   replaces the webhook token and the session key. A running Dupearr applies it by itself: it
-   refuses every credential at once, restarts, and resets before it accepts requests again.
+   replaces the webhook token and the session key and clears the trusted proxies and allowed hosts
+   (a compromise may have widened them). Where an environment variable keeps External, or
+   *Disabled for Local Addresses*, it keeps the lists those narrow instead (clearing them would
+   trust more clients) and says so: review them in *Settings → General*. A running Dupearr applies
+   it by itself: it refuses every credential at once, restarts, and resets before it accepts
+   requests again.
 2. Regenerate the webhook token and update the webhook URLs in Radarr, Sonarr and Plex.
 3. Revoke the Plex token (plex.tv) and regenerate the *arr API keys and notification secrets.
 4. Check *Activity → History* (filter *Security*: sign-ins, failed sign-ins, credential, setting

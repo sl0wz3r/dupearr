@@ -30,6 +30,8 @@ func canonical(c Config) string {
 		"  <ApiKey>" + c.ApiKey + "</ApiKey>\n" +
 		"  <AuthenticationMethod>" + c.AuthenticationMethod + "</AuthenticationMethod>\n" +
 		"  <AuthenticationRequired>" + c.AuthenticationRequired + "</AuthenticationRequired>\n" +
+		"  <TrustedProxies>" + c.TrustedProxies + "</TrustedProxies>\n" +
+		"  <AllowedHosts>" + c.AllowedHosts + "</AllowedHosts>\n" +
 		"  <LogLevel>" + c.LogLevel + "</LogLevel>\n" +
 		"  <LogSizeLimit>" + itoa(c.LogSizeLimit) + "</LogSizeLimit>\n" +
 		"  <InstanceName>" + c.InstanceName + "</InstanceName>\n" +
@@ -202,7 +204,7 @@ func TestLoadFillsMissingAndPreservesUnknown(t *testing.T) {
 <!-- prolog comment -->
 <Config>
   <Port>8080</Port>
-  <AllowedHosts>dupearr.example.com</AllowedHosts>
+  <SslCertPassword>hunter2</SslCertPassword>
   <!-- keep me -->
   <Nested attr="1"><Child>v &amp; w</Child></Nested>
   <ApiKey>` + testKey + `</ApiKey>
@@ -219,7 +221,7 @@ func TestLoadFillsMissingAndPreservesUnknown(t *testing.T) {
 	}
 	wantFile := `<Config>
   <Port>8080</Port>
-  <AllowedHosts>dupearr.example.com</AllowedHosts>
+  <SslCertPassword>hunter2</SslCertPassword>
   <!-- keep me -->
   <Nested attr="1"><Child>v &amp; w</Child></Nested>
   <ApiKey>` + testKey + `</ApiKey>
@@ -232,6 +234,8 @@ func TestLoadFillsMissingAndPreservesUnknown(t *testing.T) {
   <SslKeyPath></SslKeyPath>
   <AuthenticationMethod>Forms</AuthenticationMethod>
   <AuthenticationRequired>Enabled</AuthenticationRequired>
+  <TrustedProxies></TrustedProxies>
+  <AllowedHosts></AllowedHosts>
   <LogLevel>info</LogLevel>
   <LogSizeLimit>1</LogSizeLimit>
   <InstanceName>Dupearr</InstanceName>
@@ -847,5 +851,74 @@ func TestLoadRefusesToWriteAnUnloadableFile(t *testing.T) {
 	}
 	if readFile(t, p) != content {
 		t.Fatal("file modified")
+	}
+}
+
+// The reverse-proxy trust lists (issue #1) are ordinary config.xml settings: stored as "a, b" whatever
+// separators were typed, saved by Update and read back unchanged; an empty list is valid.
+func TestTrustListsRoundTrip(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	c := defaultWithKey()
+	c.TrustedProxies = "172.18.0.5 ,10.0.0.0/8;fd00::/8"
+	c.AllowedHosts = "Dupearr.Example.com\n*.lan.example.org"
+	p := writeFile(t, dir, canonical(c), 0o600)
+
+	m := mustLoad(t, dir)
+	got := m.Get()
+	if got.TrustedProxies != "172.18.0.5, 10.0.0.0/8, fd00::/8" || got.AllowedHosts != "Dupearr.Example.com, *.lan.example.org" {
+		t.Fatalf("loaded lists = %q / %q", got.TrustedProxies, got.AllowedHosts)
+	}
+	want := defaultWithKey()
+	want.TrustedProxies, want.AllowedHosts = got.TrustedProxies, got.AllowedHosts
+	if file := readFile(t, p); file != canonical(want) {
+		t.Fatalf("config.xml was not canonicalised:\n%s", file)
+	}
+
+	if _, err := m.Update(func(c *Config) { c.TrustedProxies = "10.0.0.2;;  10.0.0.3" }); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustLoad(t, dir).Get(); got.TrustedProxies != "10.0.0.2, 10.0.0.3" || got.AllowedHosts != want.AllowedHosts {
+		t.Fatalf("reloaded lists = %q / %q", got.TrustedProxies, got.AllowedHosts)
+	}
+	saved := readFile(t, p)
+	if _, err := m.Update(func(c *Config) { c.TrustedProxies, c.AllowedHosts = "", " " }); err != nil {
+		t.Fatalf("clearing the lists: %v", err)
+	}
+	if got := mustLoad(t, dir).Get(); got.TrustedProxies != "" || got.AllowedHosts != "" {
+		t.Fatalf("cleared lists reloaded as %q / %q", got.TrustedProxies, got.AllowedHosts)
+	}
+	if !strings.Contains(saved, "<TrustedProxies>10.0.0.2, 10.0.0.3</TrustedProxies>") {
+		t.Fatalf("saved file:\n%s", saved)
+	}
+}
+
+// config.xml stays lenient like the environment: entries the reverse-proxy code refuses (a range
+// that spans the internet, a typo) never stop Dupearr from starting. They are skipped and logged by
+// internal/auth; only Settings → General refuses them.
+func TestInvalidTrustEntriesDoNotStopStartup(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	c := defaultWithKey()
+	c.TrustedProxies = "0.0.0.0/0, bogus"
+	c.AllowedHosts = "bad/host"
+	writeFile(t, dir, canonical(c), 0o600)
+	m, err := load(dir, nil)
+	if err != nil {
+		t.Fatalf("Load refused invalid trust entries: %v", err)
+	}
+	if got := m.Get(); got.TrustedProxies != "0.0.0.0/0, bogus" || got.AllowedHosts != "bad/host" {
+		t.Fatalf("lists = %q / %q", got.TrustedProxies, got.AllowedHosts)
+	}
+	if errs := Validate(m.Get()); len(errs) != 0 {
+		t.Fatalf("Validate = %v, want no problems", errs)
+	}
+	environ := []string{"DUPEARR__AUTH__TRUSTEDPROXIES=0.0.0.0/0 bogus", "DUPEARR__AUTH__ALLOWEDHOSTS=bad/host"}
+	m, err = load(t.TempDir(), environ)
+	if err != nil {
+		t.Fatalf("Load refused invalid trust entries from the environment: %v", err)
+	}
+	if got := m.Get(); got.TrustedProxies != "0.0.0.0/0, bogus" || !slices.Equal(m.EnvOverrides(), []string{"trustedProxies", "allowedHosts"}) {
+		t.Fatalf("lists = %q, overrides %v", got.TrustedProxies, m.EnvOverrides())
 	}
 }

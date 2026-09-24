@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -294,5 +296,50 @@ func TestBackup(t *testing.T) {
 	d.expect(http.MethodGet, "/api/v1/system/backup", nil, http.StatusOK, &list)
 	if len(list) != 0 {
 		t.Errorf("backups after delete = %+v", list)
+	}
+}
+
+// TestExternalTrustFromSettings (issue #1): the trusted proxies set in Settings → General (PUT
+// /api/v1/config/host) are saved to config.xml and decide External authentication for the next
+// request, without a restart; a browser relayed by the proxy cannot save a list that would stop
+// trusting it without confirmTrustChange.
+func TestExternalTrustFromSettings(t *testing.T) {
+	t.Parallel()
+	d := startDupearr(t, startOptions{forms: true, env: []string{"DUPEARR__AUTH__METHOD=External"}})
+	anon := &http.Client{Timeout: requestTimeout}
+	statusOf := func() int {
+		t.Helper()
+		return d.requestWith(anon, http.MethodGet, "/api/v1/system/status", nil, nil).Status
+	}
+	// Without lists External trusts a request to an IP address (the DNS-rebinding guard only).
+	if got := statusOf(); got != http.StatusOK {
+		t.Fatalf("anonymous request without trusted proxies = %d, want 200", got)
+	}
+	d.expect(http.MethodPut, "/api/v1/config/host", map[string]any{"trustedProxies": "10.99.0.1"}, http.StatusAccepted, nil)
+	if got := statusOf(); got != http.StatusUnauthorized {
+		t.Fatalf("anonymous request from 127.0.0.1 with trusted proxy 10.99.0.1 = %d, want 401 (no restart needed)", got)
+	}
+	d.expect(http.MethodPut, "/api/v1/config/host", map[string]any{"trustedProxies": "127.0.0.1"}, http.StatusAccepted, nil)
+	if got := statusOf(); got != http.StatusOK {
+		t.Fatalf("anonymous request relayed by the trusted proxy 127.0.0.1 = %d, want 200", got)
+	}
+
+	// The relayed browser itself cannot lock itself out by accident.
+	r := d.requestWith(anon, http.MethodPut, "/api/v1/config/host", map[string]any{"trustedProxies": "10.99.0.1"},
+		http.Header{"Origin": {d.base}})
+	var errs []struct {
+		PropertyName string `json:"propertyName"`
+		ErrorMessage string `json:"errorMessage"`
+	}
+	if r.Status != http.StatusBadRequest || json.Unmarshal(r.Body, &errs) != nil || len(errs) != 1 ||
+		errs[0].PropertyName != "confirmTrustChange" || !strings.Contains(errs[0].ErrorMessage, "127.0.0.1") {
+		t.Fatalf("relayed lockout change: %s, want 400 on confirmTrustChange", r)
+	}
+	cfg, err := os.ReadFile(filepath.Join(d.dataDir, "config.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(cfg), "<TrustedProxies>127.0.0.1</TrustedProxies>") {
+		t.Fatalf("config.xml:\n%s", cfg)
 	}
 }

@@ -1104,11 +1104,18 @@ func TestExternalAuthCheckWantsTrustedProxies(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := e.checker()
-	proxies := 0
-	c.d.ProxyTrust = func() (int, int) { return proxies, 0 }
+	proxies, hosts := 0, 0
+	c.d.ProxyTrust = func() (int, int) { return proxies, hosts }
 	got := bySource(c.Run(context.Background()), SourceExternalAuth)
-	if len(got) != 1 || got[0].Type != models.HealthWarning || !strings.Contains(got[0].Message, "DUPEARR__AUTH__TRUSTEDPROXIES") {
+	if len(got) != 1 || got[0].Type != models.HealthWarning || !strings.Contains(got[0].Message, "DUPEARR__AUTH__TRUSTEDPROXIES") ||
+		!strings.Contains(got[0].Message, "Settings → General") || !strings.Contains(got[0].Message, "by an IP address") {
 		t.Fatalf("without trusted proxies: %+v", got)
+	}
+	// Allowed hosts without trusted proxies: any client that names one of them is trusted.
+	hosts = 1
+	got = bySource(c.Run(context.Background()), SourceExternalAuth)
+	if len(got) != 1 || got[0].Type != models.HealthWarning || !strings.Contains(got[0].Message, "names one of the allowed hosts") {
+		t.Fatalf("allowed hosts only: %+v", got)
 	}
 	proxies = 1
 	got = bySource(c.Run(context.Background()), SourceExternalAuth)
@@ -1132,7 +1139,8 @@ func TestReverseProxyCheck(t *testing.T) {
 	last = time.Date(2026, 9, 23, 10, 0, 0, 0, time.UTC)
 	got := bySource(c.Run(context.Background()), SourceReverseProxy)
 	if len(got) != 1 || got[0].Type != models.HealthWarning ||
-		!strings.Contains(got[0].Message, "172.18.0.5") || !strings.Contains(got[0].Message, "DUPEARR__AUTH__TRUSTEDPROXIES") {
+		!strings.Contains(got[0].Message, "172.18.0.5") || !strings.Contains(got[0].Message, "DUPEARR__AUTH__TRUSTEDPROXIES") ||
+		!strings.Contains(got[0].Message, "Settings → General") {
 		t.Fatalf("results = %+v", got)
 	}
 }

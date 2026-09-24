@@ -1153,6 +1153,13 @@ export interface HostConfig {
   apiKey: string;
   authenticationMethod: AuthenticationMethod;
   authenticationRequired: AuthenticationRequired;
+  /**
+   * Reverse proxies whose forwarding headers Dupearr believes: IP addresses or CIDR ranges,
+   * comma-separated (returned as "a, b"). Takes effect with the next request.
+   */
+  trustedProxies: string;
+  /** Host names Dupearr is reached by through the proxy ("*.example.com" for sub-domains), comma-separated. */
+  allowedHosts: string;
   username: string;
   /** Write-only, masked. */
   password: string;
@@ -1169,10 +1176,15 @@ export interface HostConfig {
   restartRequired?: boolean;
   /** Read-only: the credential of the webhook URLs (can only queue scans). */
   webhookToken?: string;
-  /** Write-only: confirms a change of the username, password, authentication or API key. */
+  /** Write-only: confirms a change of the username, password, authentication, API key or trust lists. */
   currentPassword?: string;
   /** Write-only: keep the API key when the password changes (it is replaced by default). */
   keepApiKey?: boolean;
+  /**
+   * Write-only: save trust lists that stop trusting the browser making the change (External's
+   * proxy, None's host rule); without it the server refuses such a change (400 confirmTrustChange).
+   */
+  confirmTrustChange?: boolean;
 }
 
 /** GET/PUT /api/v1/config/settings (models.Settings) */

@@ -29,6 +29,8 @@ const SETTING_LABELS: Record<string, string> = {
   apiKey: 'API Key',
   authenticationMethod: 'Authentication',
   authenticationRequired: 'Authentication Required',
+  trustedProxies: 'Trusted Proxies',
+  allowedHosts: 'Allowed Hosts',
   bindAddress: 'Bind Address',
   port: 'Port',
   urlBase: 'URL Base',

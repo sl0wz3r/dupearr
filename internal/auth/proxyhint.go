@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"net"
 	"net/http"
 	"time"
 )
@@ -50,10 +51,13 @@ func (s *Service) noteUntrustedForwarding(r *http.Request) {
 
 // UntrustedProxySeen returns when a request with a forwarding header last arrived from a local
 // peer that is not one of the TrustedProxies, and that peer's address (zero time: none since
-// start). The ReverseProxyCheck health check reports it.
+// start, or the peer has been added to the TrustedProxies since). The ReverseProxyCheck health
+// check reports it.
 func (s *Service) UntrustedProxySeen() (time.Time, string) {
-	if v := s.untrustedFwd.Load(); v != nil {
-		return v.at, v.peer
+	v := s.untrustedFwd.Load()
+	if v == nil || s.isTrustedProxy(net.ParseIP(v.peer)) {
+		// Once the proxy is trusted (Settings → General takes effect at once) the notice is stale.
+		return time.Time{}, ""
 	}
-	return time.Time{}, ""
+	return v.at, v.peer
 }
