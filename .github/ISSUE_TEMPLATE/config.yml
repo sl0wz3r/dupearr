@@ -1,0 +1,17 @@
+# New-issue chooser: only the bug and feature forms; everything else goes to Discussions or the
+# private security channel.
+blank_issues_enabled: false
+contact_links:
+  - name: Question or setup help
+    url: https://github.com/sl0wz3r/dupearr/discussions/categories/q-a
+    about: How do I…? Is this result expected? Ask in Discussions → Q&A.
+  - name: Idea or roadmap discussion
+    url: https://github.com/sl0wz3r/dupearr/discussions/categories/ideas
+    about: Open-ended ideas and larger proposals. See ROADMAP.md first.
+  - name: Security vulnerability
+    url: https://github.com/sl0wz3r/dupearr/security/policy
+    about: Please do not open a public issue. Report it privately as the security policy describes.
+  # Add once the Community Applications listing and the forum thread are live:
+  # - name: Unraid support thread
+  #   url: https://forums.unraid.net/topic/<id>-support-sl0wz3r-dupearr/
+  #   about: Unraid-specific installation help in the Unraid forum.

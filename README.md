@@ -5,16 +5,23 @@
 <h1 align="center">Dupearr</h1>
 
 <p align="center">
-  <b>Find duplicate movies and TV episodes in Plex, keep the best copy, remove the rest — safely.</b><br>
-  A self-hosted, *arr-style app with a web UI, built to sit next to Plex, Radarr and Sonarr.
+  <b>Keep the best copy of every movie and episode in Plex. Safely remove the rest.</b><br>
+  A self-hosted, *arr-style duplicate manager for Plex, Radarr and Sonarr, with a web UI.
 </p>
 
 <p align="center">
-  <a href="https://github.com/sl0wz3r/dupearr/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/sl0wz3r/dupearr/actions/workflows/ci.yml/badge.svg?branch=main"></a>
-  <a href="https://github.com/sl0wz3r/dupearr/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/sl0wz3r/dupearr?include_prereleases&amp;sort=semver"></a>
-  <a href="https://github.com/sl0wz3r/dupearr/pkgs/container/dupearr"><img alt="Container image on ghcr.io" src="https://img.shields.io/badge/ghcr.io-dupearr-blue?logo=docker"></a>
-  <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/sl0wz3r/dupearr"></a>
+  <a href="https://github.com/sl0wz3r/dupearr/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/sl0wz3r/dupearr/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/sl0wz3r/dupearr/actions/workflows/release.yml"><img alt="Release workflow status" src="https://github.com/sl0wz3r/dupearr/actions/workflows/release.yml/badge.svg"></a>
+  <a href="https://github.com/sl0wz3r/dupearr/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/sl0wz3r/dupearr?include_prereleases&amp;sort=semver"></a>
+  <a href="https://github.com/sl0wz3r/dupearr/pkgs/container/dupearr"><img alt="Container image on ghcr.io (amd64, arm64)" src="https://img.shields.io/badge/ghcr.io-dupearr-blue?logo=docker&amp;logoColor=white"></a>
+  <a href="LICENSE"><img alt="License: GPL-3.0-or-later" src="https://img.shields.io/github/license/sl0wz3r/dupearr"></a>
 </p>
+
+> [!IMPORTANT]
+> **Beta (0.1).** Dupearr deletes media files. It starts in its safest state: dry run and manual
+> approval are on, recent files are never touched, and every run has a cap (see
+> [Safety first](#safety-first)). It is still new software, so keep backups of anything you
+> cannot replace, and read a few dry-run results before you let it remove anything.
 
 ---
 
@@ -26,22 +33,25 @@ remux, …") picks the copy to keep, explains why, and lets you review everythin
 file is touched. Approved removals go through the owning \*arr (so it doesn't re-download them),
 through Plex, or into Dupearr's own recycle bin.
 
-**Status:** pre-1.0 (0.1.0, unreleased). Everything is designed around not losing data, but
-keep backups of anything you cannot replace.
+**Want to see it first?** The [demo](#try-it-without-touching-your-library) runs Dupearr against
+a fake Plex, Radarr and Sonarr, so you can try everything without touching your library.
 
 ## Contents
 
+- [Screenshots](#screenshots)
 - [Features](#features)
 - [Safety first](#safety-first)
-- [Screenshots](#screenshots)
+- [Why Dupearr?](#why-dupearr)
+- [Try it without touching your library](#try-it-without-touching-your-library)
 - [Quick start](#quick-start) — [Unraid](#unraid) · [docker compose](#docker-compose) · [docker run](#docker-run) · [binaries](#native-binaries)
 - [First run](#first-run)
 - [Configuration reference](#configuration-reference)
 - [How deletion works](#how-deletion-works)
 - [FAQ](#faq)
+- [Getting help](#getting-help)
 - [Security](#security)
 - [Known limitations & roadmap](#known-limitations--roadmap)
-- [Development](#development)
+- [Contributing & development](#contributing--development)
 - [License](#license)
 
 User guides live in [`docs/user/`](docs/user/): [requirements](docs/user/requirements.md) ·
@@ -50,6 +60,54 @@ User guides live in [`docs/user/`](docs/user/): [requirements](docs/user/require
 [configuration](docs/user/configuration.md) · [profiles](docs/user/profiles.md) ·
 [safety](docs/user/safety.md) · [webhooks](docs/user/webhooks.md) ·
 [troubleshooting](docs/user/troubleshooting.md) · [FAQ](docs/user/faq.md).
+
+## Screenshots
+
+The screenshots show a fake library served by Dupearr's test servers (`tools/fakemedia`, the
+same ones the [demo](#try-it-without-touching-your-library) uses). No real media was involved.
+
+<p align="center">
+  <img src="docs/images/demo.gif" alt="Animated walkthrough: opening a duplicate group from the list, comparing the copies and approving the removal with dry run on" width="860">
+</p>
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/images/duplicates.png"><img src="docs/images/duplicates.png" alt="Duplicates list with status filters, bulk actions and reclaimable space"></a>
+      <p align="center"><b>Duplicates</b>: every group, its status and the space you would reclaim</p>
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/images/detail.png"><img src="docs/images/detail.png" alt="A duplicate group: the copies side by side, the keeper highlighted and the deciding criterion explained"></a>
+      <p align="center"><b>Group detail</b>: the copies side by side, which one is kept and why</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/images/profile.png"><img src="docs/images/profile.png" alt="Profile editor with an ordered chain of decision criteria"></a>
+      <p align="center"><b>Profiles</b>: an ordered chain of criteria that picks the keeper</p>
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/images/settings.png"><img src="docs/images/settings.png" alt="Settings page in the familiar *arr layout"></a>
+      <p align="center"><b>Settings</b>: the familiar *arr layout</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <a href="docs/images/history.png"><img src="docs/images/history.png" alt="Activity history listing each removal with its method and whether it is permanent or restorable"></a>
+      <p align="center"><b>Activity → History</b>: what was removed (or would have been, in dry run), how, and whether it can be restored</p>
+    </td>
+    <td width="50%" valign="top">
+      <a href="docs/images/status.png"><img src="docs/images/status.png" alt="System status page with health checks"></a>
+      <p align="center"><b>System → Status</b>: health checks that point at configuration problems</p>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center">
+      <a href="docs/images/mobile.png"><img src="docs/images/mobile.png" alt="Dupearr on a phone-sized screen" width="280"></a>
+      <p align="center"><b>Mobile</b>: the same UI on a phone</p>
+    </td>
+  </tr>
+</table>
 
 ## Features
 
@@ -107,14 +165,54 @@ Dupearr deletes media, so every default errs on the side of doing nothing:
 
 Details: [docs/user/safety.md](docs/user/safety.md).
 
-## Screenshots
+## Why Dupearr?
 
-> Screenshots will be added before the 1.0 release.
->
-> - Duplicates list with filters and reclaimable space
-> - Group detail: side-by-side comparison and decision explanation
-> - Profile editor (criteria chain, templates, protections)
-> - Activity → Queue / History with permanent vs. restorable removals
+Plex can already show you duplicates, and several tools remove them. Dupearr's focus is the part
+that is easy to get wrong: deciding which copy to keep, and removing the others in a way that you
+can review and undo. The table compares what each tool documents (from its README and source), as
+of 2026-09:
+
+| | **Dupearr** | Plex's *Duplicates* view | [plex_dupefinder](https://github.com/l3uddz/plex_dupefinder) | [Cleanarr](https://github.com/se1exin/Cleanarr) | [Deduparr](https://github.com/deduparr-dev/deduparr) | [Deduplarr](https://github.com/thedinz/Deduplarr) |
+|---|---|---|---|---|---|---|
+| Interface | Web UI (\*arr-style) and API | Plex apps | Command line (Python) | Web UI | Web UI | Web UI |
+| Finds duplicates | Versions within one Plex item; opt-in, the same TMDB/IMDb/TVDB id across libraries; full-disc backups found on disk | Items with two or more merged versions, intentional or not | Plex's duplicate filter | Plex's duplicate filter | The Plex API, plus an optional filesystem "deep scan" (MD5 and fuzzy title) | The Plex API |
+| Picks the copy to keep | An ordered chain of criteria with tolerances; every decision is explained | You decide | An additive score (codecs, resolution, filename patterns, file size) | Keeps the widest version by default (ties: the largest) | An additive score plus regex rules | Your preferences for container, codecs and subtitles |
+| Radarr/Sonarr | Any number of instances: quality, custom-format score and tags for every copy | — | — | — | Removes files through them, then rescans | — |
+| Removes files through | The owning \*arr, Plex, or Dupearr's recycle bin (with restore) | Plex (owner account, *Allow media deletion*) | The Plex API | The Plex API | Radarr/Sonarr, qBittorrent, then the disk; rolls back on failure | The Plex API (versions or subtitle files) |
+| Out of the box | Dry run, manual approval, 7-day minimum age, per-run caps | Manual | Interactive; automatic mode optional | Manual selection | Dry run | Manual or automatic mode |
+| Project activity | New (2026-09) | Part of Plex | Last change 2024-02 | Last change 2024-07 | Active | New (2026-07) |
+
+"—" means the tool does not document such a feature.
+
+Other tools do things that Dupearr does not. Deduparr's filesystem scan can find copies that Plex
+never matched, and it works with qBittorrent. Deduplarr can also remove subtitle files. Cleanarr
+is widely used (about 738,000 Docker pulls). Plex's own view needs nothing extra. If you want
+rule-based cleanup of watched or old media rather than duplicates, look at
+[Maintainerr](https://github.com/Maintainerr/Maintainerr); Dupearr only deals with copies you
+have more than once.
+
+## Try it without touching your library
+
+[`deploy/demo`](deploy/demo/) starts Dupearr next to a **fake** Plex, Radarr, Radarr 4K and Sonarr,
+already configured and scanned. The fake library is a set of empty placeholder files in a Docker
+volume, and it covers the interesting cases: a 4K remux next to a 1080p WEB-DL, Plex Optimized
+Versions, a multi-episode file, two films Plex merged by mistake, editions and language variants
+that are not duplicates, and a 4K + 1080p pair managed by two Radarr instances. Scan, review,
+approve and even "delete": nothing real is involved, and no folder of your computer is mounted.
+All you need is Docker with Compose v2:
+
+```sh
+mkdir dupearr-demo && cd dupearr-demo
+curl -fsSLO https://raw.githubusercontent.com/sl0wz3r/dupearr/main/deploy/demo/docker-compose.yml && docker compose up -d
+```
+
+Then open <http://localhost:3873/> (no login; the demo only listens on 127.0.0.1). Is port 3873
+taken, for example by your real Dupearr? Start it with `DEMO_PORT=3874 docker compose up -d` and
+open port 3874 instead. `docker compose down -v` removes the demo completely. What to try:
+[deploy/demo/README.md](deploy/demo/README.md).
+
+Working on Dupearr itself? `make test-env` builds the same setup from source (see
+[Contributing & development](#contributing--development)).
 
 ## Quick start
 
@@ -138,6 +236,9 @@ tested, and check where it was built with
 ### Unraid
 
 **Install via Community Applications** (recommended):
+
+> The Community Applications listing is not live yet. Until Dupearr shows up in the **Apps** tab,
+> use the manual template (*Without Community Applications*, below).
 
 1. Open the **Apps** tab, search for **Dupearr** and click **Install**.
 2. Check the paths (`/config` → `/mnt/user/appdata/dupearr`, `/data` → the same host folder your
@@ -373,6 +474,20 @@ Yes: `http://<host>:3873/api/v1/…` with the `X-Api-Key` header. See [docs/API.
 
 More answers in the [FAQ](docs/user/faq.md).
 
+## Getting help
+
+- **Questions and setup help:**
+  [Discussions → Q&A](https://github.com/sl0wz3r/dupearr/discussions/categories/q-a).
+- **Bugs:** open an issue with the
+  [bug report form](https://github.com/sl0wz3r/dupearr/issues/new/choose). It asks for your
+  version, install method, dry-run setting and logs. Never paste API keys or tokens, and check the
+  file paths in your logs before you post them.
+- **Something was removed that should not have been:** turn dry run back on, check *Activity →
+  History* (anything in Dupearr's recycle bin can be restored), then report it.
+- **Security vulnerabilities:** privately, as described in [SECURITY.md](SECURITY.md).
+
+Where each kind of question goes, and what to include: [SUPPORT.md](SUPPORT.md).
+
 ## Security
 
 Dupearr holds your Plex **owner** token and \*arr API keys and can delete media, so treat it like
@@ -392,7 +507,8 @@ as described in [SECURITY.md](SECURITY.md).
 ## Known limitations & roadmap
 
 What Dupearr does **not** do yet. Nothing here is a promise or a date; these are the directions
-the design leaves room for.
+the design leaves room for. [ROADMAP.md](ROADMAP.md) has the details: what each item needs, where
+it plugs in, and where help is welcome.
 
 | Area | Today | Roadmap |
 |---|---|---|
@@ -402,12 +518,24 @@ the design leaves room for.
 | Files Plex does not know | No content hashing: a copy Plex has not matched (wrong match, unscanned folder, a file outside every library) is invisible, and identical files are only detected through Plex and the \*arrs (same path/name + size, hardlinks). | Optional **hash-based** detection of identical files on disk, outside Plex. |
 | Full-disc backups | Found only in a movie's own folder (or, in a shared folder, as an image named after the movie), read from the disc's metadata on every scan. Disc images (`.iso`) have unknown quality and go to review; discs in TV libraries and AVCHD/BDAV/HD DVD folders are only protected, never removed. | Reading the video attributes inside disc images; season discs in TV libraries. |
 | Decision criteria | File attributes only (resolution, HDR, source, custom-format score, bitrate, audio, codec, size, age, language, library, patterns…). | **Watch history** criteria from Tautulli / Plex (e.g. keep the copy that is actually played, or the one with the user's progress). |
+| Dashboards | `GET /api/v1/duplicate/stats` returns the numbers (group counts, reclaimable and reclaimed space, last scan; API key required), but there is no ready-made widget. | A Homepage `customapi` example, and native **Homepage / Homarr** widgets. |
+| Languages | The web UI is in English only. | Translations (i18n). |
 | Host and proxy trust | Trusted proxies and allowed host names are set with the `DUPEARR__AUTH__TRUSTEDPROXIES` / `DUPEARR__AUTH__ALLOWEDHOSTS` environment variables only. Without them *None* and *External* only trust requests that open Dupearr by an IP address or a local host name (DNS-rebinding guard), and Dupearr's port must only be reachable through the authenticating proxy. | The same lists in *Settings → General* / `config.xml`. |
 | Shared host names | A URL base (`/dupearr`) behind a reverse proxy that serves other apps on the **same host name** (`/radarr`, `/sonarr`, …) is not an isolation boundary: they share one browser origin, so a script flaw (XSS) in any of them can act with your Dupearr session (it cannot read the API key, which the web UI never receives). | Give Dupearr its **own host name** (`dupearr.example.com`) — recommended whenever other apps share the proxy. |
 
-Suggestions and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+Ideas are welcome in
+[Discussions → Ideas](https://github.com/sl0wz3r/dupearr/discussions/categories/ideas); pull
+requests are welcome too, see [Contributing & development](#contributing--development).
 
-## Development
+## Contributing & development
+
+Contributions are welcome, from bug reports and docs fixes to code. Start with
+[CONTRIBUTING.md](CONTRIBUTING.md): Dupearr deletes people's media, so it explains the safety rules
+every change has to follow. Issues labelled
+[good first issue](https://github.com/sl0wz3r/dupearr/labels/good%20first%20issue) are small and
+well-scoped, and [help wanted](https://github.com/sl0wz3r/dupearr/labels/help%20wanted) marks
+larger ones where a contributor would be welcome; please comment on an issue before you start.
+[ROADMAP.md](ROADMAP.md) lists the bigger directions.
 
 Requirements: Go 1.27+, Node.js 24 (20.19+ or 22.13+ also work), make; Docker with buildx for
 images.
@@ -434,7 +562,9 @@ Web UI work: run the backend (`make run`), then `cd web && npm run dev` — Vite
 **Fake media servers.** `go run ./tools/fakemedia` serves a realistic fake Plex server plus
 Radarr and Sonarr instances backed by sparse dummy files (TRaSH `/data` layout), so you can scan,
 review and "delete" without touching real media. The same fakes back the end-to-end tests
-(`internal/testutil/fakemedia`) and record any call Dupearr must never make.
+(`internal/testutil/fakemedia`) and record any call Dupearr must never make. `make test-env`
+starts Dupearr built from source next to the fakes in Docker, pre-configured with dry run on
+([deploy/test-env](deploy/test-env/README.md)).
 
 Design documents: [architecture](docs/ARCHITECTURE.md), [decisions](docs/DECISIONS.md) (these win
 on conflict), [package contracts](docs/CONTRACTS.md), [HTTP API](docs/API.md) and the research notes

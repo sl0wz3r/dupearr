@@ -6,6 +6,21 @@ All notable changes to Dupearr are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-24
+
+### Added
+
+- One-command public demo (`deploy/demo/`): Dupearr plus fake Plex, Radarr, Radarr 4K and Sonarr
+  with fake media, bound to localhost only; the fake servers are published as the
+  `dupearr-demo-media` image on every release.
+- README screenshots and a short demo GIF, a "Why Dupearr?" comparison, badges, issue and pull
+  request templates, `SUPPORT.md` and `ROADMAP.md`.
+
+### Changed
+
+- Release workflow: GitHub Actions pinned to their Node 24 releases; the demo stack is smoke-tested
+  against the freshly pushed image before its image is published.
+
 ## [0.1.0] - 2026-09-24
 
 First public version.
@@ -192,5 +207,6 @@ First public version.
 - Security review report and deployment hardening guide: [docs/SECURITY.md](docs/SECURITY.md);
   vulnerability reporting: [SECURITY.md](SECURITY.md).
 
-[Unreleased]: https://github.com/sl0wz3r/dupearr/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/sl0wz3r/dupearr/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/sl0wz3r/dupearr/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/sl0wz3r/dupearr/releases/tag/v0.1.0

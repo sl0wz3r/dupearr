@@ -218,6 +218,34 @@ test-env-logs: ## Follow the test environment's logs
 test-env-down: ## Stop the test environment (keeps its volumes; test-env-reset wipes them)
 	$(TEST_ENV) down
 
+# One-command public demo (deploy/demo): Dupearr + the fake Plex/*arrs of the demo-media image
+# (docker/fakemedia.Dockerfile), seeded through the API; users pull both images from the registry.
+# demo-local builds both from this tree for this machine (DOCKER_PLATFORM), runs deploy/demo/test.sh
+# with them as Compose project DEMO_PROJECT on 127.0.0.1:DEMO_PORT (seed, the default scenario's 10
+# groups, dry run, recycle bin, restore, idempotent re-seed), then removes the demo, its volumes and
+# both images. DEMO_KEEP=true keeps everything and leaves the demo running.
+# Its image names are its own (not DEMO_DUPEARR_IMAGE / DEMO_MEDIA_IMAGE, which the compose file
+# reads from the environment): demo-local builds these tags and deletes them afterwards.
+DEMO_LOCAL_IMAGE       ?= dupearr-demo-local:dev
+DEMO_LOCAL_MEDIA_IMAGE ?= dupearr-demo-media-local:dev
+DEMO_PORT              ?= 38731
+DEMO_PROJECT           ?= dupearr-demo-local
+DEMO_KEEP              ?= false
+
+.PHONY: demo-local
+demo-local: ## Build Dupearr + demo-media from this tree, test deploy/demo on 127.0.0.1:DEMO_PORT, clean up
+	docker buildx build --platform $(DOCKER_PLATFORM) --load $(DOCKER_BUILD_ARGS) -t $(DEMO_LOCAL_IMAGE) $(DOCKER_FLAGS) .
+	docker buildx build --platform $(DOCKER_PLATFORM) --load $(DOCKER_BUILD_ARGS) -f docker/fakemedia.Dockerfile -t $(DEMO_LOCAL_MEDIA_IMAGE) .
+	@status=0; \
+	DEMO_DUPEARR_IMAGE='$(DEMO_LOCAL_IMAGE)' DEMO_MEDIA_IMAGE='$(DEMO_LOCAL_MEDIA_IMAGE)' DEMO_PORT='$(DEMO_PORT)' \
+		DEMO_PROJECT='$(DEMO_PROJECT)' DEMO_KEEP='$(DEMO_KEEP)' sh deploy/demo/test.sh || status=$$?; \
+	if [ '$(DEMO_KEEP)' = true ]; then \
+		echo "DEMO_KEEP=true: kept $(DEMO_LOCAL_IMAGE) and $(DEMO_LOCAL_MEDIA_IMAGE)"; \
+	else \
+		docker image rm '$(DEMO_LOCAL_IMAGE)' '$(DEMO_LOCAL_MEDIA_IMAGE)' >/dev/null && echo "Removed $(DEMO_LOCAL_IMAGE) and $(DEMO_LOCAL_MEDIA_IMAGE)"; \
+	fi; \
+	exit $$status
+
 # Unraid Community Applications (CA): the public template and ca_profile.xml are rendered from
 # unraid/ca/*.tmpl with the values in ONE file, CA_ENV (unraid/ca/publish.env). Workflow and
 # submission steps: unraid/ca/README.md and unraid/README.md. Rendered files are validated before

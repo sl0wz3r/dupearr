@@ -1,0 +1,119 @@
+# Dupearr demo: Dupearr plus FAKE Plex, Radarr, Radarr 4K and Sonarr servers with a made-up
+# library, configured and scanned for you. Nothing here touches your media: the "library" is a tree
+# of empty placeholder files inside a Docker volume, the fake servers are only reachable inside this
+# demo's Docker network, and no folder of your computer is mounted.
+#
+#   mkdir dupearr-demo && cd dupearr-demo
+#   curl -fsSLO https://raw.githubusercontent.com/sl0wz3r/dupearr/main/deploy/demo/docker-compose.yml && docker compose up -d
+#   open http://localhost:3873          no login; Dupearr listens on 127.0.0.1 only
+#   docker compose logs -f seed         set-up progress (ready about 30 s after the start)
+#   docker compose down -v              remove the demo: containers, network and both volumes
+#
+# Port 3873 taken (by your own Dupearr, say)?  DEMO_PORT=3874 docker compose up -d
+# Pin a release instead of :latest:  DEMO_DUPEARR_IMAGE=<image>:X.Y.Z DEMO_MEDIA_IMAGE=<image>:X.Y.Z
+# What to try, and how it works: deploy/demo/README.md. Needs Docker Compose v2 (`docker compose`).
+name: dupearr-demo
+
+services:
+  # A new named volume is owned by root: hand /data (the fake library and Dupearr's recycle bin) to
+  # 1000:1000, the user the fakes and Dupearr (PUID/PGID) run as, so Dupearr can move the files the
+  # fakes created (filesystem deletion method, recycle bin, restore).
+  init:
+    image: ${DEMO_MEDIA_IMAGE:-ghcr.io/sl0wz3r/dupearr-demo-media:latest}
+    user: "0:0"
+    entrypoint: ["chown", "1000:1000", "/data"]
+    network_mode: none
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+    volumes:
+      - media:/data
+    restart: "no"
+
+  # Fake Plex Media Server (32400), Radarr (7878), Radarr 4K (7879) and Sonarr (8989) with scenario
+  # "default": every duplicate situation Dupearr handles. Fixed, public test credentials, so no port
+  # is published. Restarting this service resets the fake library to the scenario.
+  demo-media:
+    image: ${DEMO_MEDIA_IMAGE:-ghcr.io/sl0wz3r/dupearr-demo-media:latest}
+    user: "1000:1000"
+    command: ["-data", "/data", "-host", "0.0.0.0", "-scenario", "default"]
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    volumes:
+      - media:/data
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  dupearr:
+    image: ${DEMO_DUPEARR_IMAGE:-ghcr.io/sl0wz3r/dupearr:latest}
+    environment:
+      # Same user as the fakes: the shared /data volume belongs to it.
+      PUID: "1000"
+      PGID: "1000"
+      UMASK: "002"
+      TZ: ${DEMO_TZ:-Etc/UTC}
+      # No login page. Dupearr trusts "None" only for requests that name it by a private host
+      # (localhost, an IP address) and the port below is bound to 127.0.0.1: never publish it.
+      DUPEARR__AUTH__METHOD: "None"
+      DUPEARR__APP__INSTANCENAME: "Dupearr Demo"
+    ports:
+      - "127.0.0.1:${DEMO_PORT:-3873}:3873"
+    volumes:
+      - config:/config
+      # The same /data the fakes serve from, so every path mapping is an identity mapping.
+      - media:/data
+    # Least privilege, as in deploy/docker-compose.yml: the entrypoint only needs these to set up
+    # /config and drop to PUID:PGID.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - KILL
+      - SETGID
+      - SETUID
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      demo-media:
+        condition: service_started
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  # One-shot: configures Dupearr through its API (fake Plex + the three *arrs, path mappings, a
+  # scope group, demo settings) and runs the first scan (deploy/demo/seed.sh, in the demo-media
+  # image). It reads Dupearr's API key from the config volume, so it runs as Dupearr's PUID:PGID.
+  # Runs again on every `docker compose up`; what already exists is left alone.
+  seed:
+    image: ${DEMO_MEDIA_IMAGE:-ghcr.io/sl0wz3r/dupearr-demo-media:latest}
+    user: "1000:1000"
+    entrypoint: ["/usr/local/bin/dupearr-demo-seed"]
+    environment:
+      DEMO_PORT: ${DEMO_PORT:-3873}
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    volumes:
+      - config:/config:ro
+    depends_on:
+      dupearr:
+        condition: service_healthy
+      demo-media:
+        condition: service_started
+    restart: "no"
+
+volumes:
+  media:
+  config:

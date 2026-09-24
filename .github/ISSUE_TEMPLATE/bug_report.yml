@@ -1,0 +1,113 @@
+name: Bug report
+description: Something in Dupearr is wrong or broken.
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this.
+
+        > **Never post API keys, tokens or passwords.** That means your Plex token, your Radarr/Sonarr API keys, Dupearr's API key or webhook token (every webhook URL contains it, as `?apikey=`), notification secrets and passwords. Do not attach `config.xml`, `dupearr.db` or a backup zip: they hold every secret. If something leaks, replace it (see [SUPPORT.md](https://github.com/sl0wz3r/dupearr/blob/main/SUPPORT.md#sharing-logs-safely)).
+
+        - **Security vulnerability?** Do not open an issue. Report it privately as described in the [security policy](https://github.com/sl0wz3r/dupearr/security/policy).
+        - **A question, or not sure it is a bug?** Ask in [Discussions → Q&A](https://github.com/sl0wz3r/dupearr/discussions/categories/q-a).
+        - **Did Dupearr remove something it should not have?** Turn dry run back on first (*Settings → Media Management*). Then check *Activity → History*: anything in Dupearr's recycle bin can be restored from there.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched the existing issues and discussions.
+          required: true
+        - label: I removed every API key, token and password from what I paste below, and checked the file paths I share.
+          required: true
+  - type: input
+    id: version
+    attributes:
+      label: Dupearr version
+      description: "*System → Status*, or `dupearr version`. Add the image tag or digest if you pin one."
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Install method
+      options:
+        - Unraid (Community Applications)
+        - Unraid (manual template)
+        - docker compose
+        - docker run
+        - Native binary on Linux
+        - Native binary on macOS
+        - Native binary on Windows
+        - Other (say which below)
+    validations:
+      required: true
+  - type: dropdown
+    id: dry-run
+    attributes:
+      label: Dry run
+      description: "*Settings → Media Management → Dry run*"
+      options:
+        - On (the default)
+        - "Off"
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: data-loss
+    attributes:
+      label: Did Dupearr remove, move or change a file it should not have?
+      description: If you answer yes, this report gets the `safety` label and is handled first.
+      options:
+        - "No"
+        - "Yes"
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Scan the "Movies" library
+        2. Open the group for …
+        3. …
+  - type: textarea
+    id: environment
+    attributes:
+      label: Your setup
+      description: >-
+        The versions of Plex, Radarr and Sonarr, and how many instances of each. Your order of
+        deletion methods. The container path mappings of Plex, the *arrs and Dupearr, and the path
+        mappings set up in Dupearr. Path problems are the most common cause of bugs.
+      placeholder: |
+        Plex 1.x, Radarr 6.x (two instances: 1080p and 4K), Sonarr 4.x
+        Deletion methods: arr, filesystem
+        Plex: /mnt/user/data/media -> /data/media; Radarr and Dupearr: the same
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: >-
+        Set the log level to `debug` (*Settings → General*), reproduce the problem, and paste the
+        part of the log around it (*System → Log Files*, or `docker logs dupearr`). Dupearr redacts
+        API keys, tokens and passwords in its log, but it does **not** hide file paths, host names
+        or IP addresses. Check the paths and replace anything you do not want to make public, but
+        keep the folder structure. Remove any first-run `setupCode=` line.
+      render: text
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: >-
+        Screenshots (a group's detail with its "decided by" line and review flags helps), related
+        issues, workarounds. Crop out any settings page that shows a token or an API key.

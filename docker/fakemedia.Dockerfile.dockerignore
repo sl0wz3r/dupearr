@@ -1,0 +1,12 @@
+# Build context of docker/fakemedia.Dockerfile. BuildKit reads <Dockerfile>.dockerignore instead of
+# the repository's .dockerignore (which leaves out deploy/, needed here for the demo's seeder).
+# Allowlist: the Go module, the fake servers' sources, the seeder and the license; nothing else
+# (no .git, no local data, no web/node_modules) is sent to the builder.
+*
+!go.mod
+!go.sum
+!internal
+!tools
+!deploy/demo/seed.sh
+!LICENSE
+**/.DS_Store

@@ -3,6 +3,34 @@
 Thanks for helping! Dupearr deletes people's media, so correctness and safety come before
 features. Please read this page before opening a pull request.
 
+## Ways to help
+
+- **Try the beta and tell us what happens.** The [demo](deploy/demo/) and `make test-env` run
+  Dupearr against fake media servers, so you can try it without a real library. Report bugs with
+  the [bug report form](https://github.com/sl0wz3r/dupearr/issues/new/choose), and ask questions
+  in [Discussions](https://github.com/sl0wz3r/dupearr/discussions). [SUPPORT.md](SUPPORT.md)
+  says where each kind of question goes.
+- **Pick up an issue.** Issues labelled
+  [`good first issue`](https://github.com/sl0wz3r/dupearr/labels/good%20first%20issue) are small
+  and well-scoped. Issues labelled
+  [`help wanted`](https://github.com/sl0wz3r/dupearr/labels/help%20wanted) are larger ones where
+  a contributor would be welcome. Comment on the issue before you start, so that two people do not
+  build the same thing.
+- **Shape the roadmap.** [ROADMAP.md](ROADMAP.md) lists where Dupearr is heading. Please discuss
+  anything large in Discussions → *Ideas* before you write code: a new media server, a new kind
+  of detection, anything that changes what gets removed.
+- **Improve the docs.** The user guides in [`docs/user/`](docs/user/) are always worth a fix or a
+  clearer example.
+
+The labels you will see on issues:
+
+| Label | Meaning |
+|---|---|
+| `needs-triage` | New; a maintainer has not looked at it yet. |
+| `safety` | Could affect which files are removed, or how. Handled first; needs regression tests and an extra review. |
+| `roadmap` | Tracks an item in [ROADMAP.md](ROADMAP.md). |
+| `good first issue` / `help wanted` | See above. |
+
 ## Ground rules
 
 - **Safety first.** Anything that can remove, move or modify a media file needs tests for the
@@ -30,7 +58,12 @@ make            # build web UI + bin/dupearr
 make run        # run on :3873 with a throwaway data dir (./tmp/data)
 cd web && npm run dev   # UI dev server on :5173, proxies the API to :3873
 go run ./tools/fakemedia   # fake Plex + Radarr + Sonarr with sparse dummy files
+make test-env   # Docker: Dupearr built from source + the fakes, pre-configured, on :3873
 ```
+
+`make test-env` ([`deploy/test-env/`](deploy/test-env/)) is the quickest way to click through a
+change end to end: a scenario with every interesting case, dry run on, and nothing that touches
+real media.
 
 Before pushing, run what CI runs:
 
@@ -96,11 +129,16 @@ wrapper and SIGTERM delivery; CI runs it too).
    through Renovate (`.github/renovate.json`) or by hand with the new digest/SHA, never back to a
    bare tag.
 
+The [pull request template](.github/pull_request_template.md) asks for these points and has a
+short checklist.
+
 Found a vulnerability? Do not open a public issue: see [SECURITY.md](SECURITY.md).
 
-Bug reports: include the Dupearr version (*System → Status* or `dupearr version`), how you run it
-(Unraid/compose/native), the relevant part of the log at `debug` level (secrets are redacted),
-and your path layout (Plex, \*arr and Dupearr container mappings).
+Bug reports: use the bug report form. It asks for the Dupearr version (*System → Status* or
+`dupearr version`), how you run it, whether dry run is on, your path layout (Plex, \*arr and
+Dupearr container mappings) and the relevant part of the log at `debug` level. Dupearr redacts
+secrets in its log, but not file paths or host names: check them before you post. Never post API
+keys, tokens or passwords. [SUPPORT.md](SUPPORT.md#sharing-logs-safely) has the details.
 
 ## Releasing (maintainers)
 
