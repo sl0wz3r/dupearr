@@ -94,6 +94,13 @@ still needs a design.
 - **Goal:** Lidarr and music libraries. Albums and tracks need their own grouping rules (editions,
   remasters, formats), so this starts with a design. Notes on Lidarr's API are in
   [docs/research/arr-api.md](docs/research/arr-api.md) (section 7).
+- **Research and design:** [docs/research/lidarr-music.md](docs/research/lidarr-music.md).
+  Recommendation: a first slice after a short live check of Plex's music model. Only format
+  duplicates of the *same release* (FLAC and MP3 of one album release, matched by MusicBrainz
+  release-track ids): Lidarr tracks one copy, the other is unmapped, and only the unmapped copy
+  may be removed, by hand and into a recycle bin. Plex has no versions for music, and one
+  recording legitimately appears on albums, singles and compilations, so editions, remasters and
+  compilations have no rule that can be confirmed automatically: later and review-only, or never.
 
 ## Hash-based detection outside Plex
 
