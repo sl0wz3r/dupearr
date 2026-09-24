@@ -1,7 +1,7 @@
 import { Plus, RefreshCw } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { errorMessage } from '@/api/client';
-import { useArrInstances, useLibraries, useProfileSchema, useProfiles } from '@/api/hooks';
+import { useArrInstances, useLibraries, useProfileSchema, useProfiles, useTautulliInstances } from '@/api/hooks';
 import type { Profile } from '@/api/types';
 import {
   AdvancedSettingsToggle,
@@ -40,6 +40,7 @@ export default function ProfilesPage() {
   const schema = useProfileSchema();
   const libraries = useLibraries();
   const arr = useArrInstances();
+  const tautulli = useTautulliInstances();
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [editor, setEditor] = useState<EditorState | null>(null);
@@ -137,6 +138,7 @@ export default function ProfilesPage() {
           schema={schema.data}
           libraries={libraries.data ?? []}
           arrInstances={arr.data ?? []}
+          watchHistoryConnected={tautulli.data ? tautulli.data.some((t) => t.enabled) : undefined}
           existingNames={names}
           onClose={() => setEditor(null)}
           onClone={(draft) => openEditor(draft)}

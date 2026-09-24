@@ -27,6 +27,7 @@ Dupearr safely can jump to the [deployment hardening guide](#deployment-hardenin
 - [9. Final verification](#9-final-verification)
 - [10. Keeping it secure](#10-keeping-it-secure)
 - [11. Incident: loose Blu-ray clips deleted](#11-incident-loose-blu-ray-clips-deleted)
+- [12. Watch history (Tautulli, issue #5)](#12-watch-history-tautulli-issue-5)
 
 ## 1. Scope and method
 
@@ -112,8 +113,8 @@ its port forwarded to the internet.
 **Assets**
 
 - the **Plex owner token**, which controls the Plex server and the plex.tv account;
-- Radarr and Sonarr **API keys**, and **notification secrets** (SMTP passwords, bot tokens, webhook
-  URLs);
+- Radarr, Sonarr and Tautulli **API keys**, and **notification secrets** (SMTP passwords, bot tokens,
+  webhook URLs);
 - the user's **media files**: Dupearr can delete them;
 - Dupearr's **API key**, admin **session** and **password hash**;
 - integrity of the **decisions** (which copy is kept) and of the **audit history**.
@@ -775,3 +776,36 @@ a backup. No other files, no credentials and no other instance were affected.
 - The Plex method is permanent. The hardening guide already says to put `plex` last or remove it
   and to keep dry run on until the results are validated (§8, sections 4 and 7); both would have
   limited this incident.
+
+## 12. Watch history (Tautulli, issue #5)
+
+The Played / Last played criteria (DECISIONS D10) added one outbound client
+(`internal/integrations/tautulli`) and one secret class (the Tautulli admin API key, stored in the
+database and in backups). They follow the rules above:
+
+- **The key never travels in a URL** (D3, SEC-004 posture): only the `X-Api-Key` header, which
+  Tautulli reads since 2.18.0; older versions are refused rather than sent `?apikey=`. A stale
+  query in the stored URL is dropped, and the client refuses to add an `apikey` parameter.
+- **Outbound hardening** like the *arr client: redirects are never followed, link-local and
+  cloud-metadata addresses are refused also behind a proxy (netguard, SEC-052), bodies and page
+  sizes are bounded (SEC-020), error texts carry neither the URL nor the response body (SEC-031,
+  SEC-050); the classification of an error answer matches its message without repeating it.
+- **Secret handling** like the other connections: masked in every API response; a masked key is
+  only reused for the same endpoint with TLS verification no weaker (`restoreSecret`, SEC-018);
+  every change is a `connectionChanged` security event without the key; the restore summary lists
+  Tautulli destinations (`tautulliInstances`); log lines are redacted.
+- **Privacy:** only play counts, distinct-user counts and dates are stored; Tautulli user names and
+  e-mail addresses are never decoded, stored, logged or notified, and the connection test reports
+  users without history as a count.
+- **No new deletion path:** the history only reorders a group's ranking. A failed or unverifiable
+  read is never "not played"; a group ranked on it goes to review and is never auto-approved; the
+  executor never reads it (ARCHITECTURE §6 invariant 9).
+
+Regression tests: `internal/integrations/tautulli/tautulli_test.go` (TestKeyOnlyInHeader,
+TestErrorsNeverCarryURLKeyOrBody, TestRedirectNotFollowed, TestRefusesMetadataAddresses,
+TestBoundedBody, TestClassification, TestHistoryShapesAreNeverEmpty), `fakemedia_test.go`
+(TestClientAgainstFakeTautulli: the fake records any `?apikey=` as `tautulli_apikey_query_param`);
+`internal/api/tautulli_test.go` (TestTautulliCRUD, TestTautulliTest,
+TestTautulliTestDoesNotReflectUpstreamBodies); `internal/backup/tautulli_test.go`;
+`internal/scanner/watch_test.go` (TestWatchFailuresMarkEveryCopyFailed); e2e
+`internal/e2e/watch_test.go`.

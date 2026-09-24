@@ -50,6 +50,10 @@ const (
 	FlagFullDisc       = "full_disc"         // the group contains a disc version (manual approval only)
 	FlagDiscUnreadable = "disc_unreadable"   // a disc's metadata could not be read or verified (review)
 	FlagDiscTracked    = "disc_tracked_clip" // an *arr tracks a single clip inside a disc
+	// FlagWatchUnreadable: the group's profile ranks by play history (played / last_played), a
+	// version would be removed, and the play history of a version could not be read (review;
+	// docs/DECISIONS.md D10).
+	FlagWatchUnreadable = "watch_unreadable"
 )
 
 // Decision is what happens to a version.
@@ -150,6 +154,9 @@ const (
 	CritAudioLanguage      CriterionType = "audio_language"
 	CritFilenameScore      CriterionType = "filename_score"
 	CritHealth             CriterionType = "health" // docs/DECISIONS.md D4: always first in templates
+	// Play history (docs/DECISIONS.md D10): opt-in, never in a template. An unknown history ties.
+	CritPlayed     CriterionType = "played"      // prefer a copy with recorded plays
+	CritLastPlayed CriterionType = "last_played" // prefer the most recently played copy
 )
 
 // Direction for numeric criteria.
@@ -269,6 +276,20 @@ type ArrInstance struct {
 	VerifyTLS bool      `json:"verifyTls"`
 	Enabled   bool      `json:"enabled"`
 	Tags      []string  `json:"tags"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// TautulliInstance is a configured Tautulli connection: the play history of one Plex server
+// (docs/DECISIONS.md D10). Its data only ranks versions; Dupearr never acts on Tautulli.
+type TautulliInstance struct {
+	ID        int64     `json:"id"`
+	Name      string    `json:"name"`
+	ServerID  int64     `json:"serverId"` // the media server whose plays it records (one Tautulli per server)
+	URL       string    `json:"url"`      // base url incl. HTTP root, e.g. http://tautulli:8181
+	APIKey    string    `json:"apiKey"`   // masked in API responses
+	VerifyTLS bool      `json:"verifyTls"`
+	Enabled   bool      `json:"enabled"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }

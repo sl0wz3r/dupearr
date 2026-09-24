@@ -14,6 +14,7 @@ reproduce, and attach the log to your issue: API keys, tokens and passwords are 
   - [I forgot my password](#i-forgot-my-password)
 - [Plex](#plex)
 - [Radarr and Sonarr](#radarr-and-sonarr)
+- [Tautulli (play history)](#tautulli-play-history)
 - [Permissions (PUID/PGID)](#permissions-puidpgid)
 - [Path mapping mistakes](#path-mapping-mistakes)
 - [Duplicates and decisions](#duplicates-and-decisions)
@@ -193,6 +194,21 @@ Plex finish (or *Analyze* the item in Plex); the group stays in review until the
 | Queue run aborted with a "folder missing" (`409`) error | Radarr/Sonarr says the movie's root folder or the series folder does not exist, usually an unmounted disk or share. Dupearr stops the whole run on purpose. Fix the mount, then run *Process Queue* again. |
 | Copies show as "not tracked" although the \*arr has them | The \*arr reports a different path than Plex: add [path mappings](#path-mapping-mistakes) for the \*arr. |
 | The \*arr downloads the removed copy again | Keep *Unmonitor when the keeper is elsewhere* on, make sure the removal went through the \*arr (method `arr`), and check the \*arr's quality cutoff (flag *cutoff not met*: it may keep upgrading). |
+
+## Tautulli (play history)
+
+| Symptom | Cause and fix |
+|---|---|
+| Review reason "the play history could not be read (…)" / flag *Play history unreadable* | The profile ranks by *Played* / *Last played* and the last scan could not read Tautulli. The reason in brackets says why; health check *TautulliConnectivityCheck* too. Fix it, then re-scan: the group returns to *pending* (auto mode needs its stable scans again). Meanwhile the history counts as unknown — a tie — so the proposed decision is the quality ranking; you can still approve it yourself. |
+| **Test**: "version 2.18.0 or later is required" | Tautulli before 2.18.0 only reads the API key from the URL, which Dupearr never uses. Update Tautulli. |
+| **Test**: "Tautulli did not receive the X-Api-Key header" | Tautulli is recent enough, but no key reached it: a reverse proxy in front of Tautulli drops the `X-Api-Key` header. Let the proxy pass it on, or point Dupearr at Tautulli directly. |
+| A 1080p copy that was played is removed / a copy without plays is kept although the other was played | *No plays recorded since <date>* only loses to plays made on or after that date (when the copy was added). Plays from before then do not count against it: nobody could choose it yet. |
+| **Test**: "monitors another Plex server" | The URL reaches a Tautulli of a different Plex server: pick the right Plex server in the dialog, or fix the URL. |
+| **Test**: "the API was not found" | Enable the API in Tautulli (*Settings → Web Interface → API*), and include Tautulli's HTTP root in the URL (`http://host:8181/tautulli`). |
+| A copy shows *Unknown (added before the recorded history starts …)* | Tautulli started recording that library after the copy was added: a missing play proves nothing. It stays a tie; quality decides. |
+| A copy shows *Unknown (Tautulli does not keep history for …)* | *Keep History* is off for that library or for a user (Tautulli → *Libraries* / *Users* → edit). With it off, plays are never recorded, so zero plays is unknown. |
+| A copy shows *Unknown (… earlier Plex item)* | Plex re-created the item in the same library (for example after the file moved); Tautulli keeps the old plays under the old item. Dupearr cannot tell whose plays they are. Plays of a file that lived in **another** library before are not looked up at all. |
+| Health *WatchHistoryCheck*: "has no enabled Tautulli connection" | A profile uses *Played* / *Last played* but no Tautulli is connected for that Plex server: add one in *Settings → Applications*, or remove the criteria. |
 
 ## Permissions (PUID/PGID)
 

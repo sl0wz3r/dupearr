@@ -57,6 +57,7 @@ const (
 // when a migration is added, so this is decided for each new one.
 var upgradableMigrations = map[int64]bool{
 	2: true, // 0002_retained_overrides: ADD COLUMN duplicate_groups.retained_overrides DEFAULT '{}'
+	3: true, // 0003_tautulli: CREATE TABLE tautulli_instances (an older backup has no rows for it)
 }
 
 // createReference creates path as an empty database with this build's schema.

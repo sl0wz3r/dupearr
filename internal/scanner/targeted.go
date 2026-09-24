@@ -289,6 +289,10 @@ func (p *pipeline) runTargeted(body models.TargetedScanBody) error {
 	if err := p.ctx.Err(); err != nil {
 		return canceled(err)
 	}
+	p.watch(items)
+	if err := p.ctx.Err(); err != nil {
+		return canceled(err)
+	}
 	p.applyFileAges(items)
 	p.noteUnavailable(items)
 	groups := engine.BuildGroups(items, engine.GroupOptionsFromSettings(cfg.settings, cfg.exclusions, cfg.libraries))

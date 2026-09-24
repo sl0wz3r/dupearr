@@ -67,6 +67,7 @@ internal/
   integrations/
     plex/               PMS client, plex.tv PIN auth + resource discovery, → models.MediaVersion
     arr/                Radarr & Sonarr v3 clients, webhook payload types
+    tautulli/           Tautulli API v2 client (read only: play history) — DECISIONS D10
   pathmap/              remote→local path translation + cross-system file matching
   disc/                 full-disc backups (BDMV/VIDEO_TS/ISO …): path rules, detection, main
                         feature (read-only, no symlinks, bounded) — DECISIONS D9
@@ -139,6 +140,12 @@ Normalized attributes (computed by the Plex mapper, overridable/enriched by *arr
 - `Edition`: normalized edition (Plex `editionTitle`, Radarr `edition`, or filename tokens such as
   `{edition-...}`, Director's Cut, Extended, Theatrical, Unrated, IMAX, Remastered, Criterion).
 - `OptimizedVersion`: true for Plex "Optimized Versions" — these are **never** duplicates.
+- `Watch` (DECISIONS D10): the play history of the version's **Plex item**, read from the media
+  server's Tautulli during the scan (nil without one): `status` `known` (`plays` > 0 = played,
+  0 = "no plays recorded" since `since`, the item's date added), `unknown` (with `reason`) or
+  `failed` (the read failed); `plays`, distinct `users`, `lastPlayed`, `readAt`. The versions of
+  one item share it; a full disc is always `unknown`. Only counts and dates are stored, never user
+  names.
 
 ### 4.2 DuplicateGroup
 A set of ≥2 versions that represent the same content. Identity key (stable across scans):
@@ -169,13 +176,19 @@ Group **flags** (informational + safety): `cross_library`, `duration_mismatch` (
 `arr_untracked_keeper` (the keeper is not tracked by an *arr that tracks a removed copy),
 `full_disc` (a disc version, or a file inside a disc structure; manual approval only),
 `disc_unreadable` (a disc could not be read or verified → review, kept), `disc_tracked_clip` (an
-*arr tracks a clip inside a disc).
+*arr tracks a clip inside a disc), `watch_unreadable` (the profile ranks by play history, something
+would be removed, a copy's history could not be read and copies of different Plex items could be
+told apart by it → review, never auto-approved; D10).
 
 ### 4.3 Decision profiles (the rules)
 A profile is an **ordered tiebreaker chain** of criteria plus keep options and protections.
 Versions are compared criterion by criterion; the first criterion that distinguishes two versions
 decides. Numeric criteria support `tolerancePercent` (values within tolerance are equal and fall
-through). A version missing a value always ranks **below** one that has it, for that criterion.
+through). A version missing a value ranks **below** one that has it, for that criterion — except
+where a value that cannot be compared is a **tie**: video bitrate across codecs, a custom format
+score without the same *arr instance, a disc's container and multichannel count, and an unknown or
+unreadable play history (`played`, `last_played`: DECISIONS D10 — an unknown history is never "not
+played").
 Final deterministic tiebreak (always appended): *arr-managed first, larger size, older `addedAt`,
 lexicographically smaller `Key`.
 
@@ -199,6 +212,8 @@ lexicographically smaller `Key`.
 | `arr_managed`           | boolean     | `value` optional instance id | tracked by (that) *arr wins |
 | `audio_language`        | boolean     | `value` language code (ISO 639-1/2) | has track in language wins |
 | `filename_score`        | pattern sum | `patterns[{pattern, score, regex, caseSensitive}]` | glob on full path by default |
+| `played`                | boolean     | — | a copy with recorded plays beats "no plays recorded" when played on or after that copy's `since` (date added); unknown ties (D10, needs Tautulli) |
+| `last_played`           | numeric     | `minDelta` (days); direction fixed to newer | more recent play wins; "no plays recorded" loses to a play on or after its `since`; unknown ties (D10) |
 
 Profile options:
 - `keepCount` (default 1): number of best versions kept per partition.
@@ -252,6 +267,12 @@ full-disc backups, DECISIONS D9.
    `GET /api/v3/series` then `GET /api/v3/episodefile?seriesId=` + `GET /api/v3/episode?seriesId=`
    only for series that appear in candidate groups (match by tvdb/imdb id). Files are matched to
    versions with `pathmap.Matcher` (mapped local path equality, then basename+size fallback).
+2b. **Play history** (DECISIONS D10): for every media server with an enabled Tautulli connection,
+   read the candidate items' plays (version ≥ 2.18.0, the server's identity, users' and libraries'
+   keep-history flags, each library's earliest play, plays by rating key with a canary key, and a
+   churn guard per zero-play item) and attach `MediaVersion.watch` to every version. Any read error
+   marks every copy of that server `failed` (counted as a scan error); nothing is ever inferred as
+   "not played" from a failure.
 3. **Group** with `engine.BuildGroups`: dedupe identical paths, split editions, compute flags
    (duration mismatch, multi-episode sharing, hardlinks when local path accessible, min-age).
 4. **Evaluate** each group with its library's profile (or default) → per-version decision, rank,
@@ -360,6 +381,9 @@ two ProcessQueue commands at once.
 8. A full disc is only removed as a whole, by manual approval, into the recycle bin; no file inside
    a disc — and no loose clip of a flattened backup — is ever removed on its own; with
    `keepPlayableCopy` a disc (a loose clip set included, and a single clip kept as its own version) is never the only kept copy (DECISIONS D9).
+9. Play history only reorders the ranking: it never protects, never unprotects and is never read by
+   the executor. An unknown or unreadable history is never "not played"; a group ranked on a
+   history that could not be read goes to review and is never auto-approved (DECISIONS D10).
 
 ---
 

@@ -14,7 +14,8 @@ import (
 // Item fetches one item's detail (checkFiles=1, includeGuids=1, skipRefresh=1) and maps it to a
 // MediaItem with all Versions (streams → normalized attributes via mediainfo). For episodes it
 // also fills ShowIDs (grandparent show guids, cached per client) plus Season/Episode/ShowTitle.
-// Optimized versions are returned with OptimizedVersion=true (callers skip them).
+// Optimized versions are returned with OptimizedVersion=true (callers skip them). GUID is the
+// item's own guid (play-history sources record plays under it, docs/DECISIONS.md D10).
 //
 // The caller must set ServerID/LibraryID on the item and ServerID/LibraryID/Key
 // ("plex:<serverID>:<mediaID>") on every version: this client does not know Dupearr's server
@@ -53,6 +54,7 @@ func (c *Client) Item(ctx context.Context, ratingKey string) (*models.MediaItem,
 		ExternalIDs:  externalIDs(m.GUID.String(), m.Guids),
 		ShowIDs:      map[string]string{},
 		EditionTitle: m.EditionTitle.String(),
+		GUID:         strings.TrimSpace(m.GUID.String()),
 		Thumb:        m.Thumb.String(),
 		AddedAt:      unixTime(m.AddedAt),
 		Versions:     make([]models.MediaVersion, 0, len(m.Media)),

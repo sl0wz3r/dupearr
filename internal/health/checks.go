@@ -45,6 +45,10 @@ type snapshot struct {
 	libsOK    bool
 	mappings  []models.PathMapping
 	mapsOK    bool
+	tautullis []models.TautulliInstance
+	tautOK    bool
+	profiles  []models.Profile
+	profOK    bool
 }
 
 // load reads the shared inputs of a Run.
@@ -85,6 +89,16 @@ func (c *Checker) load(ctx context.Context) *snapshot {
 		s.mapsOK = true
 	} else {
 		c.log.Debug("Health: cannot list path mappings", "error", err)
+	}
+	if s.tautullis, err = st.Tautullis().List(lctx); err == nil {
+		s.tautOK = true
+	} else {
+		c.log.Debug("Health: cannot list Tautulli connections", "error", err)
+	}
+	if s.profiles, err = st.Profiles().List(lctx); err == nil {
+		s.profOK = true
+	} else {
+		c.log.Debug("Health: cannot list profiles", "error", err)
 	}
 	return s
 }
@@ -207,8 +221,9 @@ func listText(items []string) string {
 	return strings.Join(items[:maxListed], ", ") + " and " + strconv.Itoa(len(items)-maxListed) + " more"
 }
 
-func serverSubject(id int64) string { return "server:" + strconv.FormatInt(id, 10) }
-func arrSubject(id int64) string    { return "arr:" + strconv.FormatInt(id, 10) }
+func serverSubject(id int64) string   { return "server:" + strconv.FormatInt(id, 10) }
+func arrSubject(id int64) string      { return "arr:" + strconv.FormatInt(id, 10) }
+func tautulliSubject(id int64) string { return "tautulli:" + strconv.FormatInt(id, 10) }
 
 // serverTarget / arrTarget name a probed connection for forEach.
 func serverTarget(s models.MediaServer) (string, string) { return serverSubject(s.ID), s.Name }
@@ -348,6 +363,206 @@ func (c *Checker) checkArrRecycleBin(ctx context.Context, s *snapshot) []result 
 			fmt.Sprintf("%s has no recycling bin configured: deletes through %s are permanent. "+
 				"Set Settings → Media Management → Recycling Bin in %s to be able to undo removals.", a.Name, a.Name, a.Name))
 	})
+}
+
+// enabledTautullis returns the enabled Tautulli connections of enabled media servers, with their
+// server.
+func (s *snapshot) enabledTautullis() []tautulliTarget {
+	servers := map[int64]models.MediaServer{}
+	for _, srv := range s.enabledPlexServers() {
+		servers[srv.ID] = srv
+	}
+	var out []tautulliTarget
+	for _, t := range s.tautullis {
+		if srv, ok := servers[t.ServerID]; ok && t.Enabled {
+			out = append(out, tautulliTarget{t: t, server: srv})
+		}
+	}
+	return out
+}
+
+// tautulliTarget is a Tautulli connection with the media server it records.
+type tautulliTarget struct {
+	t      models.TautulliInstance
+	server models.MediaServer
+}
+
+func tautulliTargetOf(x tautulliTarget) (string, string) { return tautulliSubject(x.t.ID), x.t.Name }
+
+// checkTautulliConnectivity reports Tautulli connections a scan cannot use: unreachable, key
+// rejected, too old, or monitoring another Plex server (docs/DECISIONS.md D10). Groups ranked by
+// play history go to review while it lasts.
+func (c *Checker) checkTautulliConnectivity(ctx context.Context, s *snapshot) []result {
+	if c.d.TautulliFactory == nil || !s.tautOK || !s.serversOK {
+		return nil
+	}
+	return forEach(c, SourceTautulliConnectivity, s.enabledTautullis(), tautulliTargetOf, func(x tautulliTarget) *result {
+		client := c.d.TautulliFactory(x.t)
+		if client == nil {
+			return nil
+		}
+		info, err := client.Info(ctx)
+		if err != nil {
+			return issue(SourceTautulliConnectivity, tautulliSubject(x.t.ID), models.HealthError,
+				fmt.Sprintf("Unable to read the Tautulli connection %q: %s. Groups ranked by play history go to review until it answers.",
+					x.t.Name, strings.TrimPrefix(errText(err), "tautulli: ")))
+		}
+		want := strings.TrimSpace(x.server.MachineIdentifier)
+		switch {
+		case want == "":
+			return issue(SourceTautulliConnectivity, tautulliSubject(x.t.ID), models.HealthError,
+				fmt.Sprintf("The Tautulli connection %q cannot be matched to %s: the media server has no machine identifier yet. "+
+					"Test and save it in Settings → Media Servers.", x.t.Name, x.server.Name))
+		case !strings.EqualFold(strings.TrimSpace(info.PMSIdentifier), want):
+			return issue(SourceTautulliConnectivity, tautulliSubject(x.t.ID), models.HealthError,
+				fmt.Sprintf("The Tautulli connection %q monitors another Plex server (machine identifier %s), not %s: its play history is "+
+					"not used. Check its URL in Settings → Applications.", x.t.Name, info.PMSIdentifier, x.server.Name))
+		}
+		return nil
+	})
+}
+
+// watchProfiles returns the profiles (by id, and whether the default one does) that rank by play
+// history.
+func watchProfiles(profiles []models.Profile) (byID map[int64]models.Profile, def *models.Profile) {
+	byID = map[int64]models.Profile{}
+	for _, p := range profiles {
+		for _, cr := range p.Criteria {
+			if cr.Enabled && (cr.Type == models.CritPlayed || cr.Type == models.CritLastPlayed) {
+				byID[p.ID] = p
+				if p.IsDefault {
+					pp := p
+					def = &pp
+				}
+				break
+			}
+		}
+	}
+	return byID, def
+}
+
+// checkWatchHistory warns when a profile ranks by play history for a server without an enabled
+// Tautulli (every copy's history is then unknown and those criteria never decide), and notes the
+// libraries and users whose history Tautulli does not keep (their copies without plays are unknown).
+func (c *Checker) checkWatchHistory(ctx context.Context, s *snapshot) []result {
+	if !s.profOK || !s.tautOK || !s.serversOK || !s.libsOK {
+		return nil
+	}
+	using, def := watchProfiles(s.profiles)
+	if len(using) == 0 {
+		return nil
+	}
+	servers := map[int64]models.MediaServer{}
+	for _, srv := range s.enabledPlexServers() {
+		servers[srv.ID] = srv
+	}
+	withTautulli := map[int64]tautulliTarget{}
+	for _, x := range s.enabledTautullis() {
+		withTautulli[x.server.ID] = x
+	}
+	missing := map[int64][]string{}      // server → profile names
+	libs := map[int64][]models.Library{} // server → libraries ranked by play history
+	for _, l := range s.libraries {
+		if _, ok := servers[l.ServerID]; !ok || !l.Enabled || (l.Type != "movie" && l.Type != "show") {
+			continue
+		}
+		var p *models.Profile
+		if l.ProfileID != nil {
+			if pp, ok := using[*l.ProfileID]; ok {
+				p = &pp
+			}
+		} else {
+			p = def
+		}
+		if p == nil {
+			continue
+		}
+		libs[l.ServerID] = append(libs[l.ServerID], l)
+		if _, ok := withTautulli[l.ServerID]; !ok && !slices.Contains(missing[l.ServerID], p.Name) {
+			missing[l.ServerID] = append(missing[l.ServerID], p.Name)
+		}
+	}
+	var out []result
+	for _, id := range sortedIDs(missing) {
+		names := missing[id]
+		slices.Sort(names)
+		out = append(out, *issue(SourceWatchHistory, serverSubject(id), models.HealthWarning,
+			fmt.Sprintf("The profile %s ranks by play history (Played / Last played), but %s has no enabled Tautulli "+
+				"connection: every copy's play history is unknown, so those criteria never decide. Add Tautulli in "+
+				"Settings → Applications, or remove the criteria.", quoteList(names), servers[id].Name)))
+	}
+	if c.d.TautulliFactory == nil {
+		return out
+	}
+	var targets []tautulliTarget
+	for _, id := range sortedIDs(libs) {
+		if x, ok := withTautulli[id]; ok {
+			targets = append(targets, x)
+		}
+	}
+	out = append(out, forEach(c, SourceWatchHistory, targets, tautulliTargetOf, func(x tautulliTarget) *result {
+		client := c.d.TautulliFactory(x.t)
+		if client == nil {
+			return nil
+		}
+		// Unreachable connections are reported by TautulliConnectivityCheck.
+		users, err := client.Users(ctx)
+		if err != nil {
+			return nil
+		}
+		noUsers := 0
+		for _, u := range users {
+			if u.Active && (u.KeepHistory == nil || !*u.KeepHistory) {
+				noUsers++
+			}
+		}
+		var noLibs []string
+		for _, l := range libs[x.server.ID] {
+			lib, err := client.Library(ctx, l.SectionKey)
+			if err != nil {
+				return nil
+			}
+			if lib.KeepHistory == nil || !*lib.KeepHistory {
+				noLibs = append(noLibs, l.Title)
+			}
+		}
+		var parts []string
+		if len(noLibs) > 0 {
+			parts = append(parts, "the libraries "+listText(noLibs))
+		}
+		if noUsers == 1 {
+			parts = append(parts, "1 user")
+		} else if noUsers > 1 {
+			parts = append(parts, strconv.Itoa(noUsers)+" users")
+		}
+		if len(parts) == 0 {
+			return nil
+		}
+		return issue(SourceWatchHistory, tautulliSubject(x.t.ID), models.HealthNotice,
+			fmt.Sprintf("The Tautulli connection %q keeps no play history for %s: in those libraries (or, for users, on the whole server) "+
+				"a copy without recorded plays counts as unknown, not as \"no plays recorded\". Turn on \"Keep History\" in Tautulli "+
+				"if you want Played / Last played to decide there.", x.t.Name, strings.Join(parts, " and ")))
+	})...)
+	return out
+}
+
+// sortedIDs returns the keys of m in order.
+func sortedIDs[T any](m map[int64]T) []int64 {
+	out := make([]int64, 0, len(m))
+	for id := range m {
+		out = append(out, id)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// quoteList renders names quoted ("A", "B").
+func quoteList(names []string) string {
+	q := make([]string, len(names))
+	for i, n := range names {
+		q[i] = strconv.Quote(n)
+	}
+	return listText(q)
 }
 
 func (c *Checker) checkPathMapping(_ context.Context, s *snapshot) []result {

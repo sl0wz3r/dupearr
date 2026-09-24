@@ -33,6 +33,7 @@ import (
 	"github.com/sl0wz3r/dupearr/internal/health"
 	"github.com/sl0wz3r/dupearr/internal/integrations/arr"
 	"github.com/sl0wz3r/dupearr/internal/integrations/plex"
+	"github.com/sl0wz3r/dupearr/internal/integrations/tautulli"
 	"github.com/sl0wz3r/dupearr/internal/logging"
 	"github.com/sl0wz3r/dupearr/internal/models"
 	"github.com/sl0wz3r/dupearr/internal/notifications"
@@ -57,9 +58,12 @@ type Deps struct {
 	PlexOpts    plex.Options
 	PlexFactory func(s models.MediaServer) *plex.Client
 	ArrFactory  func(a models.ArrInstance) *arr.Client
-	WebFS       fs.FS // embedded SPA (web/dist); may lack index.html in dev
-	StartTime   time.Time
-	Restart     func() // graceful restart (re-exec); call after the response is written
+	// TautulliFactory returns the client of a Tautulli connection (connection tests;
+	// docs/DECISIONS.md D10). nil: tests answer 503.
+	TautulliFactory func(t models.TautulliInstance) *tautulli.Client
+	WebFS           fs.FS // embedded SPA (web/dist); may lack index.html in dev
+	StartTime       time.Time
+	Restart         func() // graceful restart (re-exec); call after the response is written
 }
 
 // The subsets of the services the handlers use. The concrete services satisfy them (checked
@@ -261,6 +265,14 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/arr/{id}", s.handleArr)
 	mux.HandleFunc("PUT /api/v1/arr/{id}", s.audited(audit.KindConnectionChanged, "Application changed", s.handleArrUpdate))
 	mux.HandleFunc("DELETE /api/v1/arr/{id}", s.audited(audit.KindConnectionChanged, "Application removed", s.handleArrDelete))
+
+	// Watch history (Tautulli connections, docs/DECISIONS.md D10)
+	mux.HandleFunc("GET /api/v1/tautulli", s.handleTautullis)
+	mux.HandleFunc("POST /api/v1/tautulli", s.audited(audit.KindConnectionChanged, "Tautulli connection added", s.handleTautulliCreate))
+	mux.HandleFunc("POST /api/v1/tautulli/test", s.handleTautulliTest)
+	mux.HandleFunc("GET /api/v1/tautulli/{id}", s.handleTautulli)
+	mux.HandleFunc("PUT /api/v1/tautulli/{id}", s.audited(audit.KindConnectionChanged, "Tautulli connection changed", s.handleTautulliUpdate))
+	mux.HandleFunc("DELETE /api/v1/tautulli/{id}", s.audited(audit.KindConnectionChanged, "Tautulli connection removed", s.handleTautulliDelete))
 
 	// Path mappings
 	mux.HandleFunc("GET /api/v1/pathmapping", s.handlePathMappings)

@@ -455,3 +455,44 @@ describe('<PatternsEditor> help', () => {
     expect(r.textContent).toMatch(/Regular expressions \(Go RE2 syntax\) match the full\s+path/);
   });
 });
+
+// docs/DECISIONS.md D10 (issue #5): play-history criteria in the builder.
+describe('<CriteriaBuilder> play history', () => {
+  it('badges Played and Last played as needing Tautulli, also in the add picker', () => {
+    render(<Harness initial={[{ type: 'health', enabled: true }]} />);
+    const picker = screen.getByRole('combobox', { name: 'Add criterion' });
+    expect(within(picker).getByRole('option', { name: 'Played (requires Tautulli)' })).toBeInTheDocument();
+    expect(within(picker).getByRole('option', { name: 'Last played (requires Tautulli)' })).toBeInTheDocument();
+  });
+
+  it('shows Last played without a direction and with a minimum difference in days', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <Harness
+        initial={[
+          { type: 'played', enabled: true },
+          { type: 'last_played', enabled: true, direction: 'higher', minDelta: 30 },
+        ]}
+        onChange={onChange}
+      />,
+    );
+    const played = row('Played');
+    expect(within(played).getByText('requires Tautulli')).toBeInTheDocument();
+    expect(within(played).queryByRole('button', { name: /options/ })).not.toBeInTheDocument();
+    const last = row('Last played');
+    expect(within(last).getByText('requires Tautulli')).toBeInTheDocument();
+    expect(within(last).queryByLabelText('Prefer')).not.toBeInTheDocument();
+    const days = within(last).getByLabelText('Minimum difference (days)');
+    await user.clear(days);
+    await user.type(days, '45');
+    expect(onChange).toHaveBeenLastCalledWith([
+      { type: 'played', enabled: true },
+      { type: 'last_played', enabled: true, direction: 'higher', minDelta: 45 },
+    ]);
+    expect(explanation()).toMatch(
+      /^Keep a file that has been played \(Tautulli; an unknown play history is a tie\); if still tied, prefer the most recently played file \(plays less than 45 days apart count as a tie\)/,
+    );
+    expect(within(last).getByText(/never counts as “not played”/)).toBeInTheDocument();
+  });
+});

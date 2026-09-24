@@ -163,6 +163,12 @@ type CriterionSchema struct {
 	DefaultDirection  string               `json:"defaultDirection,omitempty"`
 	SupportsTolerance bool                 `json:"supportsTolerance"`
 	RequiresArr       bool                 `json:"requiresArr"`
+	// RequiresWatchHistory: the criterion ranks by play history and needs a play-history source
+	// (Tautulli); without one every value is unknown and ties (docs/DECISIONS.md D10).
+	RequiresWatchHistory bool `json:"requiresWatchHistory"`
+	// MinDeltaUnit is set when the criterion takes a minimum difference but no tolerance: the unit
+	// of MinDelta ("days" for last_played).
+	MinDeltaUnit string `json:"minDeltaUnit,omitempty"`
 }
 
 // SchemaOption is one selectable value of an ordered criterion.

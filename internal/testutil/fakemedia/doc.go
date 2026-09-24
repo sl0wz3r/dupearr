@@ -1,5 +1,6 @@
 // Package fakemedia is a realistic, in-memory fake of a Plex Media Server plus Radarr / Sonarr
-// (API v3) instances, backed by a real directory tree of sparse dummy video files. It exists for
+// (API v3) instances and a Tautulli (API v2), backed by a real directory tree of sparse dummy video
+// files. It exists for
 // integration and end-to-end tests, the local demo and web-UI development — it is NOT used by the
 // Dupearr binary.
 //
@@ -32,6 +33,17 @@
 //     DELETE episodefile/{id}, episode/monitor, importlistexclusion, config/mediamanagement,
 //     queue (paged), tag and rootfolder. Optional URL base (307 when omitted) and a "starting up"
 //     mode (503).
+//   - Tautulli (/api/v2, docs/research/watch-history.md): get_tautulli_info, get_server_info (the
+//     fake Plex's machine identifier), get_users, get_library (an unknown section gets Tautulli's
+//     "Local" defaults) and get_history with Tautulli's semantics — comma-separated rating_key
+//     lists, guid prefix matching, section_id, grouping and live activity ON unless turned off (a
+//     live row has a null row_id), start/length paging (default 25) with recordsFiltered, and
+//     HTML-escaped strings. The plays come from [Movie].Plays (a play can lie under a retired
+//     rating key: Plex re-created the item); libraries and users can keep no history. The key is
+//     read from ?apikey= (a violation, RuleTautulliKeyInURL) or, like 2.18.0+, the X-Api-Key header;
+//     [Env.SetTautulliMode] emulates an older Tautulli, another Plex server, an error result, a
+//     short page, no rating-key list support, or an outage. The "watch" scenario ([Watch]) pairs
+//     played and unplayed copies across Movies and Movies 4K.
 //
 // # Filesystem layout
 //
@@ -83,7 +95,7 @@
 // assertions) the fake records [Violation]s: calls Dupearr must never make (whole-item or library
 // deletes, malformed or non-canonical delete paths, emptyTrash, merge/split, the proxy parameter,
 // section refreshes with force or outside the section, *arr bulk deletes, rescans without an item
-// id, the apikey query parameter, …) and deletes that break the safety invariants of
+// id, the apikey query parameter of an *arr or Tautulli, …) and deletes that break the safety invariants of
 // docs/ARCHITECTURE.md §6: deleting a Plex Optimized Version, a version sharing its file with
 // another version, the last available version of an item, a multi-episode file another episode
 // still needs, a file of an item that is playing, a file tracked by an *arr item carrying the

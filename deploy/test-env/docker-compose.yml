@@ -1,4 +1,4 @@
-# Local test environment: Dupearr + a fake Plex / Radarr / Radarr 4K / Sonarr (tools/fakemedia).
+# Local test environment: Dupearr + a fake Plex / Radarr / Radarr 4K / Sonarr / Tautulli (tools/fakemedia).
 # Nothing here touches real media — the fake library is a tree of sparse dummy files in a Docker
 # volume. Start it with `make test-env` (builds, starts and pre-configures everything), then open
 # http://localhost:3873. See deploy/test-env/README.md.
@@ -31,6 +31,7 @@ services:
       - "127.0.0.1:47878:7878"  # Radarr
       - "127.0.0.1:47879:7879"  # Radarr 4K
       - "127.0.0.1:48989:8989"  # Sonarr
+      - "127.0.0.1:48181:8181"  # Tautulli
     depends_on:
       init-perms:
         condition: service_completed_successfully

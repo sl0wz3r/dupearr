@@ -291,6 +291,33 @@ func (p *WebhookPayload) Kind() models.ArrKind // added: "radarr" (movie) | "son
 func (p *WebhookPayload) ToTargetedScan() (models.TargetedScanBody, bool)
 ```
 
+## internal/integrations/tautulli (added, DECISIONS D10 — read only)
+```go
+type Options struct { VerifyTLS bool; Timeout time.Duration; HTTPClient *http.Client }
+type Client struct{ /* unexported */ }
+func New(inst models.TautulliInstance, opts Options) *Client // never fails; an unusable URL is reported by every call
+const MinVersion = "2.18.0"; const DefaultPageSize = 1000; const DefaultMaxRows = 250_000
+type Info struct { Version, PMSIdentifier, PMSName string }
+func (c *Client) Info(ctx context.Context) (*Info, error) // get_tautulli_info (ErrTooOld < 2.18.0) + get_server_info
+type User struct { Active bool; KeepHistory *bool }           // flags only: no names, no e-mail
+func (c *Client) Users(ctx context.Context) ([]User, error)
+type Library struct { SectionID string; KeepHistory *bool }   // nil: not reported / another section answered
+func (c *Client) Library(ctx context.Context, sectionID string) (*Library, error)
+type HistoryRow struct { RowID int64; RatingKey, GUID string; UserID int64; Started, Stopped time.Time }
+func (r HistoryRow) PlayedAt() time.Time
+func (c *Client) FirstPlay(ctx context.Context, sectionID string) (*HistoryRow, error) // earliest play; nil = none
+type HistoryFilter struct { RatingKeys []string; GUID, SectionID string; PageSize, MaxRows int }
+// History returns every recorded play (grouping and live activity off, oldest first, deduplicated
+// by row id) or an error: short page, shrinking history, a row for a key not asked for, more rows
+// than MaxRows, an "error" result or data of an unexpected shape → ErrIncomplete / ErrCommandFailed.
+func (c *Client) History(ctx context.Context, f HistoryFilter) ([]HistoryRow, error)
+func Transient(err error) bool // worth one retry later (timeout, dropped connection, 5xx)
+var ErrUnauthorized, ErrTooOld, ErrWrongApp, ErrNotFound, ErrRedirect, ErrInvalidArgument, ErrCommandFailed, ErrIncomplete error
+type HTTPError struct { Cmd string; StatusCode int; Err error } // never carries the response body
+```
+The API key travels in the `X-Api-Key` header only; redirects are never followed; netguard refuses
+link-local/metadata addresses; answers are bounded; errors never carry the URL or a response body.
+
 ## internal/engine (pure — no I/O)
 ```go
 type GroupOptions struct {
@@ -349,6 +376,8 @@ type CriterionSchema struct {
     DefaultDirection string          `json:"defaultDirection,omitempty"`
     SupportsTolerance bool           `json:"supportsTolerance"`
     RequiresArr bool                 `json:"requiresArr"`
+    RequiresWatchHistory bool        `json:"requiresWatchHistory"`   // added (D10): played, last_played
+    MinDeltaUnit string              `json:"minDeltaUnit,omitempty"` // added (D10): "days" for last_played
 }
 type SchemaOption struct { Value string `json:"value"`; Label string `json:"label"` }
 func CriteriaSchema() []CriterionSchema
@@ -365,6 +394,16 @@ compare `DiscInfo.FeatureBytes` on `file_size` and count `FreedBytes` as reclaim
 disc versions (setting off, TV, protect-only kinds, not removable/reachable, shared with other
 Plex items) and regular versions with a file inside a disc structure, and applies
 `KeepPlayableCopy`; ValidateDecisions refuses removing such a file, a TV disc or an unremovable disc.
+
+Play history (added, DECISIONS D10): `played` and `last_played` read `MediaVersion.Watch` and compare
+two versions only when both histories are known (an unknown or failed history is class-less: a tie,
+never eliminated); "no plays recorded" loses only to a play on or after its `since` (the item's
+date added; `metric.floor`); `last_played` ignores `direction` (always newer) and takes `minDelta`
+in days. The engine-owned flag `watch_unreadable` (`BlocksAutoApproval`) is set when an enabled
+play-history criterion, a removal and a `failed` history coincide in a group with regular copies of
+at least two Plex items, which makes the group review. Values and
+reasons never say "never watched" / "unwatched". Without those criteria, watch data changes
+neither decisions nor signatures.
 
 ## internal/disc (added, DECISIONS D9 — read-only, never follows symlinks, bounded)
 ```go
@@ -441,6 +480,14 @@ type ArrClient interface {
     TrackedFiles(ctx context.Context, f arr.TrackedFilter) ([]arr.TrackedFile, error)
     QueueItemIDs(ctx context.Context) (map[int64]bool, error)
 }
+// WatchClient (added, D10) is the subset of *tautulli.Client the scan reads play history with.
+type WatchClient interface {
+    Info(ctx context.Context) (*tautulli.Info, error)
+    Users(ctx context.Context) ([]tautulli.User, error)
+    Library(ctx context.Context, sectionID string) (*tautulli.Library, error)
+    FirstPlay(ctx context.Context, sectionID string) (*tautulli.HistoryRow, error)
+    History(ctx context.Context, f tautulli.HistoryFilter) ([]tautulli.HistoryRow, error)
+}
 type Deps struct {
     Store         store.Store
     Bus           *events.Bus
@@ -448,6 +495,9 @@ type Deps struct {
     Notifier      *notifications.Service // may be nil in tests
     PlexFactory   func(s models.MediaServer) PlexClient
     ArrFactory    func(a models.ArrInstance) ArrClient
+    // TautulliFactory (added, D10): the play-history client of a Tautulli connection. nil: an
+    // enabled connection cannot be read and its server's versions get a "failed" history.
+    TautulliFactory func(t models.TautulliInstance) WatchClient
     Now           func() time.Time // nil = time.Now
     Concurrency   int              // parallel item-detail fetches (default 4)
     // AutoApprove approves a group in auto mode. May be nil. Changed: it takes the group's
@@ -490,6 +540,10 @@ func GroupUsesLibrary(g *models.DuplicateGroup, id int64) bool // added (match h
 // versions whose parts are a disc's clips/IFO/VOB or an image become disc versions (origin plex); an
 // *arr file inside a disc attaches to the disc (disc_tracked_clip); TV discs only flag their
 // episodes' groups. Auto mode never proposes a disc removal.
+// Play history (added, D10): after the *arr data, full and targeted scans read each server's enabled
+// Tautulli and set MediaVersion.Watch on every version (known / unknown with a reason / failed); a
+// failed read counts in Stats.Errors, never yields "no plays", and a group with watch_unreadable
+// never counts as a stable scan (scans and re-evaluations set StableCount 0).
 // Matcher (exported for tests): matches versions to *arr files.
 type Matcher struct{ /* unexported */ }
 func NewMatcher(m *pathmap.Mapper) *Matcher
@@ -578,12 +632,14 @@ type Deps struct {
     Log         *slog.Logger
     PlexFactory func(s models.MediaServer) interface{ Identity(context.Context) (*plex.Identity, error); MediaDeletionAllowed(context.Context) (bool, error) }
     ArrFactory  func(a models.ArrInstance) interface{ Status(context.Context) (*arr.SystemStatus, error) }
+    TautulliFactory func(t models.TautulliInstance) TautulliClient // added (D10); nil skips the Tautulli probes
     StartTime       time.Time     // added: OnHealthIssue notifications wait until StartTime + BootGracePeriod
     BootGracePeriod time.Duration // added: > 0 overrides the default (15 min); < 0 disables
 }
 // added: optional capabilities of the factory results (type-asserted)
 type PlexOwnership interface { Ownership(ctx context.Context, machineID string) (owned, known bool, err error) }
 type ArrMediaManagement interface { MediaManagement(context.Context) (*arr.MediaManagement, error) }
+type TautulliClient interface { Info(context.Context) (*tautulli.Info, error); Users(context.Context) ([]tautulli.User, error); Library(ctx context.Context, sectionID string) (*tautulli.Library, error) } // added
 const BootGracePeriod = 15 * time.Minute; const CheckTimeout = 10 * time.Second; const PlexTVTimeout = 5 * time.Second // added
 func (c *Checker) GracePeriodEnd() time.Time // added
 type Checker struct{ /* unexported */ }
@@ -602,7 +658,11 @@ the port must only be reachable through the authenticating reverse proxy; `Deps.
 WebhookApiKeyCheck (added, warning; `Deps.WebhookMasterKeyUsed`), ReverseProxyCheck (added, warning:
 a local peer that is not a trusted proxy sent forwarding headers; `Deps.UntrustedProxySeen`),
 DiscDetectionUnavailable (added, notice: `detectDiscs` on but no enabled movie library folder is
-mapped), LastScanCheck, DatabaseCheck. Details: `docs/API.md` → Health.
+mapped), TautulliConnectivityCheck (added, error: a Tautulli connection is unreachable, rejects the
+key, is older than 2.18.0 or monitors another Plex server), WatchHistoryCheck (added: warning when
+a profile ranks by play history for a server without an enabled Tautulli; notice when Tautulli
+keeps no history for some of those libraries or users), LastScanCheck, DatabaseCheck. Details:
+`docs/API.md` → Health.
 
 ## internal/backup
 ```go
@@ -742,6 +802,7 @@ type Deps struct {
     PlexOpts  plex.Options
     PlexFactory func(s models.MediaServer) *plex.Client
     ArrFactory  func(a models.ArrInstance) *arr.Client
+    TautulliFactory func(t models.TautulliInstance) *tautulli.Client // added (D10): connection tests
     WebFS     fs.FS            // embedded SPA (web/dist); may lack index.html in dev
     StartTime time.Time
     Restart   func()           // graceful restart (re-exec)
@@ -790,7 +851,7 @@ func (d *DB) Seed(ctx context.Context, templates []models.Profile) error
 var ErrActionNotPending, ErrConstraint, ErrDefaultProfile, ErrNotRemovable error // added
 ```
 Tables: settings(key TEXT PK, value TEXT), users, media_servers, libraries, arr_instances,
-path_mappings, profiles(criteria/protections JSON), duplicate_groups, group_files(version JSON,
+tautulli_instances (added, migration 0003: one per media server, deleted with it), path_mappings, profiles(criteria/protections JSON), duplicate_groups, group_files(version JSON,
 decision columns), actions, history, exclusions, notifications, scan_runs, commands, tasks,
 schema_migrations. Indexes on duplicate_groups(key UNIQUE, status, last_scan_id),
 group_files(group_id), actions(status, group_id), history(created_at, event_type).
@@ -801,8 +862,9 @@ database, so an older backup is upgraded when opened): the D9 profile upgrade ad
 
 ## internal/store (persistence interfaces; additions)
 The interfaces live in `internal/store/store.go` (their comments carry the database layer's safety
-rules). Added during implementation — atomic operations so concurrent writers (a scan, the
-executor, the API) can never overwrite each other's status changes:
+rules). `Store.Tautullis() TautulliRepo` (added, D10: List/Get/Create/Update/Delete of
+`models.TautulliInstance`). Added during implementation — atomic operations so concurrent writers
+(a scan, the executor, the API) can never overwrite each other's status changes:
 ```go
 type GroupRepo interface {
     // … Upsert, UpdateStatus, SetOverride, MarkUnseenResolved, … (see store.go)

@@ -8,7 +8,7 @@ import (
 
 func TestBuiltinScenariosValidate(t *testing.T) {
 	names := ScenarioNames()
-	if want := []string{ScenarioDefault, ScenarioDiscs, ScenarioEmpty, ScenarioLooseClips, ScenarioMinimal}; !reflect.DeepEqual(names, want) {
+	if want := []string{ScenarioDefault, ScenarioDiscs, ScenarioEmpty, ScenarioLooseClips, ScenarioMinimal, ScenarioWatch}; !reflect.DeepEqual(names, want) {
 		t.Fatalf("ScenarioNames() = %v, want %v", names, want)
 	}
 	for _, name := range names {

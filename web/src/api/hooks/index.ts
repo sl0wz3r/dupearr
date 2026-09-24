@@ -10,3 +10,4 @@ export * from './usePathMappings';
 export * from './useProfiles';
 export * from './useSettings';
 export * from './useSystem';
+export * from './useTautulli';

@@ -1043,6 +1043,7 @@ func TestEvaluateValues(t *testing.T) {
 		"video_bitrate": "56.0 Mbps", "file_size": "62.0 GiB", "bit_depth": "10-bit", "custom_format_score": "Not tracked",
 		"date_added": "2024-01-01", "audio_track_count": "2", "subtitle_track_count": "12", "arr_managed": "No",
 		"audio_language": "eng", "filename_score": "100 / 1", "health": "Healthy",
+		"played": "Unknown (no watch-history source)", "last_played": "Unknown (no watch-history source)",
 	}
 	if !reflect.DeepEqual(f1.Values, want1) {
 		t.Fatalf("values 1:\n got %v\nwant %v", f1.Values, want1)

@@ -71,7 +71,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
 		fmt.Fprint(fs.Output(), "Usage: fakemedia [flags]\n\n"+
-			"Serves a fake Plex Media Server, Radarr, Radarr 4K and Sonarr for Dupearr development.\n"+
+			"Serves a fake Plex Media Server, Radarr, Radarr 4K, Sonarr and Tautulli for Dupearr development.\n"+
 			"Port 0 picks a free port.\n\nFlags:\n")
 		fs.PrintDefaults()
 	}
@@ -84,6 +84,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		radarrPort    = fs.Int("radarr-port", 7878, "fake Radarr `port`")
 		radarr4kPort  = fs.Int("radarr4k-port", 7879, "fake Radarr 4K `port`")
 		sonarrPort    = fs.Int("sonarr-port", 8989, "fake Sonarr `port`")
+		tautulliPort  = fs.Int("tautulli-port", 8181, "fake Tautulli `port` (play history)")
 		mediaDeletion = fs.Bool("media-deletion", true, "enable Plex's \"Allow media deletion\" setting")
 		autoEmpty     = fs.Bool("auto-empty-trash", false, "enable Plex's \"Empty trash automatically after every scan\" setting")
 		playing       = fs.String("playing", "", "comma-separated rating `keys` reported as playing by /status/sessions")
@@ -111,6 +112,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		fmt.Fprintln(stdout, "\nThe discs scenario hides its full-disc backups from Plex (default scanner); add -disc-scanner to expose them as versions.")
 		fmt.Fprintln(stdout, "The looseclips scenario stores Blu-ray/DVD backups flattened: Plex lists every loose clip as its own version.")
+		fmt.Fprintln(stdout, "The watch scenario pairs played and unplayed copies across Movies and Movies 4K; configure the fake Tautulli to rank by play history.")
 		return nil
 	}
 
@@ -129,6 +131,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		{fakemedia.InstanceRadarr, *radarrPort},
 		{fakemedia.InstanceRadarr4K, *radarr4kPort},
 		{fakemedia.InstanceSonarr, *sonarrPort},
+		{fakemedia.ServerTautulli, *tautulliPort},
 	}
 	addrs := make(map[string]string, len(ports))
 	for _, p := range ports {

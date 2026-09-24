@@ -94,6 +94,7 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 	if saved.IsDefault {
 		s.reevaluateAllAsync("default profile changed")
 	}
+	s.checkHealthLater(r.Context(), "profile added") // WatchHistoryCheck
 	s.writeJSON(w, http.StatusCreated, saved)
 }
 
@@ -130,6 +131,7 @@ func (s *Server) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	s.log.Info("Profile updated", "id", saved.ID, "name", saved.Name)
 	s.reevaluateAllAsync("profile changed")
+	s.checkHealthLater(r.Context(), "profile updated") // WatchHistoryCheck
 	s.writeJSON(w, http.StatusAccepted, saved)
 }
 
@@ -151,5 +153,6 @@ func (s *Server) handleProfileDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	s.log.Info("Profile deleted", "id", p.ID, "name", p.Name)
 	s.reevaluateAllAsync("profile deleted")
+	s.checkHealthLater(r.Context(), "profile deleted") // WatchHistoryCheck
 	s.writeJSON(w, http.StatusOK, empty)
 }

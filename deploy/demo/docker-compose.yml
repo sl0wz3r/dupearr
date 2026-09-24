@@ -33,9 +33,10 @@ services:
       - media:/data
     restart: "no"
 
-  # Fake Plex Media Server (32400), Radarr (7878), Radarr 4K (7879) and Sonarr (8989) with scenario
-  # "default": every duplicate situation Dupearr handles. Fixed, public test credentials, so no port
-  # is published. Restarting this service resets the fake library to the scenario.
+  # Fake Plex Media Server (32400), Radarr (7878), Radarr 4K (7879), Sonarr (8989) and Tautulli
+  # (8181) with scenario "default": every duplicate situation Dupearr handles. Fixed, public test
+  # credentials, so no port is published. Restarting this service resets the fake library to the
+  # scenario.
   demo-media:
     image: ${DEMO_MEDIA_IMAGE:-ghcr.io/sl0wz3r/dupearr-demo-media:latest}
     user: "1000:1000"

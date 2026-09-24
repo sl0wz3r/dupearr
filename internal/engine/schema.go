@@ -25,15 +25,17 @@ func CriteriaSchema() []CriterionSchema {
 	for _, t := range types {
 		info, _ := criterionInfoFor(t)
 		out = append(out, CriterionSchema{
-			Type:              t,
-			Label:             info.label,
-			Description:       info.description,
-			Kind:              info.kind,
-			Options:           info.options,
-			DefaultOrder:      info.defaultOrder,
-			DefaultDirection:  info.defaultDirection,
-			SupportsTolerance: info.supportsTolerance,
-			RequiresArr:       info.requiresArr,
+			Type:                 t,
+			Label:                info.label,
+			Description:          info.description,
+			Kind:                 info.kind,
+			Options:              info.options,
+			DefaultOrder:         info.defaultOrder,
+			DefaultDirection:     info.defaultDirection,
+			SupportsTolerance:    info.supportsTolerance,
+			RequiresArr:          info.requiresArr,
+			RequiresWatchHistory: info.requiresWatch,
+			MinDeltaUnit:         info.minDeltaUnit,
 		})
 	}
 	return out
@@ -196,6 +198,10 @@ func ValidateProfile(p models.Profile) []config.ValidationError {
 		}
 		if d := strings.TrimSpace(c.Direction); d != "" && d != models.DirectionHigher && d != models.DirectionLower {
 			add(prop+".direction", "Direction must be %q or %q", models.DirectionHigher, models.DirectionLower)
+		} else if d == models.DirectionLower && info.requiresWatch {
+			// Preferring the copy without plays would make a play a reason to remove a copy
+			// (docs/DECISIONS.md D10).
+			add(prop+".direction", "%s always prefers the played (or more recently played) copy", info.label)
 		}
 		validateTolerance(add, prop, c, info)
 		if info.kind == kindOrdered {
@@ -252,10 +258,13 @@ func validateTolerance(add addFunc, prop string, c models.Criterion, info criter
 	} else if c.TolerancePercent != 0 && !info.supportsTolerance {
 		add(prop+".tolerancePercent", "%s does not support a tolerance", info.label)
 	}
-	if badFloat(c.MinDelta) || c.MinDelta < 0 {
+	switch {
+	case badFloat(c.MinDelta) || c.MinDelta < 0:
 		add(prop+".minDelta", "Minimum delta must be 0 or more")
-	} else if c.MinDelta != 0 && !info.supportsTolerance {
+	case c.MinDelta != 0 && !info.supportsTolerance && info.minDeltaUnit == "":
 		add(prop+".minDelta", "%s does not support a minimum delta", info.label)
+	case info.minDeltaUnit == minDeltaDays && c.MinDelta > maxLastPlayedMinDeltaDays:
+		add(prop+".minDelta", "Minimum difference must be at most %d days", maxLastPlayedMinDeltaDays)
 	}
 }
 

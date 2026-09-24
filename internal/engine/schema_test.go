@@ -14,7 +14,7 @@ import (
 
 func TestCriteriaSchema(t *testing.T) {
 	s := CriteriaSchema()
-	if len(s) != 19 || len(s) != len(criterionTypes()) {
+	if len(s) != 21 || len(s) != len(criterionTypes()) {
 		t.Fatalf("schema has %d entries", len(s))
 	}
 	if s[0].Type != models.CritHealth {
@@ -23,6 +23,8 @@ func TestCriteriaSchema(t *testing.T) {
 	seen := map[models.CriterionType]bool{}
 	arr := map[models.CriterionType]bool{}
 	tol := map[models.CriterionType]bool{}
+	watch := map[models.CriterionType]bool{}
+	units := map[models.CriterionType]string{}
 	for _, c := range s {
 		if seen[c.Type] {
 			t.Fatalf("duplicate type %s", c.Type)
@@ -68,6 +70,18 @@ func TestCriteriaSchema(t *testing.T) {
 		if c.SupportsTolerance {
 			tol[c.Type] = true
 		}
+		if c.RequiresWatchHistory {
+			watch[c.Type] = true
+		}
+		if c.MinDeltaUnit != "" {
+			units[c.Type] = c.MinDeltaUnit
+		}
+	}
+	if !reflect.DeepEqual(watch, map[models.CriterionType]bool{models.CritPlayed: true, models.CritLastPlayed: true}) {
+		t.Fatalf("requiresWatchHistory = %v", watch)
+	}
+	if !reflect.DeepEqual(units, map[models.CriterionType]string{models.CritLastPlayed: "days"}) {
+		t.Fatalf("minDeltaUnit = %v", units)
 	}
 	if !reflect.DeepEqual(arr, map[models.CriterionType]bool{models.CritCustomFormatScore: true, models.CritArrManaged: true}) {
 		t.Fatalf("requiresArr = %v", arr)

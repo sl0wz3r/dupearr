@@ -160,6 +160,8 @@ type scanConfig struct {
 	servers map[int64]models.MediaServer // enabled Plex servers
 	mapper  *pathmap.Mapper
 	arrs    []models.ArrInstance // enabled instances, by id
+	// tautulli holds the enabled Tautulli connection of each media server (docs/DECISIONS.md D10).
+	tautulli map[int64]models.TautulliInstance
 }
 
 // loadScanConfig reads everything a scan needs from the store.
@@ -181,10 +183,20 @@ func (s *Service) loadScanConfig(ctx context.Context) (*scanConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load *arr instances: %w", err)
 	}
+	tautullis, err := st.Tautullis().List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load Tautulli connections: %w", err)
+	}
 	c := &scanConfig{
 		evalConfig: ec,
 		servers:    map[int64]models.MediaServer{},
 		mapper:     pathmap.New(mappings),
+		tautulli:   map[int64]models.TautulliInstance{},
+	}
+	for _, t := range tautullis {
+		if t.Enabled {
+			c.tautulli[t.ServerID] = t
+		}
 	}
 	for _, srv := range servers {
 		if srv.Enabled && (srv.Kind == models.MediaServerPlex || srv.Kind == "") {
@@ -600,6 +612,10 @@ func (p *pipeline) runFull(body models.DuplicateScanBody) error {
 	}
 
 	busy := p.enrich(items)
+	if err := p.ctx.Err(); err != nil {
+		return canceled(err)
+	}
+	p.watch(items)
 	if err := p.ctx.Err(); err != nil {
 		return canceled(err)
 	}

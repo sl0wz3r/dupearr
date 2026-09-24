@@ -32,6 +32,7 @@ type world struct {
 	plex     *plexState
 	arrs     map[string]*arrState
 	arrOrder []string
+	tautulli *tautulliState
 
 	fileSpecs map[string]*Version // media-root relative path → first version declaring it
 	partSpecs map[string]Part     // media-root relative path → part declaration
@@ -273,6 +274,11 @@ func buildWorld(sc *Scenario, root string, now func() time.Time, discScanner boo
 	used := map[string]bool{}
 	for _, m := range sc.Movies {
 		used[m.RatingKey] = m.RatingKey != ""
+		for _, p := range m.Plays {
+			if p.RetiredKey != "" {
+				used[p.RetiredKey] = true // an earlier Plex item's key: never handed out again
+			}
+		}
 	}
 	for _, sh := range sc.Shows {
 		used[sh.RatingKey] = sh.RatingKey != ""
@@ -295,6 +301,7 @@ func buildWorld(sc *Scenario, root string, now func() time.Time, discScanner boo
 		}
 	}
 
+	playsOf := map[*item][]Play{}
 	for i := range sc.Movies {
 		m := &sc.Movies[i]
 		// Rating keys are assigned even to movies Plex does not list (disc-only folders under the
@@ -315,6 +322,7 @@ func buildWorld(sc *Scenario, root string, now func() time.Time, discScanner boo
 		}
 		w.addVersions(it, versions, Mins(120))
 		p.addItem(it)
+		playsOf[it] = m.Plays
 	}
 	for i := range sc.Shows {
 		sh := &sc.Shows[i]
@@ -375,6 +383,7 @@ func buildWorld(sc *Scenario, root string, now func() time.Time, discScanner boo
 		}
 	}
 
+	w.buildTautulli(sc, playsOf)
 	if err := w.buildArrs(sc); err != nil {
 		return nil, err
 	}

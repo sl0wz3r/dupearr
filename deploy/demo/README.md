@@ -35,8 +35,8 @@ Port 3873 already in use, for example by your own Dupearr? Pick another one:
 | Service | Image | What it does |
 |---|---|---|
 | `dupearr` | Dupearr | The real app, named "Dupearr Demo", on `127.0.0.1:3873` (`DEMO_PORT`) |
-| `demo-media` | demo-media | Fake Plex (libraries *Movies*, *Movies 4K*, *TV Shows*), Radarr, Radarr 4K and Sonarr |
-| `seed` | demo-media | One-shot: adds the fakes to Dupearr through its API with identity path mappings (`/data/media → /data/media`), puts *Movies* and *Movies 4K* in one scope group, sets the minimum age to 0 h and a recycle bin (`/data/dupearr-recycle`), keeps dry run on, and runs the first scan |
+| `demo-media` | demo-media | Fake Plex (libraries *Movies*, *Movies 4K*, *TV Shows*), Radarr, Radarr 4K, Sonarr and Tautulli |
+| `seed` | demo-media | One-shot: adds the fakes (Tautulli included) to Dupearr through its API with identity path mappings (`/data/media → /data/media`), puts *Movies* and *Movies 4K* in one scope group, sets the minimum age to 0 h and a recycle bin (`/data/dupearr-recycle`), keeps dry run on, and runs the first scan |
 | `init` | demo-media | One-shot: gives the shared `/data` volume to uid/gid 1000, the user the fakes and Dupearr (`PUID`/`PGID`) run as, so Dupearr can move the fake files |
 
 Two volumes: `media` (the fake library and Dupearr's recycle bin, `/data` in every container) and

@@ -31,7 +31,7 @@ ARG BUILD_DATE=
 ARG SOURCE_URL=https://github.com/sl0wz3r/dupearr
 
 LABEL org.opencontainers.image.title="Dupearr demo media (FAKE)" \
-      org.opencontainers.image.description="FAKE Plex, Radarr and Sonarr servers with a made-up library of empty placeholder files, for the Dupearr demo and tests. No real media, no secrets (its fixed test tokens are public). Not a media server." \
+      org.opencontainers.image.description="FAKE Plex, Radarr, Sonarr and Tautulli servers with a made-up library of empty placeholder files, for the Dupearr demo and tests. No real media, no secrets (its fixed test tokens are public). Not a media server." \
       org.opencontainers.image.source="${SOURCE_URL}" \
       org.opencontainers.image.url="${SOURCE_URL}" \
       org.opencontainers.image.licenses="GPL-3.0-or-later" \
@@ -54,7 +54,7 @@ COPY LICENSE /usr/share/licenses/dupearr-demo-media/LICENSE
 
 # The fakes only write below their data directory (-data); they never need root.
 USER 1000:1000
-# Plex, Radarr, Radarr 4K, Sonarr
-EXPOSE 32400 7878 7879 8989
+# Plex, Radarr, Radarr 4K, Sonarr, Tautulli
+EXPOSE 32400 7878 7879 8989 8181
 ENTRYPOINT ["/usr/local/bin/fakemedia"]
 CMD ["-data", "/data", "-host", "0.0.0.0", "-scenario", "default"]

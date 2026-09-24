@@ -24,14 +24,15 @@ your setup and use case to its issue (label `roadmap`), or to open a thread in D
 |---|---|---|
 | [Dashboard widgets (Homepage, Homarr)](#dashboard-widgets-homepage-homarr) | Up next | `help wanted`: native widgets upstream (the `customapi` example and the stable stats contract are done) |
 | [Jellyfin and Emby](#jellyfin-and-emby) | Planned | `help wanted`: research and design first |
-| [Watch-history criteria (Tautulli, Plex)](#watch-history-criteria-tautulli-plex) | Planned | `help wanted` |
+| [Watch-history criteria (Tautulli, Plex)](#watch-history-criteria-tautulli-plex) | Partly done | `help wanted`: Plex as a source (live verification first), progress, per-user filters |
 | [Lidarr and music libraries](#lidarr-and-music-libraries) | Exploring | Design discussion |
 | [Hash-based detection outside Plex](#hash-based-detection-outside-plex) | Exploring | `safety`, design discussion |
 | [Several Plex servers](#several-plex-servers) | Exploring | `safety`, design discussion |
 | [Full-disc backups: disc images and TV season discs](#full-disc-backups-disc-images-and-tv-season-discs) | Exploring | `safety` |
 | [Translations (i18n)](#translations-i18n) | Exploring | `help wanted`: the approach first, then languages |
 
-*Up next*: small and well understood. *Planned*: the design leaves room for it
+*Up next*: small and well understood. *Partly done*: a first part shipped, the rest is open.
+*Planned*: the design leaves room for it
 ([ARCHITECTURE.md](docs/ARCHITECTURE.md)), but the work is large. *Exploring*: a direction that
 still needs a design.
 
@@ -68,10 +69,21 @@ still needs a design.
 
 ## Watch-history criteria (Tautulli, Plex)
 
-- **Today:** decisions use file attributes only: resolution, HDR, source, custom-format score,
-  bitrate, audio, codec, size, age, language, library, patterns and so on.
-- **Goal:** new profile criteria such as "keep the copy that is actually played" or "keep the copy
-  with the user's progress", with data from Tautulli or from Plex.
+- **Done (#5):** the opt-in criteria **Played** and **Last played**, with the play history
+  Tautulli (2.18.0 or later) records per Plex item for every user
+  ([profiles](docs/user/profiles.md#watch-history), [DECISIONS D10](docs/DECISIONS.md)). A missing,
+  unknown or unreadable history is a tie — never "never watched" — and a failed read sends the
+  groups ranked by it to review.
+- **Still open** (`help wanted`; details in
+  [docs/research/watch-history.md](docs/research/watch-history.md)):
+  - **Plex as a source**, after verifying on a live server how `/status/sessions/history/all`
+    attributes plays of items that share a GUID (the item fields `viewCount`/`lastViewedAt` only
+    show the owner's plays and cannot tell "0" from "unknown").
+  - **Progress** ("keep the copy with the user's progress"): resume positions are per account and
+    shared between same-GUID items; other users' positions need their tokens.
+  - **Per-user filters** (count only some users' plays), through Tautulli's `user_id` filter.
+  - **Per-version attribution**: neither Plex nor Tautulli records which file was played; it would
+    need recording live sessions over time.
 - **Care:** if the history is missing, or the lookup fails, that must never count as "never
   watched". It must behave like any other unknown value.
 

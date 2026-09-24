@@ -14,7 +14,7 @@ are covered too. Install guides: [Unraid](installation-unraid.md) ·
 - [Network](#network)
 - [Storage and paths](#storage-and-paths)
 - [Permissions](#permissions)
-- [Plex, Radarr and Sonarr](#plex-radarr-and-sonarr)
+- [Plex, Radarr, Sonarr and Tautulli](#plex-radarr-sonarr-and-tautulli)
 - [Browser](#browser)
 - [Time](#time)
 - [Sources](#sources)
@@ -39,6 +39,7 @@ are covered too. Install guides: [Unraid](installation-unraid.md) ·
 | 14 | PUID/PGID | Ids that may delete your media (Unraid: 99/100) | `ls -ln /mnt/user/data/media` |
 | 15 | Plex | A current Plex Media Server; owner token and *Allow media deletion* only for the Plex method | *Test* in *Settings → Media Servers* |
 | 16 | Radarr / Sonarr (optional) | Radarr v5 or v6, Sonarr v4 | *System → Status* in the \*arr |
+| 16b | Tautulli (optional) | 2.18.0 or later, only for the *Played* / *Last played* criteria | *Settings → Help → About* in Tautulli |
 | 17 | Browser | Chrome/Edge 111, Safari 16.4 (iOS 16.4), Firefox 128 | the browser's *About* page |
 | 18 | Clock | Host clock synchronised (NTP) | `date -u`, Unraid *Settings → Date and Time* |
 
@@ -209,6 +210,7 @@ Also on Unraid:
 | In | Built-in HTTPS (optional) | 9873/tcp | Only with `EnableSsl`. A reverse proxy is usually simpler. |
 | Out | Plex Media Server | 32400/tcp | Use the server's LAN address (`http://192.168.x.y:32400`) or a shared Docker network. `https://…plex.direct` addresses need DNS that resolves `plex.direct` (router DNS-rebinding protection may block it). |
 | Out | Radarr / Sonarr | 7878/tcp, 8989/tcp | Each instance's URL including its URL base. |
+| Out | Tautulli (optional) | 8181/tcp | Only with a [Tautulli connection](configuration.md#tautulli-watch-history), including its HTTP root. |
 | Out | plex.tv (optional) | 443/tcp | *Sign in with Plex*, server discovery and the owner-token check. Without it, enter the Plex URL and token by hand; the owner check then shows *Unknown*. |
 | Out | Notification services (optional) | 443/tcp | Discord, Slack, Telegram, Pushover, Gotify, ntfy, Apprise, email (SMTP), webhooks. |
 | In | Webhooks from Radarr, Sonarr, Plex (optional) | 3873/tcp | The \*arrs and Plex must be able to reach Dupearr's URL ([webhooks](webhooks.md)). Plex webhooks need Plex Pass. |
@@ -259,7 +261,7 @@ therefore use a normal LAN, loopback or public address.
   example TrueNAS 568:568) also works when `/config` is writable for that user
   ([Docker install](installation-docker.md#running-without-root---user-kubernetes)).
 
-## Plex, Radarr and Sonarr
+## Plex, Radarr, Sonarr and Tautulli
 
 | App | Supported | Needed for | Notes |
 |---|---|---|---|
@@ -268,9 +270,11 @@ therefore use a normal LAN, loopback or public address.
 | Plex **Allow media deletion** | | The Plex deletion method | Plex Web → *Settings → (server) → Library → Allow media deletion* (advanced). Dupearr never changes it. |
 | **Radarr** | v5 or v6 (API v3). The research covers v5.0 to v6.4.4. | Optional, recommended | API key from *Settings → General*. Set the *Recycling Bin* (*Settings → Media Management*) to make \*arr deletions restorable. |
 | **Sonarr** | v4 (API v3). The research covers v4.0.0 to v4.0.20. Sonarr v3 is not tested. | Optional, recommended | Same as Radarr. |
+| **Tautulli** | 2.18.0 or later (released 2026-08-25). Older versions only accept the API key in the URL, which Dupearr never sends: **Test** says so. | Optional: the *Played* / *Last played* criteria | API enabled (*Settings → Web Interface → API*); *Keep History* on for the libraries and users that should count ([configuration](configuration.md#tautulli-watch-history)). |
 
 Details and the version-specific behaviour Dupearr copes with:
-[plex-api research](../research/plex-api.md), [arr-api research](../research/arr-api.md).
+[plex-api research](../research/plex-api.md), [arr-api research](../research/arr-api.md),
+[watch-history research](../research/watch-history.md).
 
 **Full-disc backups** (BDMV, VIDEO_TS, ISO) need no Plex or \*arr version. Plex's default scanners
 skip disc folders, and the \*arrs track at most one file of a disc. Dupearr finds discs on disk

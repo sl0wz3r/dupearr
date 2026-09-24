@@ -58,6 +58,8 @@ const (
 	DefaultSonarrAPIKey      = "fa4e0000000000000000000000008989"
 	DefaultRadarrVersion     = "6.4.4.10685"
 	DefaultSonarrVersion     = "4.0.20.3014"
+	DefaultTautulliAPIKey    = "fa4e0000000000000000000000008181"
+	DefaultTautulliVersion   = "v2.18.1"
 	// DefaultKeepTag is the *arr tag label Dupearr treats as "protect" (docs/DECISIONS.md D3).
 	DefaultKeepTag = "dupearr-keep"
 )
@@ -73,6 +75,34 @@ type Scenario struct {
 	Movies      []Movie
 	Shows       []Show
 	Instances   []Instance
+	// Tautulli is the fake Tautulli recording the Plex server's plays (Movie.Plays).
+	Tautulli TautulliServer
+}
+
+// TautulliServer describes the fake Tautulli (API v2) that records the plays of the fake Plex
+// server (docs/research/watch-history.md).
+type TautulliServer struct {
+	APIKey  string // "" = DefaultTautulliAPIKey
+	Version string // "" = DefaultTautulliVersion
+	// Users are Tautulli's users (Play.User names one); nil = DefaultTautulliUsers().
+	Users []TautulliUser
+}
+
+// TautulliUser is one Tautulli user.
+type TautulliUser struct {
+	Name      string
+	Inactive  bool // no longer shared (is_active 0)
+	NoHistory bool // keep_history 0: Tautulli records none of the user's plays
+}
+
+// Play is one recorded play of a movie (Tautulli history, grouping off).
+type Play struct {
+	User    string        // a TautulliServer user name
+	Ago     time.Duration // when it started, before the scenario's start
+	Minutes int           // how long it lasted (0 = 90)
+	// RetiredKey records the play under an earlier Plex item of the movie — a rating key Plex no
+	// longer lists (the movie was removed and added again) — in the movie's library.
+	RetiredKey string
 }
 
 // PlexServer describes the fake Plex Media Server.
@@ -99,6 +129,8 @@ type Library struct {
 	// skip full-disc backups), or ScannerMovieDiscImage / ScannerSeriesDiscImage (the legacy
 	// disc-image scanners; only the movie one exposes discs, see Disc).
 	Scanner string
+	// NoHistory is Tautulli's "Keep History" turned off for this library (keep_history 0).
+	NoHistory bool
 }
 
 // Movie is a Plex movie item (one metadata item with one or more versions).
@@ -123,6 +155,9 @@ type Movie struct {
 	// automatically; list them here to set folder, monitoring or tags, or to add a movie that
 	// tracks no version (or a different movie, see Version.TrackedTmdbID).
 	Arr []ArrMovie
+	// Plays are the plays Tautulli recorded for this item (Plex tracks plays per item, not per
+	// version).
+	Plays []Play
 }
 
 // ArrMovie is a Radarr movie entry.
@@ -319,6 +354,11 @@ func Base(name string) *Scenario {
 			},
 		},
 	}
+}
+
+// DefaultTautulliUsers are the users of the fake Tautulli: the Plex owner and two friends.
+func DefaultTautulliUsers() []TautulliUser {
+	return []TautulliUser{{Name: "fakeowner"}, {Name: "alice"}, {Name: "bob"}}
 }
 
 // AddMovie appends a movie and returns s (for chaining).
@@ -582,6 +622,8 @@ type validator struct {
 	// clipFiles maps each loose clip set file (media-root relative) → its set; clipFolders maps each
 	// clip set folder → its set (one set per folder).
 	clipFiles, clipFolders map[string]string
+	// retired are the rating keys plays are recorded under that no item may use (Play.RetiredKey).
+	retired []string
 }
 
 func (v *validator) addf(format string, args ...any) {
@@ -670,6 +712,48 @@ func (v *validator) run() {
 	v.links()
 	v.discOverlaps()
 	v.clipOverlaps()
+	for _, rk := range v.retired {
+		if v.rks[rk] {
+			v.addf("retired rating key %q is used by an item", rk)
+		}
+	}
+	seen := map[string]bool{}
+	for _, u := range s.Tautulli.Users {
+		if u.Name == "" || seen[u.Name] {
+			v.addf("tautulli: empty or duplicate user %q", u.Name)
+		}
+		seen[u.Name] = true
+	}
+}
+
+// plays checks a movie's plays: known users, a past start, retired keys that no item uses.
+func (v *validator) plays(owner string, plays []Play) {
+	users := v.s.Tautulli.Users
+	if users == nil {
+		users = DefaultTautulliUsers()
+	}
+	for i, p := range plays {
+		po := fmt.Sprintf("%s play %d", owner, i+1)
+		found := false
+		for _, u := range users {
+			found = found || u.Name == p.User
+		}
+		if !found {
+			v.addf("%s: unknown Tautulli user %q", po, p.User)
+		}
+		if p.Ago <= 0 {
+			v.addf("%s: Ago must be positive (a play in the past)", po)
+		}
+		if p.Minutes < 0 {
+			v.addf("%s: negative duration", po)
+		}
+		if p.RetiredKey != "" {
+			if !reRatingKey.MatchString(p.RetiredKey) {
+				v.addf("%s: retired rating key %q must match ^[0-9A-Za-z]+$", po, p.RetiredKey)
+			}
+			v.retired = append(v.retired, p.RetiredKey)
+		}
+	}
 }
 
 func (v *validator) ratingKey(owner, rk string) {
@@ -801,6 +885,7 @@ func (v *validator) movie(m *Movie) {
 		v.addf("%s: at least one version is required (or a full-disc backup in Discs or ClipSets)", owner)
 	}
 	v.discs(owner, lib, m.Discs, "")
+	v.plays(owner, m.Plays)
 	type key struct {
 		inst string
 		tmdb int

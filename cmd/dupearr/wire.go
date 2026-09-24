@@ -24,6 +24,7 @@ import (
 	"github.com/sl0wz3r/dupearr/internal/health"
 	"github.com/sl0wz3r/dupearr/internal/integrations/arr"
 	"github.com/sl0wz3r/dupearr/internal/integrations/plex"
+	"github.com/sl0wz3r/dupearr/internal/integrations/tautulli"
 	"github.com/sl0wz3r/dupearr/internal/logging"
 	"github.com/sl0wz3r/dupearr/internal/models"
 	"github.com/sl0wz3r/dupearr/internal/notifications"
@@ -60,10 +61,11 @@ type app struct {
 	db   *database.DB
 	bus  *events.Bus
 
-	notifier    *notifications.Service
-	plexOpts    plex.Options
-	plexFactory func(models.MediaServer) *plex.Client
-	arrFactory  func(models.ArrInstance) *arr.Client
+	notifier        *notifications.Service
+	plexOpts        plex.Options
+	plexFactory     func(models.MediaServer) *plex.Client
+	arrFactory      func(models.ArrInstance) *arr.Client
+	tautulliFactory func(models.TautulliInstance) *tautulli.Client
 
 	scanner  *scanner.Service
 	executor *executor.Service
@@ -183,6 +185,9 @@ func (a *app) wire(ctx context.Context) error {
 	a.arrFactory = func(inst models.ArrInstance) *arr.Client {
 		return arr.New(inst, arr.Options{VerifyTLS: inst.VerifyTLS, Timeout: httpClientTimeout})
 	}
+	a.tautulliFactory = func(t models.TautulliInstance) *tautulli.Client {
+		return tautulli.New(t, tautulli.Options{VerifyTLS: t.VerifyTLS, Timeout: httpClientTimeout})
+	}
 
 	// scanner → executor. The closures below reference services built later in this function;
 	// they are only invoked once commands run, after wiring has finished.
@@ -193,6 +198,9 @@ func (a *app) wire(ctx context.Context) error {
 		Notifier:    a.notifier,
 		PlexFactory: func(s models.MediaServer) scanner.PlexClient { return a.plexFactory(s) },
 		ArrFactory:  func(i models.ArrInstance) scanner.ArrClient { return a.arrFactory(i) },
+		TautulliFactory: func(t models.TautulliInstance) scanner.WatchClient {
+			return a.tautulliFactory(t)
+		},
 		Now:         time.Now,
 		Concurrency: scanConcurrency,
 		// Auto mode approves exactly what the scan checked: the executor refuses the group when
@@ -258,6 +266,7 @@ func (a *app) wire(ctx context.Context) error {
 		} {
 			return a.arrFactory(i)
 		},
+		TautulliFactory: func(t models.TautulliInstance) health.TautulliClient { return a.tautulliFactory(t) },
 	})
 	a.backups = backup.New(dataDir, a.cfg, a.db, component(log, "Backup"))
 	a.commands = commands.New(a.db, a.bus, component(log, "Commands"))
@@ -269,24 +278,25 @@ func (a *app) wire(ctx context.Context) error {
 		return fmt.Errorf("initialize authentication: %w", err)
 	}
 	a.api = api.New(api.Deps{
-		Config:      a.cfg,
-		Store:       a.db,
-		Bus:         a.bus,
-		Log:         component(log, "Api"),
-		Logs:        a.logs,
-		Auth:        a.auth,
-		Commands:    a.commands,
-		Scanner:     a.scanner,
-		Executor:    a.executor,
-		Health:      a.health,
-		Backups:     a.backups,
-		Notifier:    a.notifier,
-		PlexOpts:    a.plexOpts,
-		PlexFactory: a.plexFactory,
-		ArrFactory:  a.arrFactory,
-		WebFS:       web.FS(),
-		StartTime:   a.startTime,
-		Restart:     a.requestRestart,
+		Config:          a.cfg,
+		Store:           a.db,
+		Bus:             a.bus,
+		Log:             component(log, "Api"),
+		Logs:            a.logs,
+		Auth:            a.auth,
+		Commands:        a.commands,
+		Scanner:         a.scanner,
+		Executor:        a.executor,
+		Health:          a.health,
+		Backups:         a.backups,
+		Notifier:        a.notifier,
+		PlexOpts:        a.plexOpts,
+		PlexFactory:     a.plexFactory,
+		ArrFactory:      a.arrFactory,
+		TautulliFactory: a.tautulliFactory,
+		WebFS:           web.FS(),
+		StartTime:       a.startTime,
+		Restart:         a.requestRestart,
 	})
 	return nil
 }

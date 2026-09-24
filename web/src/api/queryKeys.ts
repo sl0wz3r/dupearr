@@ -59,6 +59,11 @@ export const queryKeys = {
     detail: (id: Id) => ['arr', 'detail', id] as const,
   },
 
+  tautulli: {
+    all: ['tautulli'] as const,
+    list: ['tautulli', 'list'] as const,
+  },
+
   pathMappings: {
     all: ['pathMappings'] as const,
     list: ['pathMappings', 'list'] as const,

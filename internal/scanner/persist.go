@@ -100,8 +100,9 @@ func (p *pipeline) persistGroup(g *models.DuplicateGroup) {
 		dropStaleApproval(g, keptKeys(existing))
 	}
 	g.StableCount = stableCount(existing, g.Signature, p.run.Targeted)
-	if len(incomplete) > 0 {
-		// Decisions made on incomplete data never count as a confirming scan (auto mode).
+	if len(incomplete) > 0 || g.HasFlag(models.FlagWatchUnreadable) {
+		// Decisions made on incomplete data — or ranked on a play history that could not be read —
+		// never count as a confirming scan (auto mode).
 		g.StableCount = 0
 	}
 	g.LastScanID = p.run.ID

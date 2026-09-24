@@ -66,6 +66,7 @@ import (
 	"github.com/sl0wz3r/dupearr/internal/events"
 	"github.com/sl0wz3r/dupearr/internal/integrations/arr"
 	"github.com/sl0wz3r/dupearr/internal/integrations/plex"
+	"github.com/sl0wz3r/dupearr/internal/integrations/tautulli"
 	"github.com/sl0wz3r/dupearr/internal/models"
 	"github.com/sl0wz3r/dupearr/internal/notifications"
 	"github.com/sl0wz3r/dupearr/internal/store"
@@ -91,6 +92,12 @@ const (
 	// SourceDiscDetection (notice): full-disc detection is on but no enabled movie library folder
 	// is mapped to a local path, so Dupearr cannot look for discs (docs/DECISIONS.md D9).
 	SourceDiscDetection = "DiscDetectionUnavailable"
+	// SourceTautulliConnectivity (error): a Tautulli connection cannot be read, or monitors another
+	// Plex server (docs/DECISIONS.md D10).
+	SourceTautulliConnectivity = "TautulliConnectivityCheck"
+	// SourceWatchHistory: a profile ranks by play history but a server it applies to has no enabled
+	// Tautulli (warning), or Tautulli keeps no history for some libraries or users (notice).
+	SourceWatchHistory = "WatchHistoryCheck"
 )
 
 // CheckTimeout bounds each check of a Run.
@@ -131,6 +138,15 @@ type PlexOwnership interface {
 
 var _ PlexOwnership = (*plex.Client)(nil)
 
+// TautulliClient is what the Tautulli checks read (the real *tautulli.Client implements it).
+type TautulliClient interface {
+	Info(context.Context) (*tautulli.Info, error)
+	Users(context.Context) ([]tautulli.User, error)
+	Library(ctx context.Context, sectionID string) (*tautulli.Library, error)
+}
+
+var _ TautulliClient = (*tautulli.Client)(nil)
+
 // Deps are the checker's dependencies.
 //
 // Store is required for every check but AuthenticationCheck and ExternalAuthCheck; Config, Bus, Notifier, Log and the
@@ -150,6 +166,9 @@ type Deps struct {
 	ArrFactory func(a models.ArrInstance) interface {
 		Status(context.Context) (*arr.SystemStatus, error)
 	}
+	// TautulliFactory returns the client of a Tautulli connection (TautulliConnectivityCheck,
+	// WatchHistoryCheck's notices); nil skips those probes.
+	TautulliFactory func(t models.TautulliInstance) TautulliClient
 
 	// WebhookMasterKeyUsed reports when a webhook last authenticated with the master API key
 	// (zero: never); WebhookApiKeyCheck warns about it. May be nil.
@@ -308,6 +327,8 @@ func (c *Checker) checks() []check {
 		{SourcePlexOwner, c.checkPlexOwner},
 		{SourceArrConnectivity, c.checkArrConnectivity},
 		{SourceArrRecycleBin, c.checkArrRecycleBin},
+		{SourceTautulliConnectivity, c.checkTautulliConnectivity},
+		{SourceWatchHistory, c.checkWatchHistory},
 		{SourcePathMapping, c.checkPathMapping},
 		{SourceDiscDetection, c.checkDiscDetection},
 		{SourceRecycleBin, c.checkRecycleBin},

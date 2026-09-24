@@ -127,7 +127,9 @@ same ones the [demo](#try-it-without-touching-your-library) uses). No real media
   language, library, filename patterns, …) with tolerances, "keep N", "keep the best per
   resolution", protections and templates (*Keep Highest Quality*, *Keep One Per Resolution*,
   *Save Space*, *Maximum Compatibility*, *Trust My \*arr*). Every decision is explained:
-  "decided by: resolution 2160p > 1080p".
+  "decided by: resolution 2160p > 1080p". Optional **play-history** criteria (*Played*, *Last
+  played*, from Tautulli) keep the copy people actually watch; an unknown play history is a tie,
+  never "not played".
 - **Full-disc backups** — a Blu-ray/UHD `BDMV/` folder (hundreds of `.m2ts` files), a DVD
   `VIDEO_TS/`, an `.iso` or a "Disc 1"/"Disc 2" set next to a movie is **one** copy, found on disk
   (Plex's default scanners hide discs) and ranked by its main feature. Discs are kept by default;
@@ -519,7 +521,7 @@ it plugs in, and where help is welcome.
 | Several Plex servers | Each server is scanned and grouped on its own. The same title on two servers is **not** a duplicate, and two servers that index one share produce two separate sets of groups (each keeper is confirmed present right before a removal, so one server's removals cannot take the other's last copy). | Cross-server groups ("keep one copy across all my servers"). |
 | Files Plex does not know | No content hashing: a copy Plex has not matched (wrong match, unscanned folder, a file outside every library) is invisible, and identical files are only detected through Plex and the \*arrs (same path/name + size, hardlinks). | Optional **hash-based** detection of identical files on disk, outside Plex. |
 | Full-disc backups | Found only in a movie's own folder (or, in a shared folder, as an image named after the movie), read from the disc's metadata on every scan. Disc images (`.iso`) have unknown quality and go to review; discs in TV libraries and AVCHD/BDAV/HD DVD folders are only protected, never removed. | Reading the video attributes inside disc images; season discs in TV libraries. |
-| Decision criteria | File attributes only (resolution, HDR, source, custom-format score, bitrate, audio, codec, size, age, language, library, patterns…). | **Watch history** criteria from Tautulli / Plex (e.g. keep the copy that is actually played, or the one with the user's progress). |
+| Decision criteria | File attributes (resolution, HDR, source, custom-format score, bitrate, audio, codec, size, age, language, library, patterns…) and, with **Tautulli**, play history per Plex item (*Played*, *Last played*; versions of one item tie). | Plex as a play-history source, per-version attribution, a resume-progress criterion and per-user filters. |
 | Dashboards | `GET /api/v1/duplicate/stats` returns the numbers (group counts, reclaimable and reclaimed space, last scan; API key required), but there is no ready-made widget. | A Homepage `customapi` example, and native **Homepage / Homarr** widgets. |
 | Languages | The web UI is in English only. | Translations (i18n). |
 | Shared host names | A URL base (`/dupearr`) behind a reverse proxy that serves other apps on the **same host name** (`/radarr`, `/sonarr`, …) is not an isolation boundary: they share one browser origin, so a script flaw (XSS) in any of them can act with your Dupearr session (it cannot read the API key, which the web UI never receives). | Give Dupearr its **own host name** (`dupearr.example.com`) — recommended whenever other apps share the proxy. |

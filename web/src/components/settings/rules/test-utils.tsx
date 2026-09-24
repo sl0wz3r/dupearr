@@ -145,6 +145,18 @@ export const TEST_SCHEMA: ProfileSchema = {
     { type: 'audio_language', label: 'Audio Language', description: 'Has an audio track in a language.', kind: 'boolean', supportsTolerance: false, requiresArr: false },
     { type: 'filename_score', label: 'Filename Score', description: 'Sum of matching pattern scores.', kind: 'patterns', supportsTolerance: false, requiresArr: false },
     { type: 'library', label: 'Library', description: 'Preferred library.', kind: 'ordered', supportsTolerance: false, requiresArr: false },
+    { type: 'played', label: 'Played', description: 'Prefer the copy with recorded plays.', kind: 'boolean', supportsTolerance: false, requiresArr: false, requiresWatchHistory: true },
+    {
+      type: 'last_played',
+      label: 'Last played',
+      description: 'Prefer the most recently played copy.',
+      kind: 'numeric',
+      defaultDirection: 'higher',
+      supportsTolerance: false,
+      requiresArr: false,
+      requiresWatchHistory: true,
+      minDeltaUnit: 'days',
+    },
   ],
   templates: [
     {

@@ -21,6 +21,7 @@ const SETTING_LABELS: Record<string, string> = {
   logSizeLimit: 'Log File Size Limit (MB)',
   mediaServers: 'Media Servers',
   arrInstances: 'Applications',
+  tautulliInstances: 'Tautulli (Watch History)',
   pathMappings: 'Path Mappings',
   notifications: 'Notifications',
   notificationDestinations: 'Notification Destinations',
@@ -56,6 +57,8 @@ const REMOVAL_SETTINGS = new Set([
   'keepPlayableCopy',
   'mediaServers',
   'arrInstances',
+  // Play history ranks copies when a profile uses Played / Last played (docs/DECISIONS.md D10).
+  'tautulliInstances',
   'pathMappings',
 ]);
 

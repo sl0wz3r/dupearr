@@ -8,6 +8,7 @@ have a **Test** button.
 - [Plex (media servers)](#plex-media-servers)
 - [Libraries and scope groups](#libraries-and-scope-groups)
 - [Radarr and Sonarr (applications)](#radarr-and-sonarr-applications)
+- [Tautulli (watch history)](#tautulli-watch-history)
 - [Path mappings](#path-mappings)
 - [Media Management settings](#media-management-settings)
 - [Exclusions](#exclusions)
@@ -83,6 +84,36 @@ Recommendations:
 - **Separate 4K instance?** By default versions tracked by *different* instances are treated as an
   intentional pair and the group is *protected*
   ([setting](#media-management-settings): *Different \*arr instances are intentional*).
+
+## Tautulli (watch history)
+
+*Settings → Applications → Watch history → Add Tautulli* (optional)
+
+Connect [Tautulli](https://tautulli.com) to rank copies by their play history with the **Played**
+and **Last played** profile criteria ([how they decide](profiles.md#watch-history)). Dupearr only
+reads Tautulli; nothing is changed there.
+
+| Field | Notes |
+|---|---|
+| Name | Shown in explanations and health checks. |
+| Plex server | The Plex server this Tautulli monitors — one Tautulli per server. Every scan checks that Tautulli still reports this server's machine identifier; if not, its history is not used. |
+| URL | Including Tautulli's HTTP root if it has one: `http://tautulli:8181` or `https://proxy.example/tautulli`. |
+| API key | Tautulli → *Settings → Web Interface → API*: enable the API and copy the key. Requires **Tautulli 2.18.0 or later**: Dupearr sends the key only in the `X-Api-Key` header, never in a URL, and older versions only read it from the URL. A reverse proxy in front of Tautulli must pass that header on. |
+| Verify TLS | As for Plex. |
+
+**Test** shows the Tautulli version, the Plex server it monitors, since when history is recorded,
+and the libraries and number of users whose history Tautulli does not keep. In those libraries (or,
+when a user keeps no history, on the whole server) a copy without recorded plays counts as
+*unknown*, never as "not played".
+
+Things to know:
+
+- Plays are counted **per Plex item, for all users**; the versions of one item always tie.
+- A copy with *no plays recorded* only loses to a copy played after it was added.
+- A scan reads only the plays of the titles in duplicate groups. If Tautulli cannot be read, the
+  scan counts an error, every history of that server is *unknown*, and groups ranked by play
+  history go to *review* until a scan reads it again (health check *TautulliConnectivityCheck*).
+- Only counts and dates are stored — never user names.
 
 ## Path mappings
 

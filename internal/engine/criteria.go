@@ -34,6 +34,12 @@ type criterionInfo struct {
 	defaultDirection  string
 	supportsTolerance bool
 	requiresArr       bool
+	// requiresWatch: the criterion ranks by play history, which needs a play-history source
+	// (Tautulli); without one every value is unknown and ties (docs/DECISIONS.md D10).
+	requiresWatch bool
+	// minDeltaUnit is set when the criterion takes a minimum difference without a tolerance, in
+	// that unit (last_played: days).
+	minDeltaUnit string
 }
 
 // criterionTypes lists every criterion type, in schema order.
@@ -58,6 +64,8 @@ func criterionTypes() []models.CriterionType {
 		models.CritArrManaged,
 		models.CritAudioLanguage,
 		models.CritFilenameScore,
+		models.CritPlayed,
+		models.CritLastPlayed,
 	}
 }
 
@@ -188,6 +196,17 @@ func criterionInfoFor(t models.CriterionType) (criterionInfo, bool) {
 		return criterionInfo{label: "Filename score", kind: kindPatterns, defaultDirection: models.DirectionHigher,
 			description: "Sum of the scores of matching patterns. Globs without \"/\" match the file name, globs " +
 				"with \"/\" the full path; regexes match the full path. Case-insensitive unless enabled."}, true
+	case models.CritPlayed:
+		return criterionInfo{label: "Played", kind: kindBoolean, requiresWatch: true,
+			description: "Prefer the copy whose Plex item has recorded plays (Tautulli, every user). Plays are " +
+				"counted per Plex item, so versions of one item tie. An unknown play history is a tie, never " +
+				"\"not played\"; \"no plays recorded\" only loses to a copy played since the copy was added."}, true
+	case models.CritLastPlayed:
+		return criterionInfo{label: "Last played", kind: kindNumeric, defaultDirection: models.DirectionHigher,
+			requiresWatch: true, minDeltaUnit: minDeltaDays,
+			description: "Prefer the most recently played copy (Tautulli, per Plex item). Plays less than the " +
+				"minimum difference (days) apart are a tie; \"no plays recorded\" loses to a copy played since " +
+				"the copy was added; an unknown play history is a tie."}, true
 	}
 	return criterionInfo{}, false
 }
@@ -629,6 +648,8 @@ func numericValue(t models.CriterionType, v *models.MediaVersion) (float64, bool
 		if d := dateAdded(v); !d.IsZero() {
 			return float64(d.Unix()), true
 		}
+	case models.CritLastPlayed:
+		return lastPlayedValue(v)
 	case models.CritAudioTrackCount:
 		n := len(v.AudioTracks)
 		return float64(n), n > 0
@@ -787,6 +808,8 @@ func DisplayValue(t models.CriterionType, v *models.MediaVersion) string {
 			return path.Base(p)
 		}
 		return unknownValue
+	case models.CritPlayed, models.CritLastPlayed:
+		return watchDisplay(t, v)
 	}
 	return ""
 }
@@ -860,12 +883,15 @@ const (
 	specialHealth
 	specialArr
 	specialLang
+	specialPlayed     // played (docs/DECISIONS.md D10)
+	specialLastPlayed // last_played
 )
 
 // metric is one criterion (or tiebreak step) evaluated over the versions of a group. A higher
 // score is better. A version with present=false ranks below every version with a value. When
 // class is non-nil, two versions are only comparable when they share the same non-empty class
-// (video_bitrate: same codec; custom_format_score: same *arr instance); otherwise they tie.
+// (video_bitrate: same codec; custom_format_score: same *arr instance; played / last_played: a
+// known play history); otherwise they tie.
 type metric struct {
 	id       string // GroupFile.DecidingCriterion value
 	label    string
@@ -876,6 +902,10 @@ type metric struct {
 	present  []bool
 	score    []float64
 	class    []string
+	// floor (played / last_played; nil otherwise): the least score that beats each version. A
+	// copy with no plays recorded only loses to a copy played on or after the date since which
+	// none are recorded (docs/DECISIONS.md D10), a played copy never loses on played (+Inf).
+	floor    []float64
 	tolPct   float64
 	minDelta float64
 	display  []string
@@ -910,6 +940,9 @@ func (m *metric) beats(a, b int) bool {
 	}
 	if !m.present[b] {
 		return true
+	}
+	if m.floor != nil && m.score[a] < m.floor[b] {
+		return false
 	}
 	diff := m.score[a] - m.score[b]
 	if !(diff > 0) {
@@ -1113,6 +1146,15 @@ func buildMetric(c models.Criterion, vs []*models.MediaVersion, health []healthI
 		}
 	case kindNumeric:
 		higher := !strings.EqualFold(strings.TrimSpace(c.Direction), models.DirectionLower)
+		if c.Type == models.CritLastPlayed {
+			// Always the more recently played copy (ValidateProfile refuses "lower"): preferring the
+			// unplayed copy would make a play a reason to remove, the opposite of issue #5.
+			higher = true
+			m.special = specialLastPlayed
+			if c.MinDelta > 0 && !math.IsInf(c.MinDelta, 0) {
+				m.minDelta = math.Min(c.MinDelta, maxLastPlayedMinDeltaDays) * secondsPerDay
+			}
+		}
 		if info.supportsTolerance {
 			// Capped at 100 % (ValidateProfile rejects more): beyond that "a beats b" would no
 			// longer be monotone in a's score, which metric.survivors relies on.
@@ -1131,8 +1173,14 @@ func buildMetric(c models.Criterion, vs []*models.MediaVersion, health []healthI
 		default:
 			m.worse = map[bool]string{true: "lower", false: "higher"}[higher]
 		}
-		if c.Type == models.CritVideoBitrate || c.Type == models.CritCustomFormatScore {
+		if c.Type == models.CritVideoBitrate || c.Type == models.CritCustomFormatScore || c.Type == models.CritLastPlayed {
 			m.class = make([]string, n)
+		}
+		if c.Type == models.CritLastPlayed {
+			m.floor = make([]float64, n)
+			for i, v := range vs {
+				m.floor[i] = watchFloor(c.Type, v)
+			}
 		}
 		if c.Type == models.CritAudioChannels && slicesAny(vs, discChannelsUnknown) {
 			// A disc's multichannel count is unknown (Blu-ray metadata only says "multichannel"):
@@ -1160,6 +1208,10 @@ func buildMetric(c models.Criterion, vs []*models.MediaVersion, health []healthI
 			case models.CritCustomFormatScore:
 				if ok && v.Arr != nil {
 					m.class[i] = strconv.FormatInt(v.Arr.InstanceID, 10)
+				}
+			case models.CritLastPlayed:
+				if ok {
+					m.class[i] = watchClass // an unknown history ties with every copy
 				}
 			}
 			if !ok {
@@ -1191,6 +1243,25 @@ func buildMetric(c models.Criterion, vs []*models.MediaVersion, health []healthI
 				m.display[i] = DisplayValue(models.CritArrManaged, v)
 				if arrMatches(v.Arr, m.subject) {
 					m.score[i] = 1
+				}
+			}
+		case models.CritPlayed:
+			// Compared only between known histories: an unknown one ties with every copy. The
+			// score is the time of the last play (0 without plays) so that "a beats b" stays
+			// monotone in a's score (metric.survivors); the floor keeps played copies tied with
+			// each other and lets a copy with no plays recorded lose only to a later play.
+			m.special = specialPlayed
+			m.class = make([]string, n)
+			m.floor = make([]float64, n)
+			for i, v := range vs {
+				m.display[i] = watchDisplay(models.CritPlayed, v)
+				m.floor[i] = watchFloor(models.CritPlayed, v)
+				if knownWatch(v) == nil {
+					continue
+				}
+				m.class[i], m.present[i] = watchClass, true
+				if t, ok := lastPlayedValue(v); ok {
+					m.score[i] = t
 				}
 			}
 		case models.CritAudioLanguage:

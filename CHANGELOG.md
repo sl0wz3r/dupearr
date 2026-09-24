@@ -21,6 +21,19 @@ All notable changes to Dupearr are documented here. The format follows
 - [Dashboards](docs/user/dashboards.md) guide: a ready-to-paste Homepage `customapi` widget for the
   duplicate statistics (pending, to review, reclaimable, last scan), and why the API key it needs
   must stay private (#2).
+- Play-history criteria **Played** and **Last played** (opt-in, in no template), with a new
+  **Tautulli** connection under *Settings → Applications → Watch history* (Tautulli 2.18.0 or
+  later; the API key only travels in a header) (#5). Plays are counted per Plex item for every
+  user, so versions of one item tie; copies in different items (e.g. *Movies* and *Movies 4K*) can
+  be ranked by whether and when they were played. "No plays recorded" is only concluded when the
+  library and every user keep history, the item was added after the recorded history starts, it
+  is matched and no earlier Plex item of the title in its library has plays; such a copy only loses
+  to plays made after it was added. Otherwise the history is unknown, and an unknown or unreadable
+  history is a tie — never "not played". When Tautulli cannot be read, groups whose copies it could
+  tell apart go to review (flag *Play history unreadable*), are never auto-approved and need their
+  stable scans again. The group page shows a *Plays* row; health
+  checks *TautulliConnectivityCheck* and *WatchHistoryCheck*; API `/api/v1/tautulli`,
+  `MediaVersion.watch`, `CriterionSchema.requiresWatchHistory` / `minDeltaUnit` (additive).
 
 ### Changed
 

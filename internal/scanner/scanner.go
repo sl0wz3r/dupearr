@@ -40,6 +40,13 @@
 //   - Re-evaluations apply configuration changes at once: a group an exclusion now covers, with a
 //     version in a disabled library, or merged across libraries that no longer share a scope group
 //     goes to review, which cancels its queued removals (blockedReason, ReevaluateMatching).
+//   - Play history (Tautulli, docs/DECISIONS.md D10) is read after the *arr data, per media server,
+//     and stored with every version. A read that fails or cannot be verified (another Plex server,
+//     a cut-short or inconsistent answer) marks every version of that server "failed", never "no
+//     plays"; "no plays recorded" is only concluded when the library and every user keep history,
+//     the item was added after the recorded history starts, it is matched and none of its title's
+//     plays in the library lie under an earlier Plex item. A group whose profile ranks by play
+//     history and whose history could not be read goes to review and never counts as stable.
 //   - A media server stored without a machine identifier (force-saved while unreachable) gets the
 //     one it answers with on the next sync or scan, never replacing a stored one and never one
 //     another configured server has (adoptIdentity).
@@ -58,6 +65,7 @@ import (
 	"github.com/sl0wz3r/dupearr/internal/events"
 	"github.com/sl0wz3r/dupearr/internal/integrations/arr"
 	"github.com/sl0wz3r/dupearr/internal/integrations/plex"
+	"github.com/sl0wz3r/dupearr/internal/integrations/tautulli"
 	"github.com/sl0wz3r/dupearr/internal/models"
 	"github.com/sl0wz3r/dupearr/internal/notifications"
 	"github.com/sl0wz3r/dupearr/internal/store"
@@ -78,6 +86,16 @@ type ArrClient interface {
 	QueueItemIDs(ctx context.Context) (map[int64]bool, error)
 }
 
+// WatchClient is the subset of *tautulli.Client the scanner reads play history with (fakes in
+// tests; docs/DECISIONS.md D10).
+type WatchClient interface {
+	Info(ctx context.Context) (*tautulli.Info, error)
+	Users(ctx context.Context) ([]tautulli.User, error)
+	Library(ctx context.Context, sectionID string) (*tautulli.Library, error)
+	FirstPlay(ctx context.Context, sectionID string) (*tautulli.HistoryRow, error)
+	History(ctx context.Context, f tautulli.HistoryFilter) ([]tautulli.HistoryRow, error)
+}
+
 // Deps are the scanner's dependencies.
 type Deps struct {
 	Store       store.Store
@@ -86,8 +104,12 @@ type Deps struct {
 	Notifier    *notifications.Service // may be nil in tests
 	PlexFactory func(s models.MediaServer) PlexClient
 	ArrFactory  func(a models.ArrInstance) ArrClient
-	Now         func() time.Time // nil = time.Now
-	Concurrency int              // parallel item-detail fetches (default 4)
+	// TautulliFactory (additive to docs/CONTRACTS.md) returns the play-history client of a Tautulli
+	// connection (docs/DECISIONS.md D10). nil: a configured, enabled connection cannot be read, and
+	// its server's versions get a "failed" play history.
+	TautulliFactory func(t models.TautulliInstance) WatchClient
+	Now             func() time.Time // nil = time.Now
+	Concurrency     int              // parallel item-detail fetches (default 4)
 
 	// AutoApprove (additive to docs/CONTRACTS.md) approves one group in auto mode (§5 step 6).
 	// cmd/dupearr wires it to executor.Service.ApproveReviewed; signature is the
@@ -131,6 +153,9 @@ type Service struct {
 
 	// arrRetryDelay is the pause before an *arr read that failed is tried once more.
 	arrRetryDelay time.Duration
+	// watchMaxRows caps the play-history rows one server's reads may return in a scan
+	// (DefaultWatchMaxRows; lowered by tests).
+	watchMaxRows int
 }
 
 // DefaultArrRetryDelay is the pause before retrying a failed *arr read: the *arr may have been
@@ -148,7 +173,7 @@ func New(d Deps) *Service {
 	if d.Concurrency > maxConcurrency {
 		d.Concurrency = maxConcurrency
 	}
-	return &Service{d: d, arrRetryDelay: DefaultArrRetryDelay}
+	return &Service{d: d, arrRetryDelay: DefaultArrRetryDelay, watchMaxRows: DefaultWatchMaxRows}
 }
 
 // GroupLock returns the lock of the read → evaluate → upsert cycle of a group (scans and

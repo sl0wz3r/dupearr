@@ -174,9 +174,14 @@ clients share one login-throttling limit; it clears once that peer is trusted),
 `WebhookApiKeyCheck` (warning: a webhook authenticated with the master API key since start or the
 last key change — webhook URLs must carry the webhook token), `DiscDetectionUnavailable` (notice:
 `detectDiscs` is on, but no folder of an enabled movie library maps to a local path, so the scan
-cannot look for full-disc backups), `LastScanCheck`, `DatabaseCheck`. A
+cannot look for full-disc backups), `TautulliConnectivityCheck` (error: a Tautulli connection
+cannot be read, rejects its key, is older than 2.18.0 or monitors another Plex server — groups
+ranked by play history go to review meanwhile), `WatchHistoryCheck` (warning: a profile ranks by
+play history for a media server without an enabled Tautulli connection; notice: Tautulli keeps no
+history for some of the libraries concerned or for some users), `LastScanCheck`, `DatabaseCheck`. A
 `CheckHealth` command is queued automatically after every change of settings, media servers,
-applications, path mappings and library enable/disable, so the list is never stale.
+applications, Tautulli connections, path mappings, profiles and a library's enable/disable or
+profile, so the list is never stale.
 `OnHealthIssue` notifications are held back for 15 minutes after start (boot grace period, like
 the *arr apps); checks still run and are displayed, and issues still present afterwards are
 notified by the next run.
@@ -190,7 +195,7 @@ them back after reviewing). Only the settings this build knows are taken from th
 `allowDiscRemoval`, `keepPlayableCopy` (the backup's unsafe value is never applied), `mode`,
 `deletionMethods`, `recycleBinPath`, `recycleBinCleanupDays`, `minAgeHours`, `maxDeletionsPerRun`,
 `maxBytesPerRunGb`, `stableScansRequired`, `detectDiscs`, `historyRetentionDays`, `logLevel`,
-`logSizeLimit`, `mediaServers` and `arrInstances` (name → URL), `pathMappings`, `notifications`
+`logSizeLimit`, `mediaServers`, `arrInstances` and `tautulliInstances` (name → URL), `pathMappings`, `notifications`
 (name and kind only) and `notificationDestinations` (the connections whose destination or
 credentials differ under the same name and kind; never the URLs or tokens).
 
@@ -366,6 +371,29 @@ PlexServer = { name, clientIdentifier, productVersion, owned, accessToken,
 | GET/PUT/DELETE | `/api/v1/arr/{id}` | PUT → 202 (tests first unless `?forceSave=true`): absent fields (incl. `tags`) keep their values; `kind` cannot change (400); 409 on a duplicate URL; a URL change re-points the instance (see Duplicates: approve 409) |
 | POST | `/api/v1/arr/test` | body `ArrInstance` → `{"appName","version","instanceName","recycleBin":"", "recycleBinCleanupDays":7}`; 400 (credentials, wrong application, redirect = missing URL base) / 502 (unreachable); error messages never carry the server's response body |
 
+## Watch history (Tautulli)
+Tautulli connections provide the play history of the Played / Last played profile criteria
+(DECISIONS D10). One connection per media server; Dupearr only reads from Tautulli (≥ 2.18.0; the
+API key is sent in the `X-Api-Key` header only, never in a URL).
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/api/v1/tautulli` | `TautulliInstance[]` (apiKey masked) |
+| POST | `/api/v1/tautulli` | create → 201 (tests first unless `?forceSave=true`); 400 when `serverId` names no media server; 409 when the media server already has a Tautulli connection, or another connection uses the same URL |
+| GET/PUT/DELETE | `/api/v1/tautulli/{id}` | PUT → 202 (tests first unless `?forceSave=true`); a masked `apiKey` is only kept for the same URL with TLS verification no weaker (400 otherwise); 409 as for POST. Deleting the media server deletes its connection |
+| POST | `/api/v1/tautulli/test` | body `TautulliInstance` (with `id`, a masked key is taken from the stored connection under the same rule) → `TautulliTestResult`; 400 (key rejected, not Tautulli, older than 2.18.0, API disabled, redirect = missing HTTP root, another Plex server, the media server has no machine identifier yet) / 502 (unreachable); error messages never carry the server's response body |
+
+Every change is recorded as a security event (`connectionChanged`) and queues a health check.
+There is no re-pointing quarantine: nothing Dupearr stores refers to Tautulli ids, and every scan
+checks again that Tautulli monitors the media server's machine identifier.
+```ts
+TautulliInstance = { id, name, serverId, url /* incl. HTTP root */, apiKey /* masked */, verifyTls, enabled,
+  createdAt, updatedAt }
+TautulliTestResult = { version /* "v2.18.1" */, pmsName, pmsIdentifier, serverMatches: boolean,
+  historySince: string|null /* earliest recorded play in the server's enabled libraries */,
+  librariesWithoutHistory: string[] /* titles */, usersWithoutHistory: number /* never names */ }
+```
+
 ## Path mappings
 `GET/POST /api/v1/pathmapping`, `GET/PUT/DELETE /api/v1/pathmapping/{id}` — `PathMapping`
 (`{id, sourceType:"server"|"arr", sourceId, remotePath, localPath}`). POST → 201, PUT → 202.
@@ -397,6 +425,12 @@ report the same paths.
 standalone `.m2ts/.mts` file; default order `mkv, mp4, m4v, m2ts, other, avi, ts`). Existing
 profiles got `disc` after `remux` and `m2ts` after the common containers once, when this version
 first opened the database.
+
+`CriterionSchema` also carries `requiresWatchHistory` (true for `played` and `last_played`: they
+need a Tautulli connection; without one every value is unknown and ties) and `minDeltaUnit`
+(`"days"` for `last_played`, whose `minDelta` is a number of days, at most 3650). A profile is
+refused (400) with `direction: "lower"` on either criterion, or a `tolerancePercent` on
+`last_played`. No template uses them (DECISIONS D10).
 
 ## Duplicates
 | Method | Path | Notes |
@@ -523,7 +557,22 @@ DiscInfo = { type: "bluray"|"uhd_bluray"|"dvd"|"hddvd"|"avchd"|"bdav"|"iso"|"blu
 ```
 Flags: `full_disc` (the group holds a disc version or a file inside a disc — a loose clip
 included; manual approval only),
-`disc_unreadable` (a disc could not be read/verified: review, kept), `disc_tracked_clip`.
+`disc_unreadable` (a disc could not be read/verified: review, kept), `disc_tracked_clip`,
+`watch_unreadable` (the profile ranks by play history, a version would be removed, a version's
+play history could not be read and the group holds copies of different Plex items: review, never
+auto-approved).
+
+**Play history** (`MediaVersion.watch`, DECISIONS D10; absent without a Tautulli connection for
+the media server). Plays are counted per Plex item, for every user, so the versions of one item
+carry the same value. `status` `known` with `plays` > 0 is a played copy (`since`: the start of
+its library's recorded history), with `plays` 0 "no plays recorded" since `since` — the item's date
+added — (never "not watched"); such a copy only loses to a copy last played on or after that date.
+`unknown` (with `reason`) and `failed` (the read failed; `reason` is the error) are never compared. `values.played` / `values.last_played` render
+it ("3 plays · 2 users", "No plays recorded since 2025-03-01", "Unknown (<reason>)").
+```ts
+WatchInfo = { source: "tautulli", sourceName, status: "known"|"unknown"|"failed", reason?,
+  plays, users, lastPlayed?, since?, readAt? }
+```
 `season` is `-1` when Plex did not report the episode's season (unknown — show it as "S??", never
 as "S-1" or as season 0 = specials); `season`/`episode` are omitted when 0. History titles use
 `S??E05` in that case.

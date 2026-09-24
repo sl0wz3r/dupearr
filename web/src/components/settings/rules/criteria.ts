@@ -72,9 +72,9 @@ export function schemaMap(schema: ProfileSchema | undefined | null): SchemaMap {
   return new Map((schema?.criteria ?? []).map((c) => [c.type, c]));
 }
 
-/** Which editor a criterion row shows. Health never has parameters. */
+/** Which editor a criterion row shows. Health and Played never have parameters. */
 export function editorKind(type: CriterionType, schema?: CriterionSchema): EditorKind {
-  if (type === 'health') return 'none';
+  if (type === 'health' || type === 'played') return 'none';
   const kind = schema?.kind ?? CRITERION_KIND_BY_TYPE[type];
   return kind && KNOWN_KINDS.includes(kind) ? kind : 'none';
 }
@@ -218,6 +218,13 @@ const DIRECTION_WORDING: Partial<Record<CriterionType, DirectionWording>> = {
     higherPhrase: 'more subtitle tracks',
     lowerPhrase: 'fewer subtitle tracks',
   },
+  // Fixed direction (the server refuses "lower"): only the "higher" wording is ever shown.
+  last_played: {
+    higher: 'More recently played',
+    lower: 'Less recently played',
+    higherPhrase: 'the most recently played file',
+    lowerPhrase: 'the most recently played file',
+  },
 };
 
 /** Type-specific wording for a numeric criterion's direction (e.g. date_added → Newer/Older). */
@@ -233,14 +240,35 @@ export function directionWording(type: CriterionType, schema?: CriterionSchema):
   };
 }
 
-/** Unit of a criterion's absolute minimum difference ("points" for custom format scores). */
-export function minDeltaUnit(type: CriterionType): string {
+/**
+ * Unit of a criterion's absolute minimum difference: "points" for custom format scores, "days" for
+ * Last played (the schema's `minDeltaUnit` when the server names one).
+ */
+export function minDeltaUnit(type: CriterionType, schema?: CriterionSchema): string {
+  if (schema?.minDeltaUnit) return schema.minDeltaUnit;
+  if (type === 'last_played') return 'days';
   return type === 'custom_format_score' ? 'points' : '';
 }
 
 /** Whether the row offers the absolute "Min delta" field. */
-export function supportsMinDelta(type: CriterionType): boolean {
-  return type === 'custom_format_score';
+export function supportsMinDelta(type: CriterionType, schema?: CriterionSchema): boolean {
+  return type === 'custom_format_score' || type === 'last_played' || !!schema?.minDeltaUnit;
+}
+
+/** Largest minimum difference (days) the server accepts for Last played. */
+export const MAX_LAST_PLAYED_DAYS = 3650;
+
+/**
+ * Criteria whose direction is fixed: Last played always prefers the more recently played copy
+ * (preferring the unplayed one would make a play a reason to remove, docs/DECISIONS.md D10).
+ */
+export function fixedDirection(type: CriterionType): boolean {
+  return type === 'last_played';
+}
+
+/** Whether a criterion ranks by play history, which needs a Tautulli connection. */
+export function requiresWatchHistory(type: CriterionType, schema?: CriterionSchema): boolean {
+  return schema?.requiresWatchHistory ?? (type === 'played' || type === 'last_played');
 }
 
 // ---------------------------------------------------------------------------
@@ -259,7 +287,7 @@ export function newCriterion(type: CriterionType, schema?: CriterionSchema): Cri
     c.direction = schema?.defaultDirection === 'lower' ? 'lower' : 'higher';
     const tol = DEFAULT_TOLERANCE[type];
     if (tol !== undefined && (schema?.supportsTolerance ?? true)) c.tolerancePercent = tol;
-    if (supportsMinDelta(type)) c.minDelta = 10;
+    if (supportsMinDelta(type, schema)) c.minDelta = type === 'last_played' ? 30 : 10;
   }
   if (kind === 'patterns') c.patterns = [];
   return c;
@@ -456,6 +484,13 @@ export function describeCriterion(c: Criterion, ctx: ExplainContext): string {
   const schema = ctx.schema.get(c.type);
   const kind = editorKind(c.type, schema);
   if (c.type === 'health') return 'the healthiest file';
+  if (c.type === 'played') return 'a file that has been played (Tautulli; an unknown play history is a tie)';
+  if (c.type === 'last_played') {
+    const days = c.minDelta && c.minDelta > 0 ? formatNumber(c.minDelta) : '';
+    return days
+      ? `the most recently played file (plays less than ${days} days apart count as a tie)`
+      : 'the most recently played file (an unknown play history is a tie)';
+  }
 
   switch (kind) {
     case 'ordered': {
@@ -478,7 +513,7 @@ export function describeCriterion(c: Criterion, ctx: ExplainContext): string {
         notes.push(`differences under ${formatNumber(c.tolerancePercent)}% count as a tie`);
       }
       if (c.minDelta && c.minDelta > 0) {
-        const unit = minDeltaUnit(c.type);
+        const unit = minDeltaUnit(c.type, schema);
         notes.push(`differences under ${formatNumber(c.minDelta)}${unit ? ` ${unit}` : ''} count as a tie`);
       }
       if (notes.length > 0) phrase += ` (${notes.join('; ')})`;
@@ -557,10 +592,10 @@ export function criterionSummary(c: Criterion, ctx: ExplainContext): string {
     }
     case 'numeric': {
       const w = directionWording(c.type, schema);
-      const parts = [c.direction === 'lower' ? w.lower : w.higher];
+      const parts = [c.direction === 'lower' && !fixedDirection(c.type) ? w.lower : w.higher];
       if (c.tolerancePercent && c.tolerancePercent > 0) parts.push(`${formatNumber(c.tolerancePercent)}% tolerance`);
       if (c.minDelta && c.minDelta > 0) {
-        const unit = minDeltaUnit(c.type);
+        const unit = minDeltaUnit(c.type, schema);
         parts.push(`min delta ${formatNumber(c.minDelta)}${unit ? ` ${unit}` : ''}`);
       }
       return parts.join(' · ');
@@ -748,11 +783,17 @@ export function validateProfileDraft(draft: ProfileDraft, schema: SchemaMap): Pr
     if (c.enabled) {
       const kind = editorKind(c.type, schema.get(c.type));
       if (kind === 'ordered' && (c.order ?? []).length === 0) msgs.push('Choose at least one value to rank');
-      if (kind === 'numeric' && c.direction !== 'higher' && c.direction !== 'lower') msgs.push('Choose a direction');
+      // A fixed direction (Last played) has no select to fix it with; the server defaults it.
+      if (kind === 'numeric' && !fixedDirection(c.type) && c.direction !== 'higher' && c.direction !== 'lower') {
+        msgs.push('Choose a direction');
+      }
       if (kind === 'numeric' && c.tolerancePercent !== undefined && (c.tolerancePercent < 0 || c.tolerancePercent > 100)) {
         msgs.push('Tolerance must be between 0 and 100%');
       }
       if (kind === 'numeric' && c.minDelta !== undefined && c.minDelta < 0) msgs.push('Min delta cannot be negative');
+      if (c.type === 'last_played' && (c.minDelta ?? 0) > MAX_LAST_PLAYED_DAYS) {
+        msgs.push(`The minimum difference can be at most ${MAX_LAST_PLAYED_DAYS} days`);
+      }
       if (c.type === 'audio_language') {
         if (!c.value?.trim()) msgs.push('Choose an audio language');
         else if (!isLanguageCode(c.value)) msgs.push('Use a 2- or 3-letter language code, e.g. eng');

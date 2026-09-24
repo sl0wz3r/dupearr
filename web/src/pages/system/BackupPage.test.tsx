@@ -24,6 +24,7 @@ const STAGED = {
     changes: [
       { setting: 'dryRun', current: 'false', backup: 'false', applied: false, message: 'Dry run is on after a restore' },
       { setting: 'mediaServers', current: '', backup: 'Evil PMS → http://10.9.9.9:32400', applied: true },
+      { setting: 'tautulliInstances', current: '', backup: 'Tautulli (media server 1) → http://10.9.9.9:8181', applied: true },
     ],
     cancelledRemovals: 2,
     interruptedRemovals: 0,
@@ -166,6 +167,9 @@ describe('<BackupPage>', () => {
     const review = await screen.findByRole('dialog', { name: 'Review Restore' });
     expect(within(review).getByText('Media Servers')).toBeInTheDocument();
     expect(within(review).getByText('Evil PMS → http://10.9.9.9:32400')).toBeInTheDocument();
+    // A restored Tautulli connection is named and flagged: it can change which copy is removed.
+    const tautulli = within(review).getByText('Tautulli (Watch History)').closest('tr')!;
+    expect(within(tautulli).getByText('decides removals')).toBeInTheDocument();
     expect(within(review).getByText('Dry run stays on')).toBeInTheDocument();
     expect(within(review).getByText(/2 queued and 0 running removal/)).toBeInTheDocument();
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();

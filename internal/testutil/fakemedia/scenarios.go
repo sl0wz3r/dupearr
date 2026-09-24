@@ -13,6 +13,7 @@ const (
 	ScenarioMinimal = "minimal"
 	ScenarioEmpty   = "empty"
 	ScenarioDiscs   = "discs"
+	ScenarioWatch   = "watch"
 )
 
 var builtins = map[string]func() *Scenario{
@@ -21,6 +22,7 @@ var builtins = map[string]func() *Scenario{
 	ScenarioEmpty:      Empty,
 	ScenarioDiscs:      Discs,
 	ScenarioLooseClips: LooseClips,
+	ScenarioWatch:      Watch,
 }
 
 // ScenarioNames lists the built-in scenarios.
@@ -125,6 +127,7 @@ func Default() *Scenario {
 				Video: FHD("h264"), Audio: []Audio{EAC3("eng", 6)}, DurationMs: Mins(163.8), Age: 12 * 24 * time.Hour,
 			}, Sub("eng")),
 		},
+		Plays: []Play{{User: "alice", Ago: 20 * day}, {User: "bob", Ago: 6 * day}},
 	})
 
 	// 2. 1080p (tracked) + 720p (untracked) + a Plex Optimized Version (never a duplicate).
@@ -167,13 +170,15 @@ func Default() *Scenario {
 		},
 	})
 
-	// 4. A plain single-version movie (not a duplicate).
+	// 4. A plain single-version movie (not a duplicate). Its plays are the start of the recorded
+	// history of "Movies" (fake Tautulli).
 	s.AddMovie(Movie{
 		Section: SectionMovies, Title: "Heat", Year: 1995, TmdbID: 949, ImdbID: "tt0113277",
 		Versions: []Version{{
 			Parts: []Part{{File: mv("Heat (1995)", "Heat (1995) [Bluray-1080p][DTS-HD MA 5.1][x264].mkv"), Size: GiB(18.6)}},
 			Video: FHD("h264"), Audio: []Audio{DTSHDMA("eng", 6)}, DurationMs: Mins(170), Tracked: InstanceRadarr,
 		}},
+		Plays: []Play{{User: "fakeowner", Ago: 400 * day, Minutes: 170}},
 	})
 
 	// 5. Cross-library: "Movies" (Radarr) and "Movies 4K" (Radarr4K) share Dune — two Plex items
@@ -393,6 +398,89 @@ func Default() *Scenario {
 				}},
 			},
 		},
+	})
+	return s
+}
+
+// day is 24 hours.
+const day = 24 * time.Hour
+
+// Watch is the play-history scenario (docs/DECISIONS.md D10): cross-library pairs (Movies +
+// Movies 4K, to be scope-grouped in Dupearr) whose plays the fake Tautulli recorded. Nothing is
+// tracked by an *arr. The recorded history of "Movies" starts 500 days ago (Heat), that of
+// "Movies 4K" 420 days ago (Mad Max: Fury Road):
+//
+//  1. Arrival: the 1080p copy (Movies) was played 3 times by alice and bob; the 2160p copy
+//     (Movies 4K, added 30 days ago) has no plays recorded — a Played-first profile keeps 1080p.
+//  2. The Prestige: 1080p played; the 2160p copy was added 600 days ago, before the history of its
+//     library starts — its zero is unknown, and quality decides.
+//  3. Blade Runner: 1080p played; the 2160p item is new (added 60 days ago) but its plays are
+//     recorded under an earlier Plex item (retired rating key 9001) — unknown.
+//  4. Sicario: one Plex item with a 1080p and a 2160p version, played by alice: plays are per
+//     item, so the versions tie on the play-history criteria.
+func Watch() *Scenario {
+	s := Base(ScenarioWatch)
+	s.Description = "Play history: played vs. no plays recorded, history coverage, an earlier Plex item, versions of one item."
+	web := func(file string, size float64, video Video) Version {
+		return Version{Parts: []Part{{File: file, Size: GiB(size)}}, Video: video, Audio: []Audio{EAC3("eng", 6)}, DurationMs: Mins(118)}
+	}
+	aged := func(v Version, age time.Duration) Version {
+		v.Age = age
+		return v
+	}
+	s.AddMovie(Movie{
+		Section: SectionMovies, Title: "Heat", Year: 1995, TmdbID: 949, ImdbID: "tt0113277",
+		Versions: []Version{aged(web(mv("Heat (1995)", "Heat (1995) [Bluray-1080p].mkv"), 18.6, FHD("h264")), 900*day)},
+		Plays:    []Play{{User: "fakeowner", Ago: 500 * day}, {User: "alice", Ago: 90 * day}},
+	})
+	s.AddMovie(Movie{
+		Section: SectionMovies4K, Title: "Mad Max: Fury Road", Year: 2015, TmdbID: 76341, ImdbID: "tt1392190",
+		Versions: []Version{aged(web(mv4("Mad Max Fury Road (2015)", "Mad Max Fury Road (2015) [WEBDL-2160p].mkv"), 18.2, HDR10UHD()), 800*day)},
+		Plays:    []Play{{User: "bob", Ago: 420 * day}},
+	})
+
+	// 1. Played 1080p vs a 2160p copy with no plays recorded.
+	s.AddMovie(Movie{
+		Section: SectionMovies, Title: "Arrival", Year: 2016, TmdbID: 329865, ImdbID: "tt2543164",
+		Versions: []Version{aged(web(mv("Arrival (2016)", "Arrival (2016) [WEBDL-1080p][EAC3 5.1][h264].mkv"), 6.9, FHD("h264")), 700*day)},
+		Plays:    []Play{{User: "alice", Ago: 200 * day}, {User: "alice", Ago: 40 * day}, {User: "bob", Ago: 10 * day}},
+	})
+	s.AddMovie(Movie{
+		Section: SectionMovies4K, Title: "Arrival", Year: 2016, TmdbID: 329865, ImdbID: "tt2543164",
+		Versions: []Version{aged(web(mv4("Arrival (2016)", "Arrival (2016) [Remux-2160p][HDR10][TrueHD 7.1].mkv"), 48.2, HDR10UHD()), 30*day)},
+	})
+
+	// 2. The 2160p copy is older than the recorded history of its library.
+	s.AddMovie(Movie{
+		Section: SectionMovies, Title: "The Prestige", Year: 2006, TmdbID: 1124, ImdbID: "tt0482571",
+		Versions: []Version{aged(web(mv("The Prestige (2006)", "The Prestige (2006) [Bluray-1080p].mkv"), 11.4, FHD("h264")), 650*day)},
+		Plays:    []Play{{User: "alice", Ago: 100 * day}},
+	})
+	s.AddMovie(Movie{
+		Section: SectionMovies4K, Title: "The Prestige", Year: 2006, TmdbID: 1124, ImdbID: "tt0482571",
+		Versions: []Version{aged(web(mv4("The Prestige (2006)", "The Prestige (2006) [Remux-2160p].mkv"), 52.7, HDR10UHD()), 600*day)},
+	})
+
+	// 3. The 2160p item was re-created in Plex: its plays stay under the earlier rating key.
+	s.AddMovie(Movie{
+		Section: SectionMovies, Title: "Blade Runner", Year: 1982, TmdbID: 78, ImdbID: "tt0083658",
+		Versions: []Version{aged(web(mv("Blade Runner (1982)", "Blade Runner (1982) [Bluray-1080p].mkv"), 12.9, FHD("h264")), 550*day)},
+		Plays:    []Play{{User: "alice", Ago: 50 * day}},
+	})
+	s.AddMovie(Movie{
+		Section: SectionMovies4K, Title: "Blade Runner", Year: 1982, TmdbID: 78, ImdbID: "tt0083658",
+		Versions: []Version{aged(web(mv4("Blade Runner (1982)", "Blade Runner (1982) [Remux-2160p].mkv"), 61.3, HDR10UHD()), 60*day)},
+		Plays:    []Play{{User: "bob", Ago: 300 * day, RetiredKey: "9001"}},
+	})
+
+	// 4. Versions of one Plex item share its plays.
+	s.AddMovie(Movie{
+		Section: SectionMovies, Title: "Sicario", Year: 2015, TmdbID: 273481, ImdbID: "tt3397884",
+		Versions: []Version{
+			aged(web(mv("Sicario (2015)", "Sicario (2015) [WEBDL-1080p].mkv"), 7.4, FHD("h264")), 300*day),
+			aged(web(mv("Sicario (2015)", "Sicario (2015) [Remux-2160p].mkv"), 55.0, HDR10UHD()), 300*day),
+		},
+		Plays: []Play{{User: "alice", Ago: 120 * day}, {User: "alice", Ago: 5 * day}},
 	})
 	return s
 }

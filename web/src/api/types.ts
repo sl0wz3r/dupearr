@@ -157,7 +157,8 @@ export type GroupFlag =
   | 'same_file'
   | 'full_disc'
   | 'disc_unreadable'
-  | 'disc_tracked_clip';
+  | 'disc_tracked_clip'
+  | 'watch_unreadable';
 
 export type Decision = 'keep' | 'remove';
 
@@ -180,7 +181,9 @@ export type CriterionType =
   | 'arr_managed'
   | 'audio_language'
   | 'filename_score'
-  | 'health';
+  | 'health'
+  | 'played'
+  | 'last_played';
 
 export type CriterionKind = 'ordered' | 'numeric' | 'boolean' | 'patterns';
 export type Direction = 'higher' | 'lower';
@@ -445,6 +448,36 @@ export interface MediaVersion {
   arr?: ArrFileInfo | null;
   /** Set when this version is a full-disc backup (absent/null = a regular file). */
   disc?: DiscInfo | null;
+  /**
+   * Play history of the version's Plex item (docs/DECISIONS.md D10); absent/null = no
+   * play-history source (Tautulli) for its media server.
+   */
+  watch?: WatchInfo | null;
+}
+
+/** WatchInfo.status: an unknown or failed history is never "no plays". */
+export type WatchStatus = 'known' | 'unknown' | 'failed';
+
+/** Play history of a Plex item (shared by all its versions), read during the last scan. */
+export interface WatchInfo {
+  /** "tautulli" */
+  source: string;
+  /** The connection's name. */
+  sourceName: string;
+  status: WatchStatus;
+  /** Why the status is unknown or failed. */
+  reason?: string;
+  /** Recorded plays (status known; 0 = "no plays recorded" since `since`). */
+  plays: number;
+  /** Distinct users among them. */
+  users: number;
+  lastPlayed?: IsoDateTime;
+  /**
+   * With plays: the earliest recorded play of the item's library (the history covers plays since).
+   * Without plays: the item's date added — the copy only loses to a play from then on.
+   */
+  since?: IsoDateTime;
+  readAt?: IsoDateTime;
 }
 
 export interface MediaItem {
@@ -716,6 +749,10 @@ export interface CriterionSchema {
   defaultDirection?: Direction;
   supportsTolerance: boolean;
   requiresArr: boolean;
+  /** Ranks by play history: needs a Tautulli connection (unknown histories tie). */
+  requiresWatchHistory?: boolean;
+  /** Set when the criterion takes a minimum difference without a tolerance: its unit ("days"). */
+  minDeltaUnit?: string;
 }
 
 /** GET /api/v1/profile/schema */
@@ -835,6 +872,38 @@ export interface ArrTestResult {
   instanceName: string;
   recycleBin: string;
   recycleBinCleanupDays: number;
+}
+
+/** Tautulli connection: the play history of one Plex server (docs/API.md → Watch history). */
+export interface TautulliInstance {
+  id: Id;
+  name: string;
+  /** The media server whose plays it records (one Tautulli per server). */
+  serverId: Id;
+  /** Base url incl. HTTP root, e.g. http://tautulli:8181 */
+  url: string;
+  /** Masked in responses. */
+  apiKey: string;
+  verifyTls: boolean;
+  enabled: boolean;
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+}
+
+export type TautulliInstanceInput = Omit<TautulliInstance, 'id' | 'createdAt' | 'updatedAt'> & { id?: Id };
+
+/** POST /api/v1/tautulli/test response. */
+export interface TautulliTestResult {
+  version: string;
+  pmsName: string;
+  pmsIdentifier: string;
+  serverMatches: boolean;
+  /** Earliest recorded play in the server's enabled libraries (null: none yet). */
+  historySince: IsoDateTime | null;
+  /** Enabled libraries whose history Tautulli does not keep. */
+  librariesWithoutHistory: string[];
+  /** Active users whose history is not kept (names are never shown). */
+  usersWithoutHistory: number;
 }
 
 export interface PathMapping {
@@ -1104,7 +1173,10 @@ export interface RestoreResponse {
 
 /** One setting that differs between the backup and the running instance (backup.RestoreChange). */
 export interface RestoreChange {
-  /** HostConfig / Settings property name, "users", "webhookToken", "mediaServers", "arrInstances", "pathMappings" or "notifications". */
+  /**
+   * HostConfig / Settings property name, "users", "webhookToken", "mediaServers", "arrInstances",
+   * "tautulliInstances", "pathMappings" or "notifications".
+   */
   setting: string;
   current: string;
   backup: string;

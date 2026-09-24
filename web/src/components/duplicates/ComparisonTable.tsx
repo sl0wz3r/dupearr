@@ -2,6 +2,7 @@ import { clsx } from 'clsx';
 import { Disc3, Lock, TriangleAlert } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { CriterionType, DiscInfo, GroupFile, Id, MediaPart, MediaVersion, Profile } from '@/api/types';
+import { usePreferences } from '@/app/preferences';
 import { Badge, ByteSize, CopyButton, DecisionBadge, RelativeTime } from '@/components/ui';
 import {
   ARR_KIND_LABELS,
@@ -24,6 +25,7 @@ import {
   formatDuration,
   formatFileCount,
   formatNumber,
+  formatUtcDate,
   resolutionLabel,
   sourceLabel,
   videoCodecLabel,
@@ -40,6 +42,8 @@ import { OverrideControl, type OverrideValue } from './OverrideControl';
 
 interface RowContext {
   libraryNames?: ReadonlyMap<Id, string>;
+  /** Every copy is a version of one Plex item (one rating key): they share its play history. */
+  sameItem?: boolean;
 }
 
 interface RowSpec {
@@ -440,6 +444,17 @@ const ROWS: RowSpec[] = [
     render: (f) => <Value primary={<RelativeTime date={f.version.addedAt} />} />,
   },
   {
+    id: 'plays',
+    label: 'Plays',
+    criteria: ['played', 'last_played'],
+    best: (files, profile) =>
+      firstNonEmpty(bestForCriterion('played', files, profile), bestForCriterion('last_played', files, profile)),
+    // Only once a play-history source is involved (or a play-history criterion decided).
+    visible: (files, deciding) =>
+      files.some((f) => !!f.version.watch) || deciding.has('played') || deciding.has('last_played'),
+    render: (f, ctx) => <PlaysCell version={f.version} sameItem={!!ctx.sameItem} />,
+  },
+  {
     id: 'paths',
     label: 'Path(s)',
     criteria: ['filename_score'],
@@ -490,6 +505,35 @@ const ROWS: RowSpec[] = [
 
 const COVERED = new Set<CriterionType>(ROWS.flatMap((r) => r.criteria));
 
+/**
+ * Play history of a copy (docs/DECISIONS.md D10). The wording follows what the history can tell:
+ * recorded plays, "no plays recorded" since the item was added, or unknown with the reason — never
+ * "not watched".
+ */
+function PlaysCell({ version, sameItem }: { version: MediaVersion; sameItem: boolean }) {
+  const { preferences } = usePreferences();
+  // UTC days, like the engine's reasons ("no plays recorded since 2025-03-01"), in the user's format.
+  const day = (d: string) => formatUtcDate(d, preferences);
+  const w = version.watch;
+  const unknown = <span className="text-muted">Unknown</span>;
+  const note = sameItem ? 'Same Plex item: plays are shared by its versions' : '';
+  const join = (...parts: string[]) => parts.filter(Boolean).join(' · ') || undefined;
+  if (!w) return <Value primary={unknown} secondary="No watch-history source" />;
+  if (w.status === 'failed') {
+    const source = w.sourceName || 'Tautulli';
+    return <Value primary={unknown} secondary={`${source} could not be read${w.reason ? `: ${w.reason}` : ''}`} />;
+  }
+  if (w.status !== 'known') return <Value primary={unknown} secondary={w.reason || undefined} />;
+  if (w.plays <= 0) {
+    return <Value primary="No plays recorded" secondary={join(w.since ? `since ${day(w.since)}` : '', note)} />;
+  }
+  const plays = `${formatNumber(w.plays)} ${w.plays === 1 ? 'play' : 'plays'}`;
+  const users = w.users > 0 ? ` · ${formatNumber(w.users)} ${w.users === 1 ? 'user' : 'users'}` : '';
+  return (
+    <Value primary={plays + users} secondary={join(w.lastPlayed ? `last played ${day(w.lastPlayed)}` : '', note)} />
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Table
 // ---------------------------------------------------------------------------
@@ -525,7 +569,9 @@ export function ComparisonTable({
 }: ComparisonTableProps) {
   const deciding = decidingCriteria(files);
   const decidingSet = new Set(deciding.keys());
-  const ctx: RowContext = { libraryNames };
+  const firstKey = files[0]?.version.ratingKey;
+  const sameItem = files.length > 1 && !!firstKey && files.every((f) => f.version.ratingKey === firstKey);
+  const ctx: RowContext = { libraryNames, sameItem };
 
   // Criteria the engine reported that no fixed row covers (forward compatible).
   const extraCriteria = new Set<CriterionType>();

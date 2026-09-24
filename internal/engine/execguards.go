@@ -30,6 +30,8 @@ var autoBlockingFlags = map[string]bool{
 	models.FlagFullDisc:       true,
 	models.FlagDiscUnreadable: true,
 	models.FlagDiscTracked:    true,
+	// docs/DECISIONS.md D10: decisions ranked on a play history that could not be read.
+	models.FlagWatchUnreadable: true,
 }
 
 // BlocksAutoApproval reports whether a group flag keeps the group out of automatic approval (a

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Pre-configures the local test environment (deploy/test-env/docker-compose.yml) through Dupearr's
-# API: the fake Plex server, Radarr, Radarr 4K and Sonarr, identity path mappings, a shared scope
+# API: the fake Plex server, Radarr, Radarr 4K, Sonarr and Tautulli, identity path mappings, a shared scope
 # group for "Movies" + "Movies 4K", test-friendly settings, and a first duplicate scan.
 # Idempotent: connections that already exist are left alone. Needs curl and python3.
 set -eu
@@ -14,6 +14,7 @@ PLEX_TOKEN="fAkEpLeXtOkEn0000001"
 RADARR_KEY="fa4e0000000000000000000000007878"
 RADARR4K_KEY="fa4e0000000000000000000000007879"
 SONARR_KEY="fa4e0000000000000000000000008989"
+TAUTULLI_KEY="fa4e0000000000000000000000008181"
 
 say() { printf '\033[1;35m==>\033[0m %s\n' "$*"; }
 
@@ -52,6 +53,13 @@ if [ "$(api GET /arr | json_len)" = "0" ]; then
   api POST /arr '{"name":"Sonarr","kind":"sonarr","url":"http://fakemedia:8989","apiKey":"'"$SONARR_KEY"'","enabled":true,"verifyTls":false,"tags":[]}' >/dev/null
 else
   say "*arr instances already configured"
+fi
+
+if [ "$(api GET /tautulli | json_len)" = "0" ]; then
+  say "Adding Tautulli (play history of the fake Plex server)"
+  api POST /tautulli '{"name":"Tautulli","serverId":'"$SERVER_ID"',"url":"http://fakemedia:8181","apiKey":"'"$TAUTULLI_KEY"'","enabled":true,"verifyTls":false}' >/dev/null
+else
+  say "Tautulli already configured"
 fi
 
 if [ "$(api GET /pathmapping | json_len)" = "0" ]; then

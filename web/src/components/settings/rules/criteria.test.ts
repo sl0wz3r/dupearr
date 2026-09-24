@@ -12,16 +12,20 @@ import {
   explainCriteria,
   explainKeep,
   explainProtections,
+  fixedDirection,
   hasProfileErrors,
   keepPerValues,
   keepSummary,
   mapProfileServerErrors,
+  minDeltaUnit,
   newCriterion,
   normalizeProfile,
   orderedOptions,
   protectionTypes,
+  requiresWatchHistory,
   schemaMap,
   summarizeCriteria,
+  supportsMinDelta,
   templateDescription,
   toProfileInput,
   uniqueName,
@@ -423,5 +427,72 @@ describe('validation', () => {
     expect(e.protections).toEqual(['Out of range']);
     expect(e.keepCount).toEqual(['Too small']);
     expect(e.general).toEqual(['Something else', 'Mystery']);
+  });
+});
+
+// docs/DECISIONS.md D10 (issue #5): play-history criteria.
+describe('play-history criteria', () => {
+  it('Played has no parameters and says an unknown history is a tie', () => {
+    expect(editorKind('played', SMAP.get('played'))).toBe('none');
+    expect(newCriterion('played', SMAP.get('played'))).toEqual({ type: 'played', enabled: true });
+    expect(describeCriterion({ type: 'played', enabled: true }, CTX)).toBe(
+      'a file that has been played (Tautulli; an unknown play history is a tie)',
+    );
+    expect(criterionSummary({ type: 'played', enabled: true }, CTX)).toBe('');
+  });
+
+  it('Last played has a fixed direction and a minimum difference in days (default 30)', () => {
+    const schema = SMAP.get('last_played');
+    expect(editorKind('last_played', schema)).toBe('numeric');
+    expect(fixedDirection('last_played')).toBe(true);
+    expect(fixedDirection('date_added')).toBe(false);
+    expect(supportsMinDelta('last_played', schema)).toBe(true);
+    expect(minDeltaUnit('last_played', schema)).toBe('days');
+    expect(minDeltaUnit('last_played')).toBe('days');
+    const c = newCriterion('last_played', schema);
+    expect(c).toEqual({ type: 'last_played', enabled: true, direction: 'higher', minDelta: 30 });
+    expect(describeCriterion(c, CTX)).toBe('the most recently played file (plays less than 30 days apart count as a tie)');
+    expect(describeCriterion({ type: 'last_played', enabled: true, direction: 'higher' }, CTX)).toBe(
+      'the most recently played file (an unknown play history is a tie)',
+    );
+    // A stored "lower" never shows as "less recently played": the server always prefers the newer play.
+    expect(criterionSummary({ ...c, direction: 'lower' }, CTX)).toBe('More recently played · min delta 30 days');
+  });
+
+  it('flags both criteria as needing Tautulli (schema first, built-in fallback)', () => {
+    expect(requiresWatchHistory('played', SMAP.get('played'))).toBe(true);
+    expect(requiresWatchHistory('last_played')).toBe(true);
+    expect(requiresWatchHistory('resolution', SMAP.get('resolution'))).toBe(false);
+  });
+
+  it('never words a copy as unwatched', () => {
+    const text = explainCriteria(
+      [
+        { type: 'health', enabled: true },
+        { type: 'played', enabled: true },
+        { type: 'last_played', enabled: true, direction: 'higher', minDelta: 30 },
+      ],
+      CTX,
+    ).toLowerCase();
+    for (const bad of ['never watched', 'unwatched', 'not watched', 'not played']) expect(text).not.toContain(bad);
+  });
+
+  it('validates the minimum difference (at most 3650 days)', () => {
+    const draft = (minDelta: number): ProfileDraft => ({
+      name: 'P',
+      isDefault: false,
+      keepCount: 1,
+      keepPer: '',
+      protections: [],
+      criteria: [{ type: 'last_played', enabled: true, direction: 'higher', minDelta }],
+    });
+    expect(validateProfileDraft(draft(3650), SMAP).criterion.last_played).toBeUndefined();
+    // Created through the API without a direction: nothing to choose in the editor, nothing to fix.
+    const noDirection = draft(30);
+    delete noDirection.criteria[0]!.direction;
+    expect(validateProfileDraft(noDirection, SMAP).criterion.last_played).toBeUndefined();
+    expect(validateProfileDraft(draft(3651), SMAP).criterion.last_played).toEqual([
+      'The minimum difference can be at most 3650 days',
+    ]);
   });
 });

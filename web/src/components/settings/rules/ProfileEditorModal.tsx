@@ -22,6 +22,7 @@ import {
   normalizeProfile,
   protectionTypes,
   schemaMap,
+  requiresWatchHistory,
   toProfileInput,
   validateProfileDraft,
   type ProfileDraft,
@@ -39,6 +40,11 @@ export interface ProfileEditorModalProps {
   schema: ProfileSchema | undefined;
   libraries?: readonly Library[];
   arrInstances?: readonly ArrInstance[];
+  /**
+   * Whether an enabled Tautulli connection exists (undefined = not known yet). Without one, the
+   * play-history criteria never decide (every history is unknown and ties).
+   */
+  watchHistoryConnected?: boolean;
   /** Names of existing profiles (used to name clones). */
   existingNames?: readonly string[];
   onClose: () => void;
@@ -75,6 +81,7 @@ export function ProfileEditorModal({
   schema,
   libraries = [],
   arrInstances = [],
+  watchHistoryConnected,
   existingNames = [],
   onClose,
   onClone,
@@ -289,11 +296,18 @@ export function ProfileEditorModal({
 
         <EditorSection
           title="Decision Criteria"
-          description="Copies are compared criterion by criterion from the top; the first criterion that tells two copies apart decides. A copy with an unknown value always ranks below one that has it."
+          description="Copies are compared criterion by criterion from the top; the first criterion that tells two copies apart decides. A copy with an unknown value ranks below one that has it, unless the criterion says an unknown value is a tie (an unknown play history always is)."
         >
           <div className="mb-3">
             <ProfileExplanation draft={draft} schema={smap} libraries={libraries} arrInstances={arrInstances} />
           </div>
+          {watchHistoryConnected === false &&
+            draft.criteria.some((c) => c.enabled && requiresWatchHistory(c.type, smap.get(c.type))) && (
+              <Alert kind="info" className="mb-3" title="No Tautulli connection">
+                Played and Last played rank by the play history Tautulli records. Until a Tautulli is connected in
+                Settings → Applications, every copy&apos;s play history is unknown and these criteria never decide.
+              </Alert>
+            )}
           <CriteriaBuilder
             criteria={draft.criteria}
             onChange={(criteria) => patch({ criteria })}

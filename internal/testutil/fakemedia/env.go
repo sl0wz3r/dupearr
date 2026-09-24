@@ -83,6 +83,10 @@ type Env struct {
 	PlexToken         string
 	MachineIdentifier string
 
+	// Tautulli records the fake Plex server's plays (Movie.Plays); TautulliAPIKey is its key.
+	Tautulli       *Server
+	TautulliAPIKey string
+
 	// Radarr, Radarr4K and Sonarr are the servers of the standard instance names (nil when the
 	// scenario has no such instance); Instances holds every *arr server by instance name.
 	Radarr, Radarr4K, Sonarr                   *Server
@@ -194,6 +198,11 @@ func New(opts Options) (*Env, error) {
 		return fail(err)
 	}
 	e.Plex = ps
+	ts, err := e.listen(opts.Addrs[ServerTautulli], ServerTautulli, "tautulli", "Tautulli", w.tautulli.apiKey, "", e.tautulliHandler())
+	if err != nil {
+		return fail(err)
+	}
+	e.Tautulli, e.TautulliAPIKey = ts, w.tautulli.apiKey
 	for _, name := range w.arrOrder {
 		a := w.arrs[name]
 		s, err := e.listen(opts.Addrs[name], name, a.kind, a.instanceName, a.apiKey, a.urlBase, e.arrHandler(a))
@@ -282,10 +291,13 @@ func (e *Env) Close() error {
 	return e.closeErr
 }
 
-// Server returns the server named name (ServerPlex or an instance name), or nil.
+// Server returns the server named name (ServerPlex, ServerTautulli or an instance name), or nil.
 func (e *Env) Server(name string) *Server {
-	if name == ServerPlex {
+	switch name {
+	case ServerPlex:
 		return e.Plex
+	case ServerTautulli:
+		return e.Tautulli
 	}
 	return e.Instances[name]
 }
@@ -993,6 +1005,8 @@ func (e *Env) Describe(out io.Writer) {
 		}
 		fmt.Fprintf(out, "          library %s %-10q (%s) %s%s\n", s.key, s.title, s.typ, strings.Join(locs, ", "), scanner)
 	}
+	t := e.w.tautulli
+	fmt.Fprintf(out, "Tautulli  %-28s apiKey=%s version=%s plays=%d\n", e.Tautulli.URL, t.apiKey, t.version, len(t.rows))
 	names := append([]string(nil), e.w.arrOrder...)
 	sort.Strings(names)
 	for _, name := range names {

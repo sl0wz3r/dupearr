@@ -86,6 +86,10 @@ func TestItemMovie(t *testing.T) {
 	if item.ShowIDs == nil || len(item.ShowIDs) != 0 {
 		t.Errorf("movie ShowIDs = %#v, want empty non-nil", item.ShowIDs)
 	}
+	// The item's own guid, as play-history sources record it (docs/DECISIONS.md D10).
+	if item.GUID != "plex://movie/5d776b59ad5437001f79c6f8" {
+		t.Errorf("GUID = %q", item.GUID)
+	}
 	if len(item.Versions) != 5 {
 		t.Fatalf("versions = %d, want 5", len(item.Versions))
 	}

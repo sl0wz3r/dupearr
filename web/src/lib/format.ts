@@ -237,6 +237,19 @@ export function formatDate(value: DateInput, opts: DateFormatOptions = {}): stri
   return formatDateTokens(d, opts.shortDateFormat ?? 'MMM D YYYY');
 }
 
+/**
+ * Short date of the UTC calendar day ("Mar 1 2025" in every time zone), for dates the server
+ * writes as UTC days in its own texts (the play-history reasons): both then name the same day.
+ */
+export function formatUtcDate(value: DateInput, opts: DateFormatOptions = {}): string {
+  const d = toDate(value);
+  if (!d) return '';
+  return formatDateTokens(
+    new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()),
+    opts.shortDateFormat ?? 'MMM D YYYY',
+  );
+}
+
 /** Time of day: "5:02pm" / "17:02" (with seconds optional). */
 export function formatTime(value: DateInput, opts: DateFormatOptions & { includeSeconds?: boolean } = {}): string {
   const d = toDate(value);

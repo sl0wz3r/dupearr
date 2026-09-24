@@ -148,6 +148,42 @@ type ArrFileInfo struct {
 	DateAdded           time.Time `json:"dateAdded"`
 }
 
+// Watch statuses (WatchInfo.Status; docs/DECISIONS.md D10).
+const (
+	// WatchKnown: the history was read completely and is attributable. Plays > 0 is positive
+	// evidence; Plays == 0 ("no plays recorded") is only asserted under the strict conditions of
+	// D10 and is never "never watched".
+	WatchKnown = "known"
+	// WatchUnknown: the source was read, but this copy's plays cannot be established (history not
+	// kept, the item is older than the recorded history, a full disc, an unmatched item, …).
+	WatchUnknown = "unknown"
+	// WatchFailed: the source could not be read (or its data could not be verified) during the
+	// scan. Like unknown it never counts as "no plays"; a group ranked by play history goes to review.
+	WatchFailed = "failed"
+)
+
+// WatchSourceTautulli is WatchInfo.Source for Tautulli.
+const WatchSourceTautulli = "tautulli"
+
+// WatchInfo is the play history of a version, read during a scan and stored with the version
+// (docs/DECISIONS.md D10). Plays are attributed per Plex item (rating key), for every user: the
+// versions of one item share it. Only counts and dates are kept, never who played what. nil = no
+// play-history source for the version's media server.
+type WatchInfo struct {
+	Source     string    `json:"source"`           // WatchSourceTautulli
+	SourceName string    `json:"sourceName"`       // the connection's name
+	Status     string    `json:"status"`           // Watch* status
+	Reason     string    `json:"reason,omitempty"` // why the status is unknown or failed
+	Plays      int       `json:"plays"`            // recorded plays of the item (Status known)
+	Users      int       `json:"users"`            // distinct users among them
+	LastPlayed time.Time `json:"lastPlayed,omitzero"`
+	// Since: with plays, the earliest play recorded in the item's library (the history covers plays
+	// since then); without plays ("no plays recorded since"), the item's date added, which is on or
+	// after that. A copy without plays only loses to a play from this date on.
+	Since  time.Time `json:"since,omitzero"`
+	ReadAt time.Time `json:"readAt,omitzero"` // when the scan read it
+}
+
 // Disc kinds (DiscInfo.Type): the string values of internal/disc.Type.
 const (
 	DiscBluray    = "bluray"     // BDMV Blu-ray
@@ -298,6 +334,9 @@ type MediaVersion struct {
 	Arr *ArrFileInfo `json:"arr,omitempty"`
 	// Disc is set when the version is a full-disc backup (nil for a regular file).
 	Disc *DiscInfo `json:"disc,omitempty"`
+	// Watch is the play history of the version's item (nil: no play-history source is configured
+	// for its media server). docs/DECISIONS.md D10.
+	Watch *WatchInfo `json:"watch,omitempty"`
 }
 
 // IsDisc reports a full-disc backup version.
@@ -350,4 +389,8 @@ type MediaItem struct {
 	Thumb        string            `json:"thumb"` // Plex thumb path (for poster proxy)
 	AddedAt      time.Time         `json:"addedAt"`
 	Versions     []MediaVersion    `json:"versions"`
+
+	// GUID is the item's own Plex guid ("plex://movie/…", a legacy agent guid, or "local://…" when
+	// unmatched): play-history sources record plays under it (docs/DECISIONS.md D10).
+	GUID string `json:"guid,omitempty"`
 }

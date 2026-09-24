@@ -38,7 +38,7 @@ func (s *syncBuffer) String() string {
 }
 
 // randomPorts makes every server listen on a free port.
-var randomPorts = []string{"-plex-port", "0", "-radarr-port", "0", "-radarr4k-port", "0", "-sonarr-port", "0"}
+var randomPorts = []string{"-plex-port", "0", "-radarr-port", "0", "-radarr4k-port", "0", "-sonarr-port", "0", "-tautulli-port", "0"}
 
 // startRun runs the command in the background and waits until it serves.
 func startRun(t *testing.T, args ...string) (stdout, stderr *syncBuffer, stop func() error) {

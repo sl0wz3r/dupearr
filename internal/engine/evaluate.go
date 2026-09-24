@@ -34,6 +34,8 @@ type evaluation struct {
 	eligible []bool // may be chosen as a keeper (not optimized, not unavailable)
 	metrics  []*metric
 	fnScores []*metric // enabled filename_score metrics (for Values)
+	// watchLabels are the labels of the enabled play-history criteria (docs/DECISIONS.md D10).
+	watchLabels []string
 
 	order  []int                 // ranking, best first
 	pos    []int                 // pos[i] = index of version i in order
@@ -91,7 +93,7 @@ func checkEvaluable(g *models.DuplicateGroup) error {
 // Overrides unless they violate an invariant), Rank, Reasons, DecidingCriterion,
 // Protected/ProtectedReason and Values; on the group ProfileID, Flags (engine-owned flags
 // recomputed: min_age, arr_untracked_keeper, arr_cutoff_unmet, missing_keeper_file,
-// intentional_arr_instances; version-derived flags added), ReclaimableBytes, Signature, Status
+// intentional_arr_instances, watch_unreadable; version-derived flags added), ReclaimableBytes, Signature, Status
 // and StatusReason. An ignored group keeps its status. A queued (approved) group stays queued
 // while the fresh status would be pending (or deferred only because a version is playing, which
 // the executor re-checks live); when the fresh evaluation needs review, is protected or must wait
@@ -156,6 +158,9 @@ func newEvaluation(g *models.DuplicateGroup, p models.Profile, env EvalEnv) *eva
 			ev.metrics = append(ev.metrics, m)
 			if c.Type == models.CritFilenameScore {
 				ev.fnScores = append(ev.fnScores, m)
+			}
+			if isWatchCriterion(c.Type) {
+				ev.watchLabels = append(ev.watchLabels, m.label)
 			}
 		}
 	}
@@ -621,6 +626,8 @@ func (ev *evaluation) lossText(mi, loser, winner int) string {
 		s = "not managed by an *arr (" + m.display[winner] + " tracks the other version)"
 	case m.special == specialLang && m.present[loser]:
 		s = "no " + m.subject + " audio track"
+	case m.special == specialPlayed || m.special == specialLastPlayed:
+		s = watchLossText(m, ev.vs[loser], ev.vs[winner])
 	case !m.present[loser]:
 		s = fmt.Sprintf("%s unknown (vs %s)", m.label, m.display[winner])
 	default:
@@ -785,7 +792,7 @@ func (ev *evaluation) values(i int) map[string]string {
 func engineOwnedFlag(f string) bool {
 	switch f {
 	case models.FlagMinAge, models.FlagArrUntrackedKeeper, models.FlagArrCutoffUnmet,
-		models.FlagMissingKeeperFile, models.FlagIntentionalArr:
+		models.FlagMissingKeeperFile, models.FlagIntentionalArr, models.FlagWatchUnreadable:
 		return true
 	}
 	return false
@@ -827,6 +834,13 @@ func (ev *evaluation) finish() {
 	}
 	if ev.youngestAge > 0 || ev.youngUnknown || ev.youngFuture {
 		flags = addFlag(flags, models.FlagMinAge)
+	}
+	if failed, _, _ := watchFailure(ev.vs); failed && len(ev.watchLabels) > 0 && removals > 0 && watchCanDecide(ev.vs) {
+		// The profile ranks by play history, but a copy's history could not be read: the ranking
+		// may differ from what the history would give (an unreadable history ties), so a person
+		// looks before anything is removed (docs/DECISIONS.md D10). Not when the history could
+		// never decide (the versions of one Plex item, full discs): the ranking is the same either way.
+		flags = addFlag(flags, models.FlagWatchUnreadable)
 	}
 	g.Flags = sortedUnique(flags)
 	if g.LibraryIDs == nil { // JSON: [] / {} rather than null
@@ -909,7 +923,7 @@ func (ev *evaluation) reclaimable() int64 {
 }
 
 // status derives the group status: review (suspect merge, same file, unanalyzed, duration
-// mismatch, inaccessible keeper) > protected (nothing to remove: every version kept or protected,
+// mismatch, inaccessible keeper, unreadable play history) > protected (nothing to remove: every version kept or protected,
 // e.g. by intentional *arr instances) > deferred (min age, *arr queue busy, playing) > pending.
 // liveChecked reports a deferral caused only by playback, which the executor re-checks live.
 func (ev *evaluation) status(removals int) (status models.GroupStatus, reason string, liveChecked bool) {
@@ -973,6 +987,18 @@ func (ev *evaluation) status(removals int) (status models.GroupStatus, reason st
 	}
 	if g.HasFlag(models.FlagMissingKeeperFile) {
 		review = append(review, "a kept version is not accessible to the media server")
+	}
+	if g.HasFlag(models.FlagWatchUnreadable) {
+		_, why, source := watchFailure(ev.vs)
+		if source == "" {
+			source = "the play-history source"
+		}
+		cause := "the play history could not be read"
+		if why != "" {
+			cause += " (" + why + ")"
+		}
+		review = append(review, fmt.Sprintf("%s; %s cannot decide: re-scan once %s is reachable",
+			cause, strings.Join(ev.watchLabels, " / "), source))
 	}
 	switch {
 	case len(review) > 0:

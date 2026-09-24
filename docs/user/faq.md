@@ -137,8 +137,17 @@ See [docs/API.md](../API.md).
 
 **Jellyfin, Emby or music?**
 Not yet. Plex, Radarr and Sonarr come first; Jellyfin/Emby, Lidarr, hash-based detection outside
-Plex, watch-history criteria and cross-server groups are on the roadmap — see
+Plex and cross-server groups are on the roadmap — see
 [Known limitations & roadmap](../../README.md#known-limitations--roadmap).
+
+**Can Dupearr keep the copy people actually watch?**
+Yes, with [Tautulli](configuration.md#tautulli-watch-history) (2.18.0 or later): add the *Played*
+and *Last played* criteria to a profile ([how they decide](profiles.md#watch-history)). Plays are
+counted per Plex item for all users, so this helps when the copies are separate items (for
+example *Movies* and *Movies 4K*); versions of one item always tie. A copy without recorded plays
+only loses to plays made after it was added, and a copy whose history is unknown — or could not be
+read — is never treated as "not played". Plays Tautulli did not record (while it was down, history
+turned off, or a file that lived in another library before) cannot count.
 
 **Where are the logs?**
 *System → Log Files*, or `logs/dupearr.txt` in the data directory (`docker logs dupearr` in a

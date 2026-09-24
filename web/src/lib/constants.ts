@@ -355,6 +355,7 @@ export const GROUP_FLAG_LABELS: Record<GroupFlag, string> = {
   full_disc: 'Full disc',
   disc_unreadable: 'Disc unreadable',
   disc_tracked_clip: '*arr tracks a disc clip',
+  watch_unreadable: 'Play history unreadable',
 };
 
 export const GROUP_FLAG_DESCRIPTIONS: Record<GroupFlag, string> = {
@@ -384,6 +385,8 @@ export const GROUP_FLAG_DESCRIPTIONS: Record<GroupFlag, string> = {
     'The main feature of a disc could not be read (resolution, HDR, audio and duration unknown) — needs review',
   disc_tracked_clip:
     'Radarr/Sonarr tracks a single file of a disc (e.g. BDMV/STREAM/00800.m2ts or a loose 00800.m2ts). Files of a disc are never removed one by one — that would break the disc',
+  watch_unreadable:
+    'The profile ranks by play history (Played / Last played), but Tautulli could not be read during the last scan: an unreadable history counts as unknown, never as "not played" — needs review',
 };
 
 export const GROUP_FLAG_KIND: Record<GroupFlag, StatusKind> = {
@@ -410,6 +413,7 @@ export const GROUP_FLAG_KIND: Record<GroupFlag, StatusKind> = {
   full_disc: 'primary',
   disc_unreadable: 'warning',
   disc_tracked_clip: 'warning',
+  watch_unreadable: 'warning',
 };
 
 export const DECISION_LABELS: Record<Decision, string> = {
@@ -446,6 +450,8 @@ export const CRITERION_TYPE_LABELS: Record<CriterionType, string> = {
   audio_language: 'Audio Language',
   filename_score: 'Filename Score',
   health: 'File Health',
+  played: 'Played',
+  last_played: 'Last Played',
 };
 
 export const CRITERION_KIND_BY_TYPE: Record<CriterionType, CriterionKind> = {
@@ -468,6 +474,8 @@ export const CRITERION_KIND_BY_TYPE: Record<CriterionType, CriterionKind> = {
   audio_language: 'boolean',
   filename_score: 'patterns',
   health: 'boolean',
+  played: 'boolean',
+  last_played: 'numeric',
 };
 
 export const DIRECTION_LABELS: Record<Direction, string> = {

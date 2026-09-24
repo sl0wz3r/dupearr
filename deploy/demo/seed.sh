@@ -1,7 +1,7 @@
 #!/bin/sh
 # Seeds the Dupearr demo (deploy/demo/docker-compose.yml) through Dupearr's API, like
 # deploy/test-env/setup.sh does for the local test environment: the fake Plex server, Radarr,
-# Radarr 4K and Sonarr of the demo-media service (tools/fakemedia, scenario "default"), identity
+# Radarr 4K, Sonarr and Tautulli of the demo-media service (tools/fakemedia, scenario "default"), identity
 # path mappings, one scope group for "Movies" + "Movies 4K", demo settings (dry run on, minimum
 # age 0 h, a recycle bin) and a first duplicate scan.
 #
@@ -29,6 +29,7 @@ PLEX_TOKEN="fAkEpLeXtOkEn0000001"
 RADARR_KEY="fa4e0000000000000000000000007878"
 RADARR4K_KEY="fa4e0000000000000000000000007879"
 SONARR_KEY="fa4e0000000000000000000000008989"
+TAUTULLI_KEY="fa4e0000000000000000000000008181"
 
 # Same layout as the fakes: the media lives under /data/media for Plex, the *arrs and Dupearr.
 MEDIA_PATH=/data/media
@@ -100,6 +101,16 @@ add_arr() { # add_arr NAME KIND PORT KEY
 add_arr "Radarr" radarr 7878 "$RADARR_KEY"
 add_arr "Radarr 4K" radarr 7879 "$RADARR4K_KEY"
 add_arr "Sonarr" sonarr 8989 "$SONARR_KEY"
+
+# Tautulli: the play history of the fake Plex server (profiles may rank by it: Played, Last played).
+TAUTULLI_URL="http://$MEDIA_HOST:8181"
+if api GET /tautulli | jq -e --arg url "$TAUTULLI_URL" 'any(.[]; .url == $url)' >/dev/null; then
+	say "Tautulli: already configured"
+else
+	say "Adding Tautulli ($TAUTULLI_URL)"
+	api POST /tautulli "$(jq -nc --arg url "$TAUTULLI_URL" --arg key "$TAUTULLI_KEY" --argjson sid "$SERVER_ID" \
+		'{name: "Tautulli", serverId: $sid, url: $url, apiKey: $key, enabled: true, verifyTls: false}')" >/dev/null
+fi
 
 # --- identity path mappings (every app sees the same /data/media) --------------------------------
 map_identity() { # map_identity SOURCE_TYPE SOURCE_ID

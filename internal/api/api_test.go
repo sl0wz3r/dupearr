@@ -279,7 +279,7 @@ func TestJSONNeverNull(t *testing.T) {
 	for _, target := range []string{
 		"/api/v1/profile", "/api/v1/profile/schema", "/api/v1/duplicate", "/api/v1/duplicate/stats",
 		"/api/v1/duplicate/1", "/api/v1/health", "/api/v1/command", "/api/v1/exclusion",
-		"/api/v1/mediaserver", "/api/v1/arr", "/api/v1/pathmapping", "/api/v1/notification",
+		"/api/v1/mediaserver", "/api/v1/arr", "/api/v1/tautulli", "/api/v1/pathmapping", "/api/v1/notification",
 		"/api/v1/notification/schema", "/api/v1/notification/triggers", "/api/v1/queue", "/api/v1/action",
 		"/api/v1/history", "/api/v1/scan", "/api/v1/system/task", "/api/v1/log", "/api/v1/log/file",
 		"/api/v1/library", "/api/v1/config/host", "/api/v1/config/settings", "/api/v1/system/status",

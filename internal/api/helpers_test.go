@@ -30,6 +30,7 @@ import (
 	"github.com/sl0wz3r/dupearr/internal/health"
 	"github.com/sl0wz3r/dupearr/internal/integrations/arr"
 	"github.com/sl0wz3r/dupearr/internal/integrations/plex"
+	"github.com/sl0wz3r/dupearr/internal/integrations/tautulli"
 	"github.com/sl0wz3r/dupearr/internal/models"
 	"github.com/sl0wz3r/dupearr/internal/notifications"
 	"github.com/sl0wz3r/dupearr/internal/store"
@@ -153,6 +154,9 @@ func newTestServer(t *testing.T, opts ...func(*serverOpts)) *testServer {
 		},
 		ArrFactory: func(a models.ArrInstance) *arr.Client {
 			return arr.New(a, arr.Options{Timeout: 5 * time.Second})
+		},
+		TautulliFactory: func(t models.TautulliInstance) *tautulli.Client {
+			return tautulli.New(t, tautulli.Options{VerifyTLS: t.VerifyTLS, Timeout: 5 * time.Second})
 		},
 		StartTime: time.Now().Add(-time.Minute),
 		Restart:   func() { ts.restarts.Add(1) },

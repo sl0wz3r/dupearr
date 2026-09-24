@@ -8,10 +8,12 @@ import type { ArrInstance, Criterion, CriterionSchema, Library, PatternScore } f
 import { Button, Checkbox, IconButton, NumberInput, OrderedListEditor, Select, TextInput } from '@/components/ui';
 import {
   COMMON_LANGUAGES,
+  MAX_LAST_PLAYED_DAYS,
   asDirection,
   criterionLabel,
   defaultOrder,
   directionWording,
+  fixedDirection,
   isLanguageCode,
   minDeltaUnit,
   newPattern,
@@ -103,26 +105,31 @@ export function NumericCriterionEditor({ criterion, schema, onChange, disabled }
   const tolerance =
     schema?.supportsTolerance ?? (criterion.type === 'video_bitrate' || criterion.type === 'file_size');
   const showTolerance = tolerance || (criterion.tolerancePercent ?? 0) > 0;
-  const showMinDelta = supportsMinDelta(criterion.type) || (criterion.minDelta ?? 0) > 0;
-  const unit = minDeltaUnit(criterion.type);
+  const showMinDelta = supportsMinDelta(criterion.type, schema) || (criterion.minDelta ?? 0) > 0;
+  const unit = minDeltaUnit(criterion.type, schema);
+  // Last played always prefers the more recently played copy: no direction to choose.
+  const fixed = fixedDirection(criterion.type);
+  const days = unit === 'days';
 
   return (
     <div className="flex flex-col gap-2">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Field label="Prefer">
-          {(id) => (
-            <Select
-              id={id}
-              disabled={disabled}
-              value={asDirection(criterion.direction)}
-              options={[
-                { value: 'higher', label: wording.higher },
-                { value: 'lower', label: wording.lower },
-              ]}
-              onChange={(v) => onChange({ ...criterion, direction: v })}
-            />
-          )}
-        </Field>
+        {!fixed && (
+          <Field label="Prefer">
+            {(id) => (
+              <Select
+                id={id}
+                disabled={disabled}
+                value={asDirection(criterion.direction)}
+                options={[
+                  { value: 'higher', label: wording.higher },
+                  { value: 'lower', label: wording.lower },
+                ]}
+                onChange={(v) => onChange({ ...criterion, direction: v })}
+              />
+            )}
+          </Field>
+        )}
         {showTolerance && (
           <Field label="Tolerance" help="Values this close count as a tie and fall through to the next criterion.">
             {(id) => (
@@ -142,14 +149,18 @@ export function NumericCriterionEditor({ criterion, schema, onChange, disabled }
           </Field>
         )}
         {showMinDelta && (
-          <Field label="Min delta" help="Differences smaller than this count as a tie.">
+          <Field
+            label={days ? 'Minimum difference (days)' : 'Min delta'}
+            help={days ? 'Plays closer together than this count as a tie.' : 'Differences smaller than this count as a tie.'}
+          >
             {(id) => (
               <NumberInput
                 id={id}
                 disabled={disabled}
                 value={criterion.minDelta ?? null}
                 min={0}
-                integer={false}
+                max={days ? MAX_LAST_PLAYED_DAYS : undefined}
+                integer={days}
                 allowEmpty
                 unit={unit || undefined}
                 onChange={(v) => onChange({ ...criterion, minDelta: v ?? undefined })}
@@ -158,6 +169,12 @@ export function NumericCriterionEditor({ criterion, schema, onChange, disabled }
           </Field>
         )}
       </div>
+      {criterion.type === 'last_played' && (
+        <div className="text-xs text-muted">
+          Uses the play history Tautulli recorded for each Plex item. A copy whose history is unknown or could not be
+          read ties with every copy; it never counts as “not played”.
+        </div>
+      )}
       {criterion.type === 'video_bitrate' && (
         <div className="text-xs text-muted">Only compared when both copies use the same video codec.</div>
       )}

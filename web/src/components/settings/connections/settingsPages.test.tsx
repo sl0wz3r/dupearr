@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   libraries: [] as unknown[],
   profiles: [] as unknown[],
   arr: [] as unknown[],
+  tautulli: [] as unknown[],
   notifications: [] as unknown[],
   libraryUpdates: [] as unknown[],
   syncs: [] as unknown[],
@@ -71,6 +72,14 @@ vi.mock('@/api/hooks/useArr', () => ({
   useUpdateArrInstance: idle,
   useDeleteArrInstance: idle,
   useTestArrInstance: idle,
+}));
+
+vi.mock('@/api/hooks/useTautulli', () => ({
+  useTautulliInstances: () => query(mocks.tautulli),
+  useCreateTautulli: idle,
+  useUpdateTautulli: idle,
+  useDeleteTautulli: idle,
+  useTestTautulli: idle,
 }));
 
 vi.mock('@/api/hooks/useNotifications', () => ({
@@ -229,6 +238,26 @@ describe('ApplicationsPage', () => {
     expect(screen.getByRole('button', { name: 'Copy Sonarr webhook URL' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Regenerate webhook token' })).toBeInTheDocument();
     expect(screen.getAllByText(/On File Import, On File Upgrade, On Rename/)).toHaveLength(2);
+  });
+
+  // docs/DECISIONS.md D10: Tautulli connections (play history) under "Watch history".
+  it('lists Tautulli connections with their Plex server, never showing the key', async () => {
+    mocks.arr = [];
+    mocks.tautulli = [
+      { id: 4, name: 'Tautulli', serverId: SERVER.id, url: 'http://tautulli:8181', apiKey: MASKED_SECRET, verifyTls: true, enabled: true, createdAt: '', updatedAt: '' },
+    ];
+    renderPage(<ApplicationsPage />);
+    const section = screen.getByText('Watch history').closest('section') ?? document.body;
+    // The card's name and its kind badge.
+    expect(within(section).getAllByText('Tautulli')).toHaveLength(2);
+    expect(within(section).getByText(SERVER.name)).toBeInTheDocument();
+    expect(within(section).getByText('http://tautulli:8181')).toBeInTheDocument();
+    expect(within(section).getByText(/never as “not played”/)).toBeInTheDocument();
+    expect(section.textContent).not.toContain(MASKED_SECRET);
+
+    const user = userEvent.setup();
+    await user.click(within(section).getByRole('button', { name: /Add Tautulli/ }));
+    expect(await screen.findByRole('dialog', { name: 'Add Tautulli' })).toBeInTheDocument();
   });
 });
 

@@ -4,7 +4,8 @@
  * The engine is the authority on decisions (rank, reasons, decidingCriterion). This module only
  * decides which cell of a row to highlight, mirroring the profile's criterion configuration
  * (order / direction) when the profile is known and the documented defaults otherwise
- * (docs/ARCHITECTURE.md §4.3, docs/DECISIONS.md D5). Missing values never win.
+ * (docs/ARCHITECTURE.md §4.3, docs/DECISIONS.md D5). Missing values never win; an unknown play
+ * history (D10) highlights nothing, since the engine treats it as a tie.
  */
 import type { Criterion, CriterionType, Direction, GroupFile, MediaVersion, Profile } from '@/api/types';
 import { AUDIO_FORMAT_ORDER, RESOLUTION_ORDER, SOURCE_ORDER, VIDEO_CODEC_ORDER } from '@/lib/constants';
@@ -194,6 +195,24 @@ export function criterionScores(
         if (hasMissingPart(v)) return 0;
         return v.videoCodec && v.width > 0 && (positive(v.bitrateKbps) ?? positive(v.videoBitrateKbps)) ? 1 : 0;
       });
+    case 'played':
+    case 'last_played': {
+      // docs/DECISIONS.md D10: plays are counted per Plex item (versions of one item tie), and an
+      // unknown or unreadable history ties with every copy. Highlight only when every copy's
+      // history is known and the copies are not all versions of one item.
+      const keys = versions.map((v) => v?.ratingKey ?? '');
+      const known = versions.map((v) => (v?.watch?.status === 'known' ? v.watch : null));
+      if (known.some((w) => w === null) || (keys[0] !== '' && allSame(keys))) return versions.map(() => null);
+      // A copy with no plays recorded only loses to a play on or after its `since` date (the date
+      // it was added): when the latest play is older than that, the engine ties them.
+      const latest = Math.max(
+        ...known.map((w) => (w!.plays > 0 ? (toDate(w!.lastPlayed)?.getTime() ?? -Infinity) : -Infinity)),
+      );
+      const tied = known.some((w) => w!.plays <= 0 && !(latest >= (toDate(w!.since)?.getTime() ?? Infinity)));
+      if (tied) return versions.map(() => null);
+      if (type === 'played') return known.map((w) => (w!.plays > 0 ? 1 : 0));
+      return known.map((w) => (w!.plays > 0 ? (toDate(w!.lastPlayed)?.getTime() ?? null) : 0));
+    }
     case 'filename_score':
     default:
       return versions.map(() => null);

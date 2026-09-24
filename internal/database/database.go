@@ -276,6 +276,9 @@ func (d *DB) Libraries() store.LibraryRepo { return libraryRepo{d} }
 // ArrInstances implements store.Store.
 func (d *DB) ArrInstances() store.ArrInstanceRepo { return arrInstanceRepo{d} }
 
+// Tautullis implements store.Store.
+func (d *DB) Tautullis() store.TautulliRepo { return tautulliRepo{d} }
+
 // PathMappings implements store.Store.
 func (d *DB) PathMappings() store.PathMappingRepo { return pathMappingRepo{d} }
 

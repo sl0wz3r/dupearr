@@ -291,9 +291,11 @@ func (s *Service) reevaluateLocked(ctx context.Context, cfg *evalConfig, ignored
 		forceReview(g, reason)
 	}
 	dropStaleApproval(g, approvedKeepers)
-	if g.Signature == prevSig {
+	if g.Signature == prevSig && !g.HasFlag(models.FlagWatchUnreadable) {
 		g.StableCount = prevStable
 	} else {
+		// Changed decisions, or decisions ranked on a play history the last scan could not read
+		// (a profile change can make the history matter): no scan has confirmed them.
 		g.StableCount = 0
 	}
 	if _, err := s.d.Store.Groups().Upsert(ctx, g); err != nil {

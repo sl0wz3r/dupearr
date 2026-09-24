@@ -299,11 +299,12 @@ func webhookTokenChange(ctx context.Context, r *rebuild, opts RestoreOptions, su
 
 // settingsChanges records the differences of the settings and connections that decide which
 // files are removed and how (dry run, automatic mode, deletion methods, limits, the recycle bin,
-// media servers, applications, path mappings, notification connections), all of which the restore
-// applies — except dry run, full-disc removal and "always keep a playable copy", which are always
-// safe after a restore (forceSafeSettings) until the admin has reviewed the rest. Notification
-// connections are listed by name and kind only (their URLs carry credentials); one whose settings
-// changed under the same name is flagged without them (notificationDestinationChanges).
+// media servers, applications, Tautulli connections, path mappings, notification connections),
+// all of which the restore applies — except dry run, full-disc removal and "always keep a playable
+// copy", which are always safe after a restore (forceSafeSettings) until the admin has reviewed the
+// rest. Notification connections are listed by name and kind only (their URLs carry credentials);
+// one whose settings changed under the same name is flagged without them
+// (notificationDestinationChanges).
 func settingsChanges(ctx context.Context, r *rebuild, sum *RestoreSummary) error {
 	bak, _, err := r.settingsDoc(ctx, stagedSchema)
 	if err != nil {
@@ -371,15 +372,20 @@ func settingsChanges(ctx context.Context, r *rebuild, sum *RestoreSummary) error
 			sum.Changes = append(sum.Changes, RestoreChange{Setting: f.name, Current: current(f.cur), Backup: f.bak, Applied: true})
 		}
 	}
-	for _, l := range []struct{ name, query string }{
-		{"mediaServers", `SELECT name || ' → ' || url FROM %s.media_servers ORDER BY 1`},
-		{"arrInstances", `SELECT kind || ' ' || name || ' → ' || url FROM %s.arr_instances ORDER BY 1`},
-		{"pathMappings", `SELECT source_type || ' ' || source_id || ': ' || remote_path || ' → ' || local_path FROM %s.path_mappings ORDER BY 1`},
-		{"notifications", `SELECT name || ' (' || kind || ')' FROM %s.notifications ORDER BY 1`},
+	for _, l := range []struct{ name, table, query string }{
+		{"mediaServers", "media_servers", `SELECT name || ' → ' || url FROM %s.media_servers ORDER BY 1`},
+		{"arrInstances", "arr_instances", `SELECT kind || ' ' || name || ' → ' || url FROM %s.arr_instances ORDER BY 1`},
+		// Tautulli connections receive their API key with every scan (docs/DECISIONS.md D10).
+		{"tautulliInstances", "tautulli_instances", `SELECT name || ' (media server ' || server_id || ') → ' || url FROM %s.tautulli_instances ORDER BY 1`},
+		{"pathMappings", "path_mappings", `SELECT source_type || ' ' || source_id || ': ' || remote_path || ' → ' || local_path FROM %s.path_mappings ORDER BY 1`},
+		{"notifications", "notifications", `SELECT name || ' (' || kind || ')' FROM %s.notifications ORDER BY 1`},
 	} {
-		bakList, err := r.list(ctx, fmt.Sprintf(l.query, stagedSchema))
-		if err != nil {
-			return invalidDB("cannot read %s: %v", l.name, err)
+		bakList := "" // a backup from before the table existed has none
+		if r.staged[l.table] != "" {
+			var err error
+			if bakList, err = r.list(ctx, fmt.Sprintf(l.query, stagedSchema)); err != nil {
+				return invalidDB("cannot read %s: %v", l.name, err)
+			}
 		}
 		curList := ""
 		if r.hasLive {

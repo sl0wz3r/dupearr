@@ -20,7 +20,14 @@ import type { ArrInstance, Criterion, CriterionSchema, CriterionType, Library } 
 import { moveItem } from '@/components/ui/OrderedListEditor';
 import { Alert, Badge, Button, EmptyState, IconButton, Select, Switch } from '@/components/ui';
 import { CRITERION_TYPE_LABELS } from '@/lib/constants';
-import { criterionLabel, criterionSummary, editorKind, newCriterion, type SchemaMap } from './criteria';
+import {
+  criterionLabel,
+  criterionSummary,
+  editorKind,
+  newCriterion,
+  requiresWatchHistory,
+  type SchemaMap,
+} from './criteria';
 import { BooleanCriterionEditor, NumericCriterionEditor, OrderedCriterionEditor, PatternsEditor } from './CriterionEditors';
 import { FieldErrors } from './Field';
 
@@ -123,6 +130,15 @@ export function CriterionRow({
             {(schema?.requiresArr ?? (criterion.type === 'custom_format_score' || criterion.type === 'arr_managed')) && (
               <Badge kind="info" outline title="Needs data from a connected Radarr/Sonarr instance">
                 requires *arr
+              </Badge>
+            )}
+            {requiresWatchHistory(criterion.type, schema) && (
+              <Badge
+                kind="info"
+                outline
+                title="Needs the play history of a Tautulli connected in Settings → Applications; without it every copy's history is unknown and ties"
+              >
+                requires Tautulli
               </Badge>
             )}
             {!enabled && <Badge outline>Disabled</Badge>}
@@ -251,7 +267,8 @@ export function CriteriaBuilder({
     .filter((t) => !used.has(t))
     .map((t) => {
       const s = schema.get(t);
-      return { value: t, label: `${criterionLabel(t, s)}${s?.requiresArr ? ' (requires *arr)' : ''}` };
+      const needs = s?.requiresArr ? ' (requires *arr)' : requiresWatchHistory(t, s) ? ' (requires Tautulli)' : '';
+      return { value: t, label: `${criterionLabel(t, s)}${needs}` };
     });
 
   const add = () => {

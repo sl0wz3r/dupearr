@@ -436,6 +436,10 @@ func TestProfiles(t *testing.T) {
 	if created.ID == 0 || created.Name != "Custom" || len(created.Criteria) != len(tmpl.Criteria) {
 		t.Fatalf("created = %+v", created)
 	}
+	// WatchHistoryCheck depends on the profiles: a profile change queues a health check.
+	if cmds, _ := ts.cmds.Recent(context.Background(), 5); findCommand(cmds, models.CmdCheckHealth) == nil {
+		t.Fatalf("no health check queued after adding a profile: %+v", cmds)
+	}
 	if props := validationProps(t, ts.do(http.MethodPost, "/api/v1/profile", map[string]any{"name": "", "keepCount": 0})); !hasProp(props, "name") || !hasProp(props, "keepCount") {
 		t.Fatalf("props = %v", props)
 	}

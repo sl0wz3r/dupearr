@@ -63,6 +63,7 @@ type Store interface {
 	MediaServers() MediaServerRepo
 	Libraries() LibraryRepo
 	ArrInstances() ArrInstanceRepo
+	Tautullis() TautulliRepo
 	PathMappings() PathMappingRepo
 	Profiles() ProfileRepo
 	Groups() GroupRepo
@@ -129,6 +130,17 @@ type ArrInstanceRepo interface {
 	Create(ctx context.Context, a *models.ArrInstance) error
 	Update(ctx context.Context, a *models.ArrInstance) error
 	Delete(ctx context.Context, id int64) error // cascades path mappings of the instance
+}
+
+// TautulliRepo stores Tautulli connections (docs/DECISIONS.md D10): at most one per media server
+// (Create/Update of a second one for the same server fail with a constraint error). Deleting the
+// media server deletes its connection.
+type TautulliRepo interface {
+	List(ctx context.Context) ([]models.TautulliInstance, error)
+	Get(ctx context.Context, id int64) (*models.TautulliInstance, error)
+	Create(ctx context.Context, t *models.TautulliInstance) error
+	Update(ctx context.Context, t *models.TautulliInstance) error
+	Delete(ctx context.Context, id int64) error
 }
 
 type PathMappingRepo interface {

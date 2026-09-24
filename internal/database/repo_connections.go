@@ -394,6 +394,94 @@ func (r arrInstanceRepo) Delete(ctx context.Context, id int64) error {
 }
 
 // ---------------------------------------------------------------------------
+// Tautulli connections
+// ---------------------------------------------------------------------------
+
+type tautulliRepo struct{ d *DB }
+
+const tautulliColumns = `id, name, server_id, url, api_key, verify_tls, enabled, created_at, updated_at`
+
+func scanTautulli(s scanner) (models.TautulliInstance, error) {
+	var (
+		t                models.TautulliInstance
+		created, updated string
+	)
+	if err := s.Scan(&t.ID, &t.Name, &t.ServerID, &t.URL, &t.APIKey, &t.VerifyTLS, &t.Enabled, &created, &updated); err != nil {
+		return models.TautulliInstance{}, err
+	}
+	var err error
+	if t.CreatedAt, err = parseTime(created); err != nil {
+		return models.TautulliInstance{}, err
+	}
+	if t.UpdatedAt, err = parseTime(updated); err != nil {
+		return models.TautulliInstance{}, err
+	}
+	return t, nil
+}
+
+func (r tautulliRepo) List(ctx context.Context) ([]models.TautulliInstance, error) {
+	out, err := queryAll(ctx, r.d.r, scanTautulli, `SELECT `+tautulliColumns+` FROM tautulli_instances ORDER BY id`)
+	if err != nil {
+		return nil, wrap(err, "list tautulli connections")
+	}
+	return out, nil
+}
+
+func (r tautulliRepo) Get(ctx context.Context, id int64) (*models.TautulliInstance, error) {
+	t, err := scanTautulli(r.d.r.QueryRowContext(ctx, `SELECT `+tautulliColumns+` FROM tautulli_instances WHERE id = ?`, id))
+	if err != nil {
+		return nil, wrap(err, "get tautulli connection %d", id)
+	}
+	return &t, nil
+}
+
+// Create inserts t and sets its ID, CreatedAt (when zero) and UpdatedAt.
+func (r tautulliRepo) Create(ctx context.Context, t *models.TautulliInstance) error {
+	now := nowUTC()
+	created := orNow(t.CreatedAt, now)
+	res, err := r.d.w.ExecContext(ctx, `INSERT INTO tautulli_instances
+		(name, server_id, url, api_key, verify_tls, enabled, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.Name, t.ServerID, t.URL, t.APIKey, b2i(t.VerifyTLS), b2i(t.Enabled), fmtTime(created), fmtTime(now))
+	if err != nil {
+		return wrap(err, "create tautulli connection")
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return wrap(err, "create tautulli connection")
+	}
+	t.ID, t.CreatedAt, t.UpdatedAt = id, created, now
+	return nil
+}
+
+// Update replaces the mutable fields of t (by ID) and sets UpdatedAt.
+func (r tautulliRepo) Update(ctx context.Context, t *models.TautulliInstance) error {
+	now := nowUTC()
+	res, err := r.d.w.ExecContext(ctx, `UPDATE tautulli_instances SET
+		name = ?, server_id = ?, url = ?, api_key = ?, verify_tls = ?, enabled = ?, updated_at = ?
+		WHERE id = ?`,
+		t.Name, t.ServerID, t.URL, t.APIKey, b2i(t.VerifyTLS), b2i(t.Enabled), fmtTime(now), t.ID)
+	if err != nil {
+		return wrap(err, "update tautulli connection %d", t.ID)
+	}
+	if err := expectAffected(res, "update tautulli connection %d", t.ID); err != nil {
+		return err
+	}
+	t.UpdatedAt = now
+	return nil
+}
+
+// Delete removes the connection. Nothing refers to it: the play history it provided stays in the
+// stored versions until the next scan replaces it (as unknown: no source).
+func (r tautulliRepo) Delete(ctx context.Context, id int64) error {
+	res, err := r.d.w.ExecContext(ctx, `DELETE FROM tautulli_instances WHERE id = ?`, id)
+	if err != nil {
+		return wrap(err, "delete tautulli connection %d", id)
+	}
+	return expectAffected(res, "delete tautulli connection %d", id)
+}
+
+// ---------------------------------------------------------------------------
 // Path mappings
 // ---------------------------------------------------------------------------
 

@@ -368,6 +368,77 @@ with dry run off deleted 337 clips permanently through Plex. A flattened backup 
   versions are checked, and a set whose playlist was read is compared like any disc. Regression
   tests: `*/realshape_clips_test.go`.
 
+## D10. Watch history (issue #5, watch-history)
+Research: `docs/research/watch-history.md`. Two **opt-in** profile criteria rank copies by their
+play history; no template uses them, so upgrades never change a decision.
+- **`played`** (boolean, no parameters): a copy with recorded plays beats a copy with **no plays
+  recorded**. **`last_played`** (numeric, direction fixed to *newer*; `ValidateProfile` refuses
+  `lower` for both criteria — preferring the unplayed copy would make a play a reason to remove):
+  the more recently played copy wins; `minDelta` is in **days** (the engine multiplies by 86400, at
+  most 3650, UI default 30); `tolerancePercent` is refused. Schema: `requiresWatchHistory: true`,
+  `minDeltaUnit: "days"` (additive).
+- **Source: Tautulli only** (≥ 2.18.0), one connection per Plex server (`tautulli_instances`,
+  `server_id` UNIQUE, deleted with the server). The key travels in the **X-Api-Key header only**
+  (Tautulli prefers `?apikey=` over the header; older versions only read the parameter, so they
+  are refused). Plex itself is **not** a source in v1: its `viewCount`/`lastViewedAt` are the
+  token owner's only, an absent field cannot be told from "0", same-GUID items share them,
+  "mark as played" creates plays that never happened, and history attribution across same-GUID
+  items is UNVERIFIED.
+- **Attribution: per Plex item (rating key), every user.** Neither Plex nor Tautulli records which
+  file or version was played, so the versions of one item always **tie**; a full disc found on disk
+  (which reuses the movie's rating key but which Plex cannot play) and any other disc version is
+  **unknown**.
+- **An unknown history is a tie, never "not played"** — the same rule as `custom_format_score`
+  across *arr instances (class `""` in the metric). Two copies are compared only when both
+  histories are **known**. This deliberately departs from "a copy missing a value ranks below"
+  (ARCHITECTURE §4.3): under that rule an unknown history would rank *below* a copy with no
+  recorded plays, i.e. worse than "never watched", which is what the history cannot tell.
+- **Known and "no plays recorded"** (status `known`, plays 0) only when, in this scan: the read
+  succeeded completely, Tautulli's `pms_identifier` equals the media server's machine identifier,
+  the version is a regular Plex version, the library and **every active user** keep history, the
+  Plex item was added on or after the library's **earliest recorded play** (the coverage start),
+  the item is matched (a guid, not `local://`), and no play of the same guid in the library lies
+  under a rating key the library no longer lists (Plex re-created the item: churn guard). Otherwise
+  the copy is `unknown` with the first failing reason. Recorded plays (rows under the rating key)
+  are evidence whatever else holds. Wording is "No plays recorded since <date>", never "never
+  watched" / "unwatched"; the date (`since`) is the Plex item's **date added**.
+- **"No plays recorded" loses only to a later play.** A played copy beats it (on `played` and on
+  `last_played`) only when its last play is **on or after** the zero copy's `since` (its date
+  added); otherwise the two tie. A play from before the copy existed says nothing about which copy
+  people chose: a fresh 4K download must not lose to a 1080p watched a year ago, nor a file split
+  out of a played Plex item into a new one (its past plays stay with the old item). Two played
+  copies tie on `played`. In the metric this is a per-version **floor** (the least score that beats
+  it: the zero copy's `since`; +Inf for a played copy on `played`), and a played copy's `played`
+  score is its last play time, so "a beats b" stays monotone for `metric.survivors`.
+- **Reads are complete or failed.** Each scan (full and targeted) reads, per server: version,
+  server identity, users (flags only: no names or e-mails are kept, logged or notified), each
+  candidate library's keep-history flag and first play, then the candidate items' plays by rating
+  key (chunks of 49 + a **canary** key known to have plays, so a Tautulli that ignores the
+  comma-separated list fails instead of looking empty; grouping and live activity off; paged to
+  `recordsFiltered`; deduplicated by row id; live rows skipped), then the churn guard per zero-play
+  candidate (guid prefix query in the copy's own library, filtered exactly). A short page, a page
+  that repeats rows of another (fewer distinct rows than `recordsFiltered`), a history that shrinks
+  while read, a row for a key not asked for, an `"error"` result (of any command, `get_library`
+  included), data of an unexpected shape or more than 250 000 rows fail the read. Tautulli 2.18+
+  answering that no key arrived means a proxy dropped the header (its own error, not "too old").
+  Transient errors get **one retry** after 3 s. A failure marks every copy of that server
+  **`failed`** (reason ≤ 300 runes, redacted), counts in `Stats.Errors` and is logged. The snapshot
+  (`WatchInfo`, with `readAt`) is stored in `group_files.version`; re-evaluations use it until the
+  next scan (the engine stays pure).
+- **Failed history ⇒ review.** When the group's profile enables `played` or `last_played`, a version
+  would be removed, any version's history is `failed` and the group holds regular copies of at
+  least two Plex items (otherwise the history could never decide: versions of one item tie, discs
+  are unknown), the engine sets the engine-owned flag **`watch_unreadable`**: status review (a
+  queued group's removals are cancelled), blocked from auto approval, `StableCount` 0 (scan and
+  re-evaluation). A person may still approve. An `unknown` history is not a failure and does not
+  trigger review.
+- **Only ranking.** Watch data never touches protections, the keeper invariants,
+  `KeepPlayableCopy`, same-file rules, minimum age, caps, dry run, F10 (still per rating key), the
+  executor's re-verification or `ValidateDecisions`; the executor never reads it.
+- **Cut** (ROADMAP follow-ups): Plex as a source (after live verification), per-version
+  attribution (session recording), a resume/progress criterion, per-user filters, a play-count
+  criterion, a "played" protection, Tautulli webhooks, older Tautulli via POST bodies.
+
 ## Post-implementation notes (v1 implementation and review)
 Decisions the implementation made on top of D1–D8 (append-only; the code comments carry details).
 

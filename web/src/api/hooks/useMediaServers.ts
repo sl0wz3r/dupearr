@@ -33,6 +33,8 @@ function useInvalidateServers() {
   return () => {
     void qc.invalidateQueries({ queryKey: queryKeys.mediaServers.all });
     void qc.invalidateQueries({ queryKey: queryKeys.libraries.all });
+    // Deleting a server deletes its Tautulli connection too (ON DELETE CASCADE).
+    void qc.invalidateQueries({ queryKey: queryKeys.tautulli.all });
     void qc.invalidateQueries({ queryKey: queryKeys.health });
   };
 }

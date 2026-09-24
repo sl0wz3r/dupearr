@@ -10,6 +10,7 @@ import {
   FileExclamationPoint,
   FileX,
   Glasses,
+  History,
   Hourglass,
   Languages,
   Layers,
@@ -54,6 +55,7 @@ export const GROUP_FLAG_ICONS: Record<GroupFlag, LucideIcon> = {
   full_disc: Disc3,
   disc_unreadable: FileQuestionMark,
   disc_tracked_clip: Clapperboard,
+  watch_unreadable: History,
 };
 
 const KIND_TEXT: Record<StatusKind, string> = {

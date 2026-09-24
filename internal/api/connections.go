@@ -734,8 +734,11 @@ func (s *Server) handleLibraryUpdate(w http.ResponseWriter, r *http.Request) {
 		s.log.Info("Library updated", "id", saved.ID, "title", saved.Title, "enabled", saved.Enabled, "scopeGroup", saved.ScopeGroup)
 		s.reevaluateAffected(ctx, "library changed", usesLibrary(saved.ID))
 	}
-	if stored.Enabled != saved.Enabled {
-		s.checkHealthLater(ctx, "library enabled or disabled") // PathMappingCheck, RecycleBinCheck
+	switch {
+	case stored.Enabled != saved.Enabled:
+		s.checkHealthLater(ctx, "library enabled or disabled") // PathMappingCheck, RecycleBinCheck, WatchHistoryCheck
+	case !sameProfile(stored.ProfileID, saved.ProfileID):
+		s.checkHealthLater(ctx, "library profile changed") // WatchHistoryCheck
 	}
 	s.writeJSON(w, http.StatusAccepted, saved)
 }

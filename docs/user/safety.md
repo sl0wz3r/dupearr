@@ -85,6 +85,7 @@ These send a group to **review** (never auto-approved):
 | Incomplete data | A Radarr/Sonarr instance could not be read during the scan: its files would look untracked. Approval is refused until a scan reads every instance (or you disable the instance). |
 | Stale data | Right before a removal, the live data no longer matched what was reviewed (including the \*arr now tracking another copy than the kept one), or a scan kept a different copy than the one you approved. |
 | Disc unreadable | A full-disc backup could not be read or checked completely (a damaged or half-copied disc, symbolic links inside, an unclear "Disc N" set, or a disc Dupearr cannot reach). It is always kept. |
+| Play history unreadable | The profile ranks by play history (*Played* / *Last played*), the group holds copies of different Plex items and Tautulli could not be read during the scan (down, wrong key, too old, another Plex server, an incomplete answer). The unreadable history counts as unknown — a tie, never "not played" — so the ranking may differ from what the history would say. You can still approve after looking; auto mode never does. |
 
 Other flags are shown on the group without sending it to review: cross-library, hardlinked, the
 \*arr's quality cutoff is not met (it may upgrade again and recreate the duplicate), and — which
@@ -256,7 +257,11 @@ Removing "the duplicates" would destroy the backup. Dupearr therefore:
 - delete anything outside the local folders of your path mappings, or follow symlinks out of them;
 - change ownership or permissions of your media (the container only fixes its own `/config`);
 - act on a group while dry run is on, without approval in manual mode, or on data it has not just
-  re-verified.
+  re-verified;
+- treat a copy as "not played" because its play history is missing, unknown or could not be read:
+  such a copy ties on *Played* / *Last played*, and a failed read sends the group to review. A copy
+  with *no plays recorded* only loses to plays made after it was added. Play history only reorders
+  the ranking — it never overrides a protection, the keeper checks or any other guard.
 
 ## A safe way to start
 
