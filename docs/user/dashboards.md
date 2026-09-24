@@ -38,7 +38,8 @@ through Homepage's generic `customapi` widget. Native Homepage and Homarr widget
 | `reclaimedBytes` | Size of the files Dupearr actually removed (dry-run removals do not count) |
 | `lastScan` | The last scan (`status`, `startedAt`, `finishedAt`, `trigger`, `stats`), or `null` before the first one |
 
-Full reference: [docs/API.md](../API.md#duplicates).
+These fields are a stable contract: they may be added to, never renamed or removed. Full
+reference: [docs/API.md](../API.md#duplicate-statistics-stable-contract).
 
 ## Homepage
 

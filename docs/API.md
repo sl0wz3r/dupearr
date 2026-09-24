@@ -402,7 +402,7 @@ first opened the database.
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/v1/duplicate` | *paged* `DuplicateGroupSummary`; filters `status` (comma list), `mediaType` (`movie`/`episode`), `libraryId`, `serverId`, `flag`, `search`. sortKey ∈ `title,lastSeenAt,firstSeenAt,reclaimableBytes,status` (default `lastSeenAt` descending) |
-| GET | `/api/v1/duplicate/stats` | `{"total","byStatus":{pending:…},"reclaimableBytes","reclaimedBytes","lastScan": ScanRun|null}` (`byStatus` lists every status) |
+| GET | `/api/v1/duplicate/stats` | `{"total","byStatus":{pending:…},"reclaimableBytes","reclaimedBytes","lastScan": ScanRun|null}` (`byStatus` lists every status). A **stable contract**: see [Duplicate statistics](#duplicate-statistics-stable-contract) |
 | GET | `/api/v1/duplicate/{id}` | full `DuplicateGroup` (models) + `"actions": Action[]` |
 | POST | `/api/v1/duplicate/{id}/approve` | optional body `{"signature":"…"}` → 200 `Action[]` (queues ProcessQueue); 400 when invariants fail; 409 cases below |
 | POST | `/api/v1/duplicate/{id}/ignore` | optional body `{"addExclusion":false}` → group (queued removals are cancelled; `addExclusion` also adds a `group_key` exclusion); 409 when resolved |
@@ -410,6 +410,33 @@ first opened the database.
 | PUT | `/api/v1/duplicate/{id}/file/{fileId}/override` | body `{"decision":"keep"|"remove"|null}` → 200 group (re-evaluated; 400 if the override breaks an invariant, e.g. 0 keepers; 404 unknown file; 409 when resolved) |
 | POST | `/api/v1/duplicate/{id}/rescan` | queues a TargetedScan of the group's Plex items → 201 `Command`; 400 when the group has no Plex items |
 | POST | `/api/v1/duplicate/bulk` | `{"ids":[…≤1000],"action":"approve"|"ignore"|"unignore","signatures"?:{"<id>":"…"}}` → 200 `{"succeeded":[ids],"failed":[{"id","message"}]}` |
+
+### Duplicate statistics (stable contract)
+
+`GET /api/v1/duplicate/stats` is what dashboards read (Homepage's `customapi` widget, see
+[docs/user/dashboards.md](user/dashboards.md), and future native widgets), so its shape is a
+promise: **fields may be added, but never renamed, removed or given another JSON type**, and a
+field keeps its meaning. `internal/api/stats_contract_test.go` pins every field below.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `total` | number | Duplicate groups, in any status |
+| `byStatus` | object | Groups per status. Every status is listed, `0` included: `pending`, `review`, `deferred`, `protected`, `queued`, `resolved`, `ignored`, `failed`. A new status may be added as a new key |
+| `reclaimableBytes` | number | Size of the versions decided *remove* in `pending`, `review` and `queued` groups |
+| `reclaimedBytes` | number | Size of the files actually removed (succeeded, non-dry-run actions) |
+| `lastScan` | object or `null` | The latest scan run; `null` before the first scan |
+| `lastScan.id` | number | Scan run id (`GET /api/v1/scan`) |
+| `lastScan.trigger` | string | `manual`, `scheduled` or `webhook` |
+| `lastScan.targeted` | boolean | `true` for a targeted scan (webhook, *Re-scan* of a group) |
+| `lastScan.status` | string | `running`, `completed` or `failed` |
+| `lastScan.startedAt` | string | RFC 3339 time |
+| `lastScan.finishedAt` | string | RFC 3339 time; **absent** while the scan is running |
+| `lastScan.error` | string | Only present when the scan failed |
+| `lastScan.stats` | object | Counters of that run: `libraries`, `itemsExamined`, `groupsFound`, `newGroups`, `resolvedGroups`, `pendingGroups`, `reviewGroups`, `reclaimableBytes`, `autoApproved`, `errors` (all numbers) |
+
+Byte counts are plain integers (not strings), so JavaScript clients read them exactly up to 8 PiB.
+Authentication: the `X-Api-Key` header (an admin credential: keep a dashboard that holds it
+private). A breaking change to this endpoint would get a new path, not a new shape.
 
 **Approving** (single and bulk share the checks; bulk reports them per id in `failed`). Groups in
 `pending`, and — approved by hand — `review`, `deferred` and `failed`, can be approved. The API

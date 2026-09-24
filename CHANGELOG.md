@@ -18,8 +18,14 @@ All notable changes to Dupearr are documented here. The format follows
   `config.xml` and the environment skip and log it, as before. Changing either list needs the
   current password when a Forms account exists, and a change of the lists or a switch to External
   that would stop trusting the browser making it (External, None) must be confirmed.
+- [Dashboards](docs/user/dashboards.md) guide: a ready-to-paste Homepage `customapi` widget for the
+  duplicate statistics (pending, to review, reclaimable, last scan), and why the API key it needs
+  must stay private (#2).
 
 ### Changed
+
+- `GET /api/v1/duplicate/stats` is documented as a stable contract for dashboards: fields may be
+  added, never renamed, removed or retyped; a test pins every field (#3).
 
 - `dupearr reset-auth` also clears the trusted proxies and allowed hosts in `config.xml` (values
   from environment variables stay and are reported), so it recovers from a wrong list too (#1).

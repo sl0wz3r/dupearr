@@ -22,7 +22,7 @@ your setup and use case to its issue (label `roadmap`), or to open a thread in D
 
 | Item | Stage | How you can help |
 |---|---|---|
-| [Dashboard widgets (Homepage, Homarr)](#dashboard-widgets-homepage-homarr) | Up next | `good first issue` (docs), `help wanted` |
+| [Dashboard widgets (Homepage, Homarr)](#dashboard-widgets-homepage-homarr) | Up next | `help wanted`: native widgets upstream (the `customapi` example and the stable stats contract are done) |
 | [Jellyfin and Emby](#jellyfin-and-emby) | Planned | `help wanted`: research and design first |
 | [Watch-history criteria (Tautulli, Plex)](#watch-history-criteria-tautulli-plex) | Planned | `help wanted` |
 | [Lidarr and music libraries](#lidarr-and-music-libraries) | Exploring | Design discussion |
@@ -40,16 +40,18 @@ still needs a design.
 ## Dashboard widgets (Homepage, Homarr)
 
 - **Today:** `GET /api/v1/duplicate/stats` (with the `X-Api-Key` header) returns the number of
-  groups, the count per status, reclaimable and reclaimed bytes and the last scan: the numbers on
-  the *Duplicates* page. See [docs/API.md](docs/API.md#duplicates).
-- **Goal:**
-  1. A ready-to-paste example for Homepage's `customapi` widget in the user docs
-     (`good first issue`).
-  2. Native widgets contributed upstream to Homepage and Homarr (`help wanted`).
-  3. Document the stats response as a stable contract: fields may be added, not renamed or
-     removed.
-- **Care:** the API key is an admin credential that can approve removals. The docs should say so,
-  and should tell people to keep the dashboard that holds it private.
+  groups, the count per status, reclaimable and reclaimed bytes and the last scan, and is a
+  [stable contract](docs/API.md#duplicate-statistics-stable-contract): fields may be added, never
+  renamed or removed. [docs/user/dashboards.md](docs/user/dashboards.md) has a ready-to-paste
+  Homepage `customapi` widget, tested against the demo.
+- **Goal:** native widgets contributed upstream (`help wanted`).
+  - **Homepage** accepts a new widget only for a feature-request discussion with at least 20
+    up-votes, and may decline young projects or projects with few stars. So this waits until
+    enough Dupearr users ask for it there; the `customapi` widget covers the need until then.
+  - **Homarr** accepts new integrations when the contributor tests them against a real system
+    and helps maintain them.
+- **Care:** the API key is an admin credential that can approve removals. The docs say so, and
+  tell people to keep the dashboard that holds it private.
 
 ## Jellyfin and Emby
 
