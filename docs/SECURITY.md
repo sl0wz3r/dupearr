@@ -5,7 +5,7 @@ Full security code review of Dupearr before its first release, run to make it pr
 | | |
 |---|---|
 | Date | September 2026 (final sign-off 2026-09-23) |
-| Baseline | commit `57bf31b` ("Add a local Docker test environment"); fixes are in the working tree on top of it |
+| Baseline | commit `62605a0` ("Add a local Docker test environment"); fixes are in the working tree on top of it |
 | Scope | the whole repository: Go server (`cmd/`, `internal/`), React SPA (`web/`), container image and entrypoint (`Dockerfile`, `docker/`), deployment files (`deploy/`, `unraid/`), CI and release workflows (`.gitea/`, `.github/`), documentation |
 | Result | **92 issues** tracked: 3 high, 22 medium, 55 low, 12 informational. **90 fixed** (each with a regression test or policy check), **1 refuted** (hardened anyway), **1 accepted risk**; further residual risks are documented below. Nothing above low severity remains open. The 16 round-3 issues (GAP-01 to GAP-16) come from the independent review of the three domains round 1 had not covered. |
 
@@ -643,8 +643,8 @@ Go 1.27.1, Node 24.6):
 | `go vet ./...` and `go vet -tags e2e ./...` | no output |
 | `go build ./...` | no output |
 | `go test ./... -race -count=1` (run twice) | both runs: every package `ok` (api ≈43 s, executor ≈35 s, auth ≈18 s, database ≈17 s, scanner ≈16 s, …). The first attempt hit a timing flake in `internal/commands` (TestEnqueueDedupe: a request right after an identical command finished joined that finished command); fixed — a finished command never absorbs a request — with the deterministic regression test TestEnqueueDoesNotJoinAFinishedCommand, then stress-run 200 times under `-race` |
-| `go test -tags e2e ./internal/e2e/... -count=1` (run twice) | both runs: 36/36 tests PASS, none skipped (7 loose-clip tests, including the upgrade from per-clip groups approved on a `9a298dc` binary) |
-| the loose-clip e2e tests against a binary built from `9a298dc` (`DUPEARR_E2E_BINARY`) | 6/6 FAIL, e.g. "the clip …/00004.m2ts is an ordinary version (remove)": the tests reproduce the incident |
+| `go test -tags e2e ./internal/e2e/... -count=1` (run twice) | both runs: 36/36 tests PASS, none skipped (7 loose-clip tests, including the upgrade from per-clip groups approved on a `b1851c3` binary) |
+| the loose-clip e2e tests against a binary built from `b1851c3` (`DUPEARR_E2E_BINARY`) | 6/6 FAIL, e.g. "the clip …/00004.m2ts is an ordinary version (remove)": the tests reproduce the incident |
 | `web: npm run typecheck && npm test && npm run build` | typecheck clean; `Test Files 46 passed (46)`, `Tests 1074 passed (1074)`; `✓ built` |
 | image build (`make docker IMAGE=dupearr-clips-final`) + `sh docker/test-image.sh` | `71 passed, 0 failed` |
 
@@ -674,8 +674,8 @@ The INC-01 image was removed after the checks.
 | ID | INC-01 |
 | Date | September 2026, before the first release |
 | Severity | High: media files permanently deleted (Plex method, no recycle bin) |
-| Affected | builds up to commit `9a298dc` (which already had the full-disc support for `BDMV/`, `VIDEO_TS/` and images) |
-| Status | Fixed in the working tree on top of `9a298dc`; regression tests in the Go, e2e and web suites |
+| Affected | builds up to commit `b1851c3` (which already had the full-disc support for `BDMV/`, `VIDEO_TS/` and images) |
+| Status | Fixed in the working tree on top of `b1851c3`; regression tests in the Go, e2e and web suites |
 | Design | [DECISIONS.md D9 addendum "Loose clip sets"](DECISIONS.md), [user/safety.md](user/safety.md) |
 
 **What happened.** A library stored its Blu-ray backups **flattened**: the numbered clips of the
@@ -750,7 +750,7 @@ a backup. No other files, no credentials and no other instance were affected.
 | Engine | `internal/engine/clips_test.go` TestStoredPerClipGroupNeverRemovesAClip, TestLooseClipSetIsAProtectedDiscVersion; `adversarial_clips_test.go` TestStrayClipIsNeverAPlayableKeeper, TestStrayClipInAMixedVersionIsProtected; `realshape_clips_test.go` TestSplitFeatureClipSetIsNotASample |
 | Executor | `internal/executor/clips_test.go` TestQueuedClipRemovalsAreRefusedByEveryMethod, TestEveryMethodRefusesALooseClip, TestLooseClipSetWholeSetRemovalAndRestore, TestLooseClipSetRemovalRefusals; `adversarial_clips_test.go` TestQueuedCopySuffixedClipRemovalsAreRefused, TestQueuedMKVNextToStrayClipsIsKeptAsThePlayableCopy, TestArrFileThatBecameACopySuffixedClipIsRefused, TestFilesystemRefusesASymlinkToAClip |
 | API | `internal/api/disc_test.go` TestLooseClipSummaryAndApproval |
-| End to end | `internal/e2e/looseclips_test.go` against the fake Plex/\*arr scenario `looseclips` (the incident's shapes: 111, 172 and 189 clips; a film split over 145 short clips; clips Plex does not list; a Radarr-tracked clip; `.1` copies): TestLooseClipsDetection, TestLooseClipsWithoutPathMappings, TestLooseClipsNeverRemovedByDefault, TestLooseClipsAutoModeNeverApproves, TestLooseClipSetRemovalAndRestore, TestLooseClipTrackedByRadarr, and TestLooseClipsUpgradeFromPerClipGroups (per-clip groups approved on a `9a298dc` binary with dry run off; after the upgrade all 240 queued clip removals are refused and Plex and the \*arrs get no delete request). The fake servers record every delete request that targets a clip as a violation. |
+| End to end | `internal/e2e/looseclips_test.go` against the fake Plex/\*arr scenario `looseclips` (the incident's shapes: 111, 172 and 189 clips; a film split over 145 short clips; clips Plex does not list; a Radarr-tracked clip; `.1` copies): TestLooseClipsDetection, TestLooseClipsWithoutPathMappings, TestLooseClipsNeverRemovedByDefault, TestLooseClipsAutoModeNeverApproves, TestLooseClipSetRemovalAndRestore, TestLooseClipTrackedByRadarr, and TestLooseClipsUpgradeFromPerClipGroups (per-clip groups approved on a `b1851c3` binary with dry run off; after the upgrade all 240 queued clip removals are refused and Plex and the \*arrs get no delete request). The fake servers record every delete request that targets a clip as a violation. |
 | Web | `web/src/components/duplicates/disc.test.ts`, `discContract.test.ts`, `duplicateUtils.test.ts`, `pages/duplicates/DuplicateDetailPage.test.tsx`, `DuplicatesPage.test.tsx` |
 
 **Lessons**

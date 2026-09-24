@@ -193,7 +193,7 @@ First public version.
 - Full discs: a kept copy that is a symlink into the disc blocks its removal; extras discs and other
   films never join a feature's set; the approval covers the disc's content; a restore only takes
   back disc entries.
-- Incident INC-01, loose Blu-ray clips deleted: development builds up to `9a298dc` treated the
+- Incident INC-01, loose Blu-ray clips deleted: development builds up to `b1851c3` treated the
   numbered clips of a flattened Blu-ray backup (`00174.m2ts` … loose in the movie folder, each
   listed by Plex as its own version) as ordinary duplicate copies, and a manual approval with dry
   run off deleted 337 clips of four movies permanently through Plex. Every removal method now

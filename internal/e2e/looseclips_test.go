@@ -897,7 +897,7 @@ func TestLooseClipTrackedByRadarr(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // preClipFixCommit is the last commit whose Dupearr treats every loose clip as its own version.
-const preClipFixCommit = "9a298dc"
+const preClipFixCommit = "b1851c3"
 
 // oldDupearrBinary returns a Dupearr binary built from preClipFixCommit into the test's temporary
 // directory (DUPEARR_E2E_OLD_BINARY overrides). The build needs git and the commit in the
