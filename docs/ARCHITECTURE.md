@@ -85,7 +85,7 @@ docker/                 Dockerfile, entrypoint.sh
 unraid/                 Unraid Community Applications template + icon
 deploy/                 docker-compose.yml, systemd unit
 docs/                   this spec, API reference, research notes, user docs
-.gitea/workflows/       CI (test + build + push image)
+.gitea/workflows/       CI (test + build), release on tags (publishing is opt-in)
 ```
 
 Dependency direction (no cycles): `models` ← `store` ← `database`; `models` ← `disc`;

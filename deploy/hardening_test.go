@@ -257,7 +257,8 @@ func TestReleasePlainHTTPRegistryIsOptIn(t *testing.T) {
 func checkGiteaReleasePlainHTTPOptIn(t *testing.T, file string) {
 	t.Helper()
 	text := readRepoFile(t, file)
-	optIn := regexp.MustCompile(`(?m)^\s+if: vars\.REGISTRY_PLAIN_HTTP == 'true'\s*$`)
+	// A publishing step also carries the PUBLISH_TO_GITEA gate (checked below) in front of the opt-in.
+	optIn := regexp.MustCompile(`(?m)^\s+if: (?:needs\.settings\.outputs\.publish == 'true' && )?vars\.REGISTRY_PLAIN_HTTP == 'true'\s*$`)
 	plainSteps, buildxSteps := 0, 0
 	for _, step := range workflowSteps(text) {
 		if strings.Contains(step, "docker/setup-buildx-action@") {
@@ -277,7 +278,7 @@ func checkGiteaReleasePlainHTTPOptIn(t *testing.T, file string) {
 	// The opt-in must protect the tokens too, not only the push: the Docker daemon behind
 	// docker/login-action falls back to plain HTTP on its own for an insecure registry, and the
 	// release step sends RELEASE_TOKEN to GITHUB_API_URL, whatever its scheme.
-	httpsCheck := regexp.MustCompile(`(?m)^\s+if: vars\.REGISTRY_PLAIN_HTTP != 'true'\s*$`)
+	httpsCheck := regexp.MustCompile(`(?m)^\s+if: (?:needs\.settings\.outputs\.publish == 'true' && )?vars\.REGISTRY_PLAIN_HTTP != 'true'\s*$`)
 	checked, loggedIn, guarded := false, false, false
 	for _, step := range workflowSteps(text) {
 		switch {
@@ -295,6 +296,24 @@ func checkGiteaReleasePlainHTTPOptIn(t *testing.T, file string) {
 	}
 	if !loggedIn || !guarded {
 		t.Errorf("%s: the release step must refuse a plain-HTTP GITHUB_API_URL without the REGISTRY_PLAIN_HTTP opt-in (login found: %v, guard found: %v)", file, loggedIn, guarded)
+	}
+	// Publishing is opt-in too (repository variable PUBLISH_TO_GITEA, read once by the "publish
+	// settings" job): no step may hand a secret to anything, or push, unless that job said so.
+	// That job itself only sees whether each secret is set (secrets.X != '').
+	publishGate := regexp.MustCompile(`(?m)^\s+if: needs\.settings\.outputs\.publish == 'true'(?: && .+)?\s*$`)
+	onlyChecksSet := regexp.MustCompile(`secrets\.\w+ != ''`)
+	publishing := 0
+	for _, step := range workflowSteps(text) {
+		if !strings.Contains(onlyChecksSet.ReplaceAllString(step, ""), "secrets.") && !strings.Contains(step, "push: true") {
+			continue
+		}
+		publishing++
+		if !publishGate.MatchString(step) {
+			t.Errorf("%s: a step uses a secret or pushes without the PUBLISH_TO_GITEA gate (if: needs.settings.outputs.publish == 'true'):\n%s", file, step)
+		}
+	}
+	if publishing < 3 {
+		t.Errorf("%s: want at least the registry login, the push and the Gitea release among the publishing steps, found %d", file, publishing)
 	}
 	for _, want := range []string{
 		"digest: ${{ steps.push.outputs.digest }}",
