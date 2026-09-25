@@ -387,15 +387,15 @@ func settingsChanges(ctx context.Context, r *rebuild, sum *RestoreSummary) error
 		if !r.hasColumn(ctx, schema, "arr_instances", "links_confirmed") || !r.hasTable(ctx, schema, "arr_server_links") {
 			return fmt.Sprintf(`SELECT kind || ' ' || name || ' → ' || url FROM %s.arr_instances ORDER BY 1`, schema)
 		}
-		// Confirmed links only matter with two or more enabled Plex servers (one server: every
-		// instance feeds it), so a one-server installation lists no change.
+		// Confirmed links only matter with two or more enabled servers of a supported kind (one
+		// server: every instance feeds it), so a one-server installation lists no change.
 		return fmt.Sprintf(`SELECT a.kind || ' ' || a.name || ' → ' || a.url || CASE
 			WHEN a.links_confirmed = 1 AND (SELECT COUNT(*) FROM %[1]s.media_servers
-				WHERE enabled = 1 AND kind IN ('plex', '')) >= 2
+				WHERE enabled = 1 AND kind IN (%[2]s)) >= 2
 			THEN ' (feeds ' || COALESCE((SELECT group_concat(n, ', ') FROM (SELECT ms.name AS n
 				FROM %[1]s.arr_server_links l JOIN %[1]s.media_servers ms ON ms.id = l.server_id
 				WHERE l.arr_id = a.id ORDER BY ms.name)), 'no media server') || ', confirmed)'
-			ELSE '' END FROM %[1]s.arr_instances a ORDER BY 1`, schema)
+			ELSE '' END FROM %[1]s.arr_instances a ORDER BY 1`, schema, supportedKindsSQL())
 	}
 	for _, l := range []struct {
 		name, table, query string
@@ -581,4 +581,15 @@ func (s *Service) securityFingerprint(ctx context.Context) (string, error) {
 		fmt.Fprintf(h, "webhookToken=%q\n", tok)
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// supportedKindsSQL is models.SupportedMediaServerKinds as a comma-separated list of SQL string
+// literals, for queries on an attached backup schema that take no arguments.
+func supportedKindsSQL() string {
+	kinds := models.SupportedMediaServerKinds()
+	quoted := make([]string, len(kinds))
+	for i, k := range kinds {
+		quoted[i] = "'" + strings.ReplaceAll(k, "'", "''") + "'"
+	}
+	return strings.Join(quoted, ", ")
 }

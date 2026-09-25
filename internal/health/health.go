@@ -74,6 +74,7 @@ import (
 	"github.com/sl0wz3r/dupearr/internal/integrations/arr"
 	"github.com/sl0wz3r/dupearr/internal/integrations/plex"
 	"github.com/sl0wz3r/dupearr/internal/integrations/tautulli"
+	"github.com/sl0wz3r/dupearr/internal/mediaserver"
 	"github.com/sl0wz3r/dupearr/internal/models"
 	"github.com/sl0wz3r/dupearr/internal/notifications"
 	"github.com/sl0wz3r/dupearr/internal/store"
@@ -135,15 +136,32 @@ type ArrMediaManagement interface {
 	MediaManagement(context.Context) (*arr.MediaManagement, error)
 }
 
-// PlexOwnership is an optional capability of the values returned by Deps.PlexFactory (the real
-// *plex.Client implements it): whether the client's token belongs to the owner of the server with
-// the given machine identifier, according to plex.tv. known is false when plex.tv does not list
-// the server for the token. PlexOwnerCheck uses it; other clients are skipped.
+// MediaServerClient is what the checks read from a media server of any kind: its identity
+// (MediaServerConnectivityCheck). The values of Deps.MediaServerFactory and Deps.PlexFactory
+// satisfy it.
+type MediaServerClient interface {
+	Identity(context.Context) (*mediaserver.Identity, error)
+}
+
+// PlexOwnership is an optional capability of the media server clients (the real *plex.Client
+// implements it): whether the client's token belongs to the owner of the server with the given
+// machine identifier, according to plex.tv. known is false when plex.tv does not list the server
+// for the token. PlexOwnerCheck uses it; other clients are skipped.
 type PlexOwnership interface {
 	Ownership(ctx context.Context, machineID string) (owned, known bool, err error)
 }
 
-var _ PlexOwnership = (*plex.Client)(nil)
+// PlexDeletionSetting is an optional capability of the media server clients (the real
+// *plex.Client and every value of Deps.PlexFactory implement it): the server's "Allow media
+// deletion" setting. PlexMediaDeletionCheck uses it; other clients are skipped.
+type PlexDeletionSetting interface {
+	MediaDeletionAllowed(context.Context) (bool, error)
+}
+
+var (
+	_ PlexOwnership       = (*plex.Client)(nil)
+	_ PlexDeletionSetting = (*plex.Client)(nil)
+)
 
 // TautulliClient is what the Tautulli checks read (the real *tautulli.Client implements it).
 type TautulliClient interface {
@@ -159,7 +177,7 @@ var _ TautulliClient = (*tautulli.Client)(nil)
 // Store is required for every check but AuthenticationCheck and ExternalAuthCheck; Config, Bus, Notifier, Log and the
 // factories may be nil (the checks needing them are skipped). A factory may also return nil to
 // skip one connection. The value returned by ArrFactory may implement ArrMediaManagement, the
-// value returned by PlexFactory PlexOwnership.
+// media server clients PlexOwnership and PlexDeletionSetting.
 type Deps struct {
 	Store       store.Store
 	Config      *config.Manager
@@ -173,6 +191,10 @@ type Deps struct {
 	ArrFactory func(a models.ArrInstance) interface {
 		Status(context.Context) (*arr.SystemStatus, error)
 	}
+	// MediaServerFactory returns the client of a media server of any supported kind (nil when
+	// there is none for its kind). When set it is used instead of PlexFactory, which stays for
+	// tests and callers wired before the kind-neutral contract; cmd/dupearr wires only this one.
+	MediaServerFactory mediaserver.Factory
 	// TautulliFactory returns the client of a Tautulli connection (TautulliConnectivityCheck,
 	// WatchHistoryCheck's notices); nil skips those probes.
 	TautulliFactory func(t models.TautulliInstance) TautulliClient

@@ -189,9 +189,9 @@ func (c *Client) AllItems(ctx context.Context, sectionKey string, mt models.Medi
 			// (another type, …): counted too, or a server could grow it without bound with
 			// rejected rows carrying huge rating keys.
 			held += seenEntryBytes + int64(len(rk))
-			if ref, ok := toItemRef(&md[i], mt); ok {
-				held += ref.approxBytes()
-				items = append(items, ref)
+			if row, ok := toItemRef(&md[i], mt); ok {
+				held += row.approxBytes()
+				items = append(items, ItemRef(row))
 			}
 			if held > maxBytes {
 				return nil, fmt.Errorf("plex: GET %s: the listing holds more than %d MiB of item data; aborting listing",
@@ -225,9 +225,13 @@ func (c *Client) AllItems(ctx context.Context, sectionKey string, mt models.Medi
 	return items, nil
 }
 
-// approxBytes estimates the memory an ItemRef holds (struct headers plus string and slice data),
-// for the listing budget.
-func (r *ItemRef) approxBytes() int64 {
+// listingRow is a mapped listing row while the listing is built: ItemRef is an alias of the
+// kind-neutral mediaserver.ItemRef, so the listing budget's method lives on this local type.
+type listingRow ItemRef
+
+// approxBytes estimates the memory a row holds (struct headers plus string and slice data), for
+// the listing budget.
+func (r *listingRow) approxBytes() int64 {
 	const (
 		itemOverhead  = 256 // ItemRef fields and slice/map headers
 		entryOverhead = 48  // one map entry (hash bucket share)
@@ -291,15 +295,15 @@ func containerTotal(mc *containerDTO, h http.Header) int {
 }
 
 // toItemRef maps a listing row. Rows without rating key or of another type are skipped.
-func toItemRef(m *metadataDTO, mt models.MediaType) (ItemRef, bool) {
+func toItemRef(m *metadataDTO, mt models.MediaType) (listingRow, bool) {
 	rk := m.RatingKey.String()
 	if rk == "" {
-		return ItemRef{}, false
+		return listingRow{}, false
 	}
 	if t := strings.ToLower(m.Type.String()); t != "" && t != string(mt) {
-		return ItemRef{}, false
+		return listingRow{}, false
 	}
-	ref := ItemRef{
+	ref := listingRow{
 		RatingKey:   rk,
 		MediaType:   mt,
 		Title:       m.Title.String(),

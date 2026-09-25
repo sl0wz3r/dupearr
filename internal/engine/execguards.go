@@ -45,7 +45,7 @@ var autoBlockingFlags = map[string]bool{
 func BlocksAutoApproval(flag string) bool { return autoBlockingFlags[flag] }
 
 // ExclusionReason reports why the exclusions cover a stored group — its key (with or without the
-// "@plex:<server>:<ratingKey>" disambiguation BuildGroups appends to colliding keys, on either
+// "@<kind>:<server>:<itemID>" disambiguation BuildGroups appends to colliding keys, on either
 // side), its title or show title (title_regex), or any version's library, item title or path
 // (path_prefix, same rules as BuildGroups). "" when none applies. An exclusion created after a
 // group was approved must stop its removals right away, not only once a full scan rebuilt it.
@@ -92,15 +92,16 @@ func ExclusionReason(ex []models.Exclusion, g *models.DuplicateGroup) string {
 	return ""
 }
 
-// keyForms returns a group key and, when it carries the "@plex:<server>:<ratingKey>"
-// disambiguation, the key without it (variant suffixes kept).
+// keyForms returns a group key and, when it carries the "@<kind>:<server>:<itemID>"
+// disambiguation (models.DisambiguationIndex; Plex: "@plex:<server>:<ratingKey>"), the key without
+// it (variant suffixes kept).
 func keyForms(key string) []string {
 	key = strings.TrimSpace(key)
-	i := strings.Index(key, "@plex:")
+	i, n := models.DisambiguationIndex(key)
 	if i < 0 {
 		return []string{key}
 	}
-	rest := key[i+len("@plex:"):]
+	rest := key[i+n:]
 	j := strings.IndexAny(rest, "#~")
 	if j < 0 {
 		return []string{key, key[:i]}

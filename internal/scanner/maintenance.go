@@ -62,13 +62,13 @@ func (s *Service) SyncLibraries(ctx context.Context, serverID int64) error {
 
 // syncServer syncs the libraries of one server.
 func (s *Service) syncServer(ctx context.Context, srv models.MediaServer) error {
-	if srv.Kind != "" && srv.Kind != models.MediaServerPlex {
+	if !srv.Kind.Supported() {
 		return fmt.Errorf("unsupported media server kind %q", srv.Kind)
 	}
-	if s.d.PlexFactory == nil {
+	if !s.hasServerFactory() {
 		return errors.New("no media server client factory configured")
 	}
-	client := s.d.PlexFactory(srv)
+	client := s.serverClient(srv)
 	if client == nil {
 		return errors.New("no client available")
 	}

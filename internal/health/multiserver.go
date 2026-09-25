@@ -34,9 +34,10 @@ const (
 	SourceMediaServerIdentity = "MediaServerIdentityCheck"
 )
 
-// multiServer reports two or more enabled Plex servers (and readable connections).
+// multiServer reports two or more enabled media servers of a supported kind (and readable
+// connections): the servers the scan compares with each other (docs/DECISIONS.md D11).
 func (s *snapshot) multiServer() bool {
-	return s.serversOK && len(s.enabledPlexServers()) >= 2
+	return s.serversOK && len(s.enabledServers()) >= 2
 }
 
 func isSeparate(srv models.MediaServer) bool {
@@ -118,7 +119,7 @@ func (c *Checker) checkMultiServerFolders(_ context.Context, s *snapshot) []resu
 	mapper := pathmap.New(s.mappings)
 	var enabled, disabled []serverFolders
 	for _, srv := range s.servers {
-		if srv.Kind != models.MediaServerPlex && srv.Kind != "" {
+		if !srv.Kind.Supported() {
 			continue
 		}
 		if srv.Enabled {
@@ -163,7 +164,7 @@ func (c *Checker) checkArrServerLinks(_ context.Context, s *snapshot) []result {
 		return nil
 	}
 	enabled := map[int64]bool{}
-	for _, srv := range s.enabledPlexServers() {
+	for _, srv := range s.enabledServers() {
 		enabled[srv.ID] = true
 	}
 	var names []string
@@ -194,7 +195,7 @@ func (c *Checker) checkMultiServerMapping(_ context.Context, s *snapshot) []resu
 	}
 	mapper := pathmap.New(s.mappings)
 	var names []string
-	for _, srv := range s.enabledPlexServers() {
+	for _, srv := range s.enabledServers() {
 		if isSeparate(srv) {
 			continue
 		}
@@ -244,7 +245,7 @@ func (c *Checker) checkSeparateServer(ctx context.Context, s *snapshot) []result
 		return nil
 	}
 	var out []result
-	for _, srv := range s.enabledPlexServers() {
+	for _, srv := range s.enabledServers() {
 		n := last.Stats.SeparateNameMatches[srv.ID]
 		if n == 0 || !isSeparate(srv) {
 			continue
@@ -262,7 +263,7 @@ func (c *Checker) checkMediaServerIdentity(_ context.Context, s *snapshot) []res
 		return nil
 	}
 	var out []result
-	for _, srv := range s.enabledPlexServers() {
+	for _, srv := range s.enabledServers() {
 		if strings.TrimSpace(srv.MachineIdentifier) != "" {
 			continue
 		}

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sl0wz3r/dupearr/internal/events"
+	"github.com/sl0wz3r/dupearr/internal/mediaserver"
 	"github.com/sl0wz3r/dupearr/internal/models"
 	"github.com/sl0wz3r/dupearr/internal/pathmap"
 	"github.com/sl0wz3r/dupearr/internal/store"
@@ -369,20 +370,24 @@ func (s *Service) ignoreRestored(ctx context.Context, g *models.DuplicateGroup, 
 	return ok
 }
 
-// notifyPlexRestored asks Plex to scan the restored files' folders (or to refresh the item).
+// notifyPlexRestored asks Plex to scan the restored files' folders (or to refresh the item). A
+// server without these capabilities (mediaserver.FolderScanner, mediaserver.ItemRefresher) is not
+// asked, and the note says so.
 func (s *Service) notifyPlexRestored(ctx context.Context, serverID int64, sectionKey, ratingKey string, paths []string) string {
 	srv, err := s.d.Store.MediaServers().Get(ctx, serverID)
-	if err != nil || !srv.Enabled || s.d.PlexFactory == nil {
+	if err != nil || !srv.Enabled || !s.hasServerFactory() {
 		return "Plex was not notified (the media server is unavailable); scan the library to show the file again"
 	}
-	c := s.d.PlexFactory(*srv)
+	c := s.newServerClient(*srv)
 	if c == nil {
 		return "Plex was not notified"
 	}
+	fsc, canScan := c.(mediaserver.FolderScanner)
+	ir, canRefresh := c.(mediaserver.ItemRefresher)
 	if sectionKey == "" && len(paths) > 0 {
 		sectionKey = s.sectionFor(ctx, serverID, paths[0])
 	}
-	if sectionKey != "" {
+	if sectionKey != "" && canScan {
 		seen := map[string]bool{}
 		var failed error
 		for _, p := range paths {
@@ -391,7 +396,7 @@ func (s *Service) notifyPlexRestored(ctx context.Context, serverID int64, sectio
 				continue
 			}
 			seen[dir] = true
-			if err := c.ScanPath(ctx, sectionKey, dir); err != nil {
+			if err := fsc.ScanPath(ctx, sectionKey, dir); err != nil {
 				failed = err
 			}
 		}
@@ -400,8 +405,8 @@ func (s *Service) notifyPlexRestored(ctx context.Context, serverID int64, sectio
 		}
 		s.d.Log.Warn("Could not ask Plex to scan a restored folder", "error", failed)
 	}
-	if ratingKey != "" {
-		if err := c.RefreshItem(ctx, ratingKey); err == nil {
+	if ratingKey != "" && canRefresh {
+		if err := ir.RefreshItem(ctx, ratingKey); err == nil {
 			return ""
 		}
 	}
@@ -444,7 +449,8 @@ func serverDir(p string) string {
 	return d
 }
 
-// serverFromKey extracts the server id of a version key "plex:<serverID>:<mediaID>".
+// serverFromKey extracts the server id of a version key "<kind>:<serverID>:<versionID>" (Plex:
+// "plex:<serverID>:<mediaID>"; a disc found on disk: "disc:<serverID>:<hash>").
 func serverFromKey(key string) int64 {
 	parts := strings.Split(key, ":")
 	if len(parts) != 3 {

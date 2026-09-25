@@ -24,7 +24,7 @@ import (
 // machineIdentifier must equal models.MediaServer.MachineIdentifier (a server stored without one
 // is not checked). It returns a non-empty problem on a mismatch and err when the identity could
 // not be read.
-func (r *run) serverIdentityProblem(ctx context.Context, sid int64, c PlexClient) (string, error) {
+func (r *run) serverIdentityProblem(ctx context.Context, sid int64, c MediaServerClient) (string, error) {
 	srv := r.servers[sid]
 	want := strings.TrimSpace(srv.MachineIdentifier)
 	if want == "" {

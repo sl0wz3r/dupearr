@@ -1,5 +1,7 @@
 // Package plex is the Plex Media Server client (library listing, item detail → models.MediaItem,
-// media deletion, refresh) plus the plex.tv PIN sign-in flow and server discovery.
+// media deletion, refresh) plus the plex.tv PIN sign-in flow and server discovery. It implements
+// the kind-neutral internal/mediaserver contract (Client, plus the VersionDeleter, ItemRefresher
+// and FolderScanner capabilities); its listing types are aliases of that package's.
 //
 // Every request sends X-Plex-Token, X-Plex-Client-Identifier, X-Plex-Product, X-Plex-Version,
 // X-Plex-Platform, X-Plex-Device, X-Plex-Device-Name, Accept: application/json and User-Agent:
@@ -27,7 +29,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sl0wz3r/dupearr/internal/models"
+	"github.com/sl0wz3r/dupearr/internal/mediaserver"
 )
 
 // Options configures clients (PMS and plex.tv).
@@ -76,66 +78,30 @@ type Client struct {
 	showIDs sync.Map // map[string]map[string]string
 }
 
-// Identity is the server's identity (GET /, falling back to /identity).
-type Identity struct {
-	MachineIdentifier, Version, FriendlyName string
-}
-
-// Section is a library section (/library/sections).
-type Section struct {
-	Key, Type, Title, UUID string
-	Locations              []string
-	// Refreshing reports a library scan in progress; ScannedAt and ContentChangedAt are Unix
-	// seconds of the last scan and of the last change of the library's content (0 = not reported).
-	// With several media servers the executor compares them with the scan's record right before a
-	// removal (docs/DECISIONS.md D11).
-	Refreshing       bool
-	ScannedAt        int64
-	ContentChangedAt int64
-}
-
-// ItemRef is a lightweight listing row (from /library/sections/{id}/all). Listing rows include
-// Media/Part (ids, files, sizes) but not stream details; see docs/DECISIONS.md D2.
-type ItemRef struct {
-	RatingKey string
-	MediaType models.MediaType
-	Title     string
-	Year      int
-	ShowTitle string
-	Season    int    // episodes: -1 when Plex did not report the season (never confused with 0 = specials)
-	Episode   int    // episodes: 0 when not reported
-	GUID      string // plex://movie/… or legacy
-	// ExternalIDs holds "tmdb"/"imdb"/"tvdb" from Guid[] (or a legacy agent guid) and "plex"
-	// (the full plex:// GUID) when present. For episodes these are episode-level ids. Never nil.
-	ExternalIDs map[string]string
-	MediaCount  int // number of NON-optimized media
-	Media       []MediaRef
-	AddedAt     time.Time
-}
-
-// MediaRef is a Media element of a listing row.
-type MediaRef struct {
-	ID         int64
-	Optimized  bool // proxyType == 42, a "target" (optimizer profile) or a part under "/Plex Versions/"
-	Width      int
-	Height     int
-	DurationMs int64
-	Parts      []PartRef
-}
-
-// PartRef is a Part element of a listing row.
-type PartRef struct {
-	ID   int64
-	File string // path as Plex sees it
-	Size int64
-}
+// The listing types are the kind-neutral ones of internal/mediaserver (docs/CONTRACTS.md): the
+// aliases keep every existing plex.* name and value, so this client's answers are unchanged.
+type (
+	// Identity is the server's identity (GET /, falling back to /identity).
+	Identity = mediaserver.Identity
+	// Section is a library section (/library/sections).
+	Section = mediaserver.Section
+	// ItemRef is a lightweight listing row (from /library/sections/{id}/all). Listing rows include
+	// Media/Part (ids, files, sizes) but not stream details; see docs/DECISIONS.md D2.
+	ItemRef = mediaserver.ItemRef
+	// MediaRef is a Media element of a listing row (VersionID stays "": the version id is ID).
+	MediaRef = mediaserver.MediaRef
+	// PartRef is a Part element of a listing row.
+	PartRef = mediaserver.PartRef
+)
 
 // Errors. Every error returned by this package wraps one of these where applicable, so callers
 // can test with errors.Is.
 var (
-	ErrUnauthorized       = errors.New("plex: unauthorized (check token)")
-	ErrNotFound           = errors.New("plex: not found")
-	ErrDeletionNotAllowed = errors.New("plex: media deletion is disabled in Plex server settings")
+	ErrUnauthorized = errors.New("plex: unauthorized (check token)")
+	// ErrNotFound (HTTP 404, or an answer without the item) also matches mediaserver.ErrNotFound,
+	// which the kind-neutral callers test for; its text and identity are unchanged.
+	ErrNotFound           error = &notFoundError{}
+	ErrDeletionNotAllowed       = errors.New("plex: media deletion is disabled in Plex server settings")
 
 	// ErrForbidden is returned for HTTP 403 (the token is valid but lacks access, e.g. a shared
 	// user's token on an owner-only endpoint).
@@ -147,6 +113,15 @@ var (
 	// host or port). Such redirects are never followed: the server URL must be corrected instead.
 	ErrRedirect = errors.New("plex: the server redirected to another address; redirects are only followed on the same server (update the server URL)")
 )
+
+// notFoundError is ErrNotFound: one pointer (errors.Is compares it by identity) that also matches
+// mediaserver.ErrNotFound. The struct is not empty so the pointer is distinct from every other.
+type notFoundError struct{ _ byte }
+
+func (*notFoundError) Error() string { return "plex: not found" }
+
+// Is lets errors.Is(err, mediaserver.ErrNotFound) match a Plex "not found".
+func (*notFoundError) Is(target error) bool { return target == mediaserver.ErrNotFound }
 
 // StatusError is returned for unexpected HTTP statuses (other than 401/403/404, which map to
 // the sentinel errors above).

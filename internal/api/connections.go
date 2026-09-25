@@ -190,7 +190,7 @@ func validateServer(ms *models.MediaServer) []config.ValidationError {
 		ms.Kind = models.MediaServerPlex
 	}
 	errs := validateName("name", ms.Name)
-	if ms.Kind != models.MediaServerPlex {
+	if !ms.Kind.Supported() {
 		errs = append(errs, invalid("kind", "Only Plex media servers are supported"))
 	}
 	u, uerrs := normalizeBaseURL("url", ms.URL)
@@ -227,6 +227,15 @@ type mediaServerTestResult struct {
 // plexTVOwnerTimeout bounds the plex.tv ownership lookup of a connection test: plex.tv is often
 // unreachable in LAN-only setups, and the answer is optional.
 const plexTVOwnerTimeout = 5 * time.Second
+
+// testServer runs the connection test of ms's kind. Only Plex has one (validateServer refuses
+// every other kind before a test).
+func (s *Server) testServer(ctx context.Context, ms models.MediaServer) (*mediaServerTestResult, error) {
+	if !ms.Kind.IsPlex() {
+		return nil, errValidation(invalid("kind", "Only Plex media servers are supported"))
+	}
+	return s.testPlex(ctx, ms)
+}
 
 // testPlex connects to a Plex server: identity plus the allowMediaDeletion setting, and — in
 // parallel, best effort — whether plex.tv lists the token as the server owner's.
@@ -354,9 +363,10 @@ func (s *Server) ensureUniqueServer(ctx context.Context, machineID string, selfI
 const identityProbeTimeout = 10 * time.Second
 
 // probeIdentity reads the machine identifier of the server a forced save points at, best effort:
-// "" when it cannot be reached (the save goes ahead; scans, syncs and tests fill it in later).
+// "" when it cannot be reached (the save goes ahead; scans, syncs and tests fill it in later). Only
+// a Plex server is asked: the probe is a Plex request carrying the credential as X-Plex-Token.
 func (s *Server) probeIdentity(ctx context.Context, ms models.MediaServer) (id, name string) {
-	if s.d.PlexFactory == nil {
+	if s.d.PlexFactory == nil || !ms.Kind.IsPlex() {
 		return "", ""
 	}
 	ctx, cancel := context.WithTimeout(ctx, identityProbeTimeout)
@@ -423,7 +433,7 @@ func (s *Server) handleMediaServerCreate(w http.ResponseWriter, r *http.Request)
 	}
 	var tested *mediaServerTestResult
 	if !forceSave(r) {
-		res, err := s.testPlex(ctx, ms)
+		res, err := s.testServer(ctx, ms)
 		if err != nil {
 			s.writeErr(w, r, err)
 			return
@@ -485,7 +495,7 @@ func (s *Server) handleMediaServerUpdate(w http.ResponseWriter, r *http.Request)
 	}
 	var tested *mediaServerTestResult
 	if !forceSave(r) {
-		res, err := s.testPlex(ctx, in)
+		res, err := s.testServer(ctx, in)
 		if err != nil {
 			s.writeErr(w, r, err)
 			return
@@ -598,7 +608,7 @@ func (s *Server) handleMediaServerTest(w http.ResponseWriter, r *http.Request) {
 		s.writeErr(w, r, errValidation(errs...))
 		return
 	}
-	res, err := s.testPlex(ctx, in)
+	res, err := s.testServer(ctx, in)
 	if err != nil {
 		s.writeErr(w, r, err)
 		return
@@ -774,6 +784,11 @@ func (s *Server) handleMediaCover(w http.ResponseWriter, r *http.Request) {
 	ms, err := s.d.Store.MediaServers().Get(r.Context(), id)
 	if err != nil {
 		s.writeErr(w, r, notFoundAs(err, "Media server"))
+		return
+	}
+	if !ms.Kind.IsPlex() {
+		// Plex artwork only: another kind's server is never sent a Plex request with its credential.
+		s.writeErr(w, r, errNotFound("Image"))
 		return
 	}
 	if s.d.PlexFactory == nil {
@@ -1017,7 +1032,7 @@ func (s *Server) arrLinks(ctx context.Context, a *models.ArrInstance) ([]config.
 	var enabled []int64
 	for _, ms := range servers {
 		known[ms.ID] = true
-		if ms.Enabled && (ms.Kind == models.MediaServerPlex || ms.Kind == "") {
+		if ms.Enabled && ms.Kind.Supported() {
 			enabled = append(enabled, ms.ID)
 		}
 	}

@@ -298,16 +298,19 @@ func (d *DiscInfo) IsLooseClips() bool { return d != nil && IsLooseClipDisc(d.Ty
 // MediaVersion is one copy of a movie/episode (one Plex Media element, or a full-disc backup).
 type MediaVersion struct {
 	// Identity
-	Key              string `json:"key"` // "plex:<serverID>:<mediaID>", or "disc:<serverID>:<hash>" for a disc found on disk
+	Key              string `json:"key"` // "<kind>:<serverID>:<versionID>" (Plex: "plex:<serverID>:<mediaID>"), or "disc:<serverID>:<hash>" for a disc found on disk
 	ServerID         int64  `json:"serverId"`
 	LibraryID        int64  `json:"libraryId"` // Dupearr library id
 	LibraryTitle     string `json:"libraryTitle"`
-	SectionKey       string `json:"sectionKey"`       // Plex library section key
-	RatingKey        string `json:"ratingKey"`        // Plex item (movie/episode) rating key
+	SectionKey       string `json:"sectionKey"`       // the server's library id (Plex: section key)
+	RatingKey        string `json:"ratingKey"`        // the server's item (movie/episode) id (Plex: rating key)
 	MediaID          int64  `json:"mediaId"`          // Plex Media id
 	ItemTitle        string `json:"itemTitle"`        // movie title or episode title
 	DisplayTitle     string `json:"displayTitle"`     // e.g. "4K DoVi/HDR10 (HEVC Main 10)"
 	OptimizedVersion bool   `json:"optimizedVersion"` // Plex Optimized Version — never a duplicate
+	// ItemKeyID is the item's stable key id (MediaItem.KeyID) when its client sets one; "" (never
+	// for Plex) = the rating key. See KeyItemID.
+	ItemKeyID string `json:"itemKeyId,omitempty"`
 
 	Parts []MediaPart `json:"parts"`
 
@@ -363,7 +366,7 @@ type OtherListing struct {
 	LibraryTitle string `json:"libraryTitle"`
 	RatingKey    string `json:"ratingKey"`
 	MediaID      int64  `json:"mediaId"`
-	VersionKey   string `json:"versionKey"` // "plex:<serverId>:<mediaId>"
+	VersionKey   string `json:"versionKey"` // "<kind>:<serverId>:<versionId>" (Plex: "plex:<serverId>:<mediaId>")
 	ItemTitle    string `json:"itemTitle"`
 	Path         string `json:"path"` // as that server reports it
 	Match        string `json:"match"`
@@ -447,4 +450,11 @@ type MediaItem struct {
 	// GUID is the item's own Plex guid ("plex://movie/…", a legacy agent guid, or "local://…" when
 	// unmatched): play-history sources record plays under it (docs/DECISIONS.md D10).
 	GUID string `json:"guid,omitempty"`
+
+	// ServerKind is the kind of the item's media server, set by the scanner ("" = Plex): the
+	// engine builds the item's keys with it (VersionKey, ServerItemKey).
+	ServerKind MediaServerKind `json:"serverKind,omitempty"`
+	// KeyID is a stable item id for the item's keys when the server's item id can change while the
+	// content stays (a client sets it; "" = RatingKey, always for Plex). See KeyItemID.
+	KeyID string `json:"keyId,omitempty"`
 }

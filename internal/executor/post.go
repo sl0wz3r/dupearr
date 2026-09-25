@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/sl0wz3r/dupearr/internal/integrations/arr"
-	"github.com/sl0wz3r/dupearr/internal/integrations/plex"
+	"github.com/sl0wz3r/dupearr/internal/mediaserver"
 	"github.com/sl0wz3r/dupearr/internal/models"
 	"github.com/sl0wz3r/dupearr/internal/pathmap"
 )
@@ -232,13 +232,17 @@ func (r *run) plexPostActions(ctx context.Context, g *models.DuplicateGroup, rem
 	r.scanDiscFolders(ctx, g, removed)
 	byServer := involvedRatingKeys(g)
 	for _, sid := range sortedKeys(byServer) {
-		c, reason := r.plexClient(sid)
+		c, reason := r.serverClient(sid)
 		if c == nil {
 			r.s.d.Log.Warn("Cannot refresh Plex after a removal", "group", g.ID, "reason", reason)
 			continue
 		}
+		ir, ok := c.(mediaserver.ItemRefresher)
+		if !ok {
+			continue // a server without item refreshes (Plex always has them)
+		}
 		for _, rk := range byServer[sid] {
-			if err := c.RefreshItem(ctx, rk); err != nil && !errors.Is(err, plex.ErrNotFound) {
+			if err := ir.RefreshItem(ctx, rk); err != nil && !errors.Is(err, mediaserver.ErrNotFound) {
 				r.s.d.Log.Warn("Could not refresh a Plex item after a removal", "group", g.ID, "ratingKey", rk, "error", err)
 			}
 		}
@@ -248,10 +252,12 @@ func (r *run) plexPostActions(ctx context.Context, g *models.DuplicateGroup, rem
 // cleanupStaleEntry removes the Plex entry of a version whose file was removed through the *arr
 // or the filesystem, but only when Plex itself reports every part missing, none of its paths is a
 // kept path, the entry still points at the removed files and (when mapped) the files are gone.
-// Returns a note for the action ("" when nothing was worth reporting).
+// Only a client that can delete one version (mediaserver.VersionDeleter) has such entries to
+// clean. Returns a note for the action ("" when nothing was worth reporting).
 func (r *run) cleanupStaleEntry(ctx context.Context, v *models.MediaVersion, vr *verification) string {
-	c, _ := r.plexClient(v.ServerID)
-	if c == nil {
+	sc, _ := r.serverClient(v.ServerID)
+	c, ok := sc.(versionDeleter)
+	if sc == nil || !ok {
 		return ""
 	}
 	for _, k := range vr.keepers {
@@ -260,7 +266,7 @@ func (r *run) cleanupStaleEntry(ctx context.Context, v *models.MediaVersion, vr 
 		}
 	}
 	item, err := c.Item(ctx, v.RatingKey)
-	if errors.Is(err, plex.ErrNotFound) {
+	if errors.Is(err, mediaserver.ErrNotFound) {
 		return ""
 	}
 	if err != nil {
@@ -321,7 +327,7 @@ func (r *run) cleanupStaleEntry(ctx context.Context, v *models.MediaVersion, vr 
 	if problem, err := r.serverIdentityProblem(ctx, v.ServerID, c); err != nil || problem != "" {
 		return "the stale Plex entry was left in place (the media server's identity could not be confirmed)"
 	}
-	if err := c.DeleteMedia(ctx, v.RatingKey, v.MediaID); err != nil && !errors.Is(err, plex.ErrNotFound) {
+	if err := c.DeleteMedia(ctx, v.RatingKey, v.MediaID); err != nil && !errors.Is(err, mediaserver.ErrNotFound) {
 		return fmt.Sprintf("could not remove the stale Plex entry: %v", err)
 	}
 	return "removed the stale Plex entry"

@@ -108,15 +108,48 @@ func (s *snapshot) methodEnabled(method string) bool {
 	return s.settings != nil && slices.Contains(s.settings.DeletionMethods, method)
 }
 
-// enabledPlexServers returns the enabled Plex servers.
-func (s *snapshot) enabledPlexServers() []models.MediaServer {
+// enabledServers returns the enabled media servers of a supported kind (those scans read).
+func (s *snapshot) enabledServers() []models.MediaServer {
 	var out []models.MediaServer
 	for _, srv := range s.servers {
-		if srv.Enabled && (srv.Kind == models.MediaServerPlex || srv.Kind == "") {
+		if srv.Enabled && srv.Kind.Supported() {
 			out = append(out, srv)
 		}
 	}
 	return out
+}
+
+// enabledPlexServers returns the enabled Plex servers (the Plex-only checks).
+func (s *snapshot) enabledPlexServers() []models.MediaServer {
+	var out []models.MediaServer
+	for _, srv := range s.servers {
+		if srv.Enabled && srv.Kind.IsPlex() {
+			out = append(out, srv)
+		}
+	}
+	return out
+}
+
+// serverClient returns the client of a media server: from Deps.MediaServerFactory when it is set,
+// else from Deps.PlexFactory, else nil. A factory's nil stays a nil interface (the server is
+// skipped).
+func (c *Checker) serverClient(srv models.MediaServer) MediaServerClient {
+	switch {
+	case c.d.MediaServerFactory != nil:
+		if cl := c.d.MediaServerFactory(srv); cl != nil {
+			return cl
+		}
+	case c.d.PlexFactory != nil:
+		if cl := c.d.PlexFactory(srv); cl != nil {
+			return cl
+		}
+	}
+	return nil
+}
+
+// hasServerFactory reports whether a media server client factory is configured.
+func (c *Checker) hasServerFactory() bool {
+	return c.d.MediaServerFactory != nil || c.d.PlexFactory != nil
 }
 
 // enabledArrs returns the enabled *arr instances.
@@ -251,11 +284,11 @@ func (c *Checker) checkNoMediaServer(_ context.Context, s *snapshot) []result {
 }
 
 func (c *Checker) checkMediaServerConnectivity(ctx context.Context, s *snapshot) []result {
-	if c.d.PlexFactory == nil {
+	if !c.hasServerFactory() {
 		return nil
 	}
-	return forEach(c, SourceMediaServerConnectivity, s.enabledPlexServers(), serverTarget, func(srv models.MediaServer) *result {
-		client := c.d.PlexFactory(srv)
+	return forEach(c, SourceMediaServerConnectivity, s.enabledServers(), serverTarget, func(srv models.MediaServer) *result {
+		client := c.serverClient(srv)
 		if client == nil {
 			return nil
 		}
@@ -275,12 +308,12 @@ func (c *Checker) checkMediaServerConnectivity(ctx context.Context, s *snapshot)
 }
 
 func (c *Checker) checkPlexMediaDeletion(ctx context.Context, s *snapshot) []result {
-	if c.d.PlexFactory == nil || !s.methodEnabled(models.MethodPlex) {
+	if !c.hasServerFactory() || !s.methodEnabled(models.MethodPlex) {
 		return nil
 	}
 	return forEach(c, SourcePlexMediaDeletion, s.enabledPlexServers(), serverTarget, func(srv models.MediaServer) *result {
-		client := c.d.PlexFactory(srv)
-		if client == nil {
+		client, ok := c.serverClient(srv).(PlexDeletionSetting)
+		if !ok || client == nil {
 			return nil
 		}
 		allowed, err := client.MediaDeletionAllowed(ctx)
@@ -295,7 +328,7 @@ func (c *Checker) checkPlexMediaDeletion(ctx context.Context, s *snapshot) []res
 }
 
 func (c *Checker) checkPlexOwner(ctx context.Context, s *snapshot) []result {
-	if c.d.PlexFactory == nil || !s.methodEnabled(models.MethodPlex) {
+	if !c.hasServerFactory() || !s.methodEnabled(models.MethodPlex) {
 		return nil
 	}
 	return forEach(c, SourcePlexOwner, s.enabledPlexServers(), serverTarget, func(srv models.MediaServer) *result {
@@ -303,8 +336,7 @@ func (c *Checker) checkPlexOwner(ctx context.Context, s *snapshot) []result {
 		if machineID == "" {
 			return nil
 		}
-		client := c.d.PlexFactory(srv)
-		po, ok := client.(PlexOwnership)
+		po, ok := c.serverClient(srv).(PlexOwnership)
 		if !ok || po == nil {
 			return nil
 		}

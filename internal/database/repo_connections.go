@@ -123,23 +123,37 @@ func (r mediaServerRepo) Update(ctx context.Context, s *models.MediaServer) erro
 	return nil
 }
 
-// comparedServer reports an enabled Plex server that is not declared separate storage: one whose
-// versions *arr files may be matched to by raw path or by name and size (docs/DECISIONS.md D11).
+// comparedServer reports an enabled server of a supported kind that is not declared separate
+// storage: one whose versions *arr files may be matched to by raw path or by name and size
+// (docs/DECISIONS.md D11).
 func comparedServer(kind models.MediaServerKind, enabled bool, storage string) bool {
-	return enabled && (kind == models.MediaServerPlex || kind == "") &&
+	return enabled && kind.Supported() &&
 		!strings.EqualFold(strings.TrimSpace(storage), models.StorageSeparate)
 }
 
+// supportedKindsIn returns "kind IN (?, …)" over models.SupportedMediaServerKinds with its
+// arguments: the SQL form of MediaServerKind.Supported.
+func supportedKindsIn() (string, []any) {
+	kinds := models.SupportedMediaServerKinds()
+	args := make([]any, len(kinds))
+	for i, k := range kinds {
+		args[i] = k
+	}
+	return "kind IN (" + strings.TrimSuffix(strings.Repeat("?, ", len(kinds)), ", ") + ")", args
+}
+
 // unconfirmArrLinks runs in the write transaction that added, enabled or declared shared storage a
-// media server (id): when two or more Plex servers are then enabled, the *arr instances whose links
-// were confirmed without this server were confirmed while a person could not choose it (or while
-// only one server was enabled, when the links are confirmed automatically). "Not linked" would
-// then mean "untracked" for its versions, so their links count as unconfirmed again until a person
-// saves them: rules 2 and 3 stay off for the instance and the versions it may track go to review.
+// media server (id): when two or more servers of a supported kind are then enabled, the *arr
+// instances whose links were confirmed without this server were confirmed while a person could not
+// choose it (or while only one server was enabled, when the links are confirmed automatically).
+// "Not linked" would then mean "untracked" for its versions, so their links count as unconfirmed
+// again until a person saves them: rules 2 and 3 stay off for the instance and the versions it may
+// track go to review.
 func (r mediaServerRepo) unconfirmArrLinks(ctx context.Context, tx *sql.Tx, id int64) error {
 	var enabled int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM media_servers WHERE enabled = 1 AND kind IN (?, '')`,
-		models.MediaServerPlex).Scan(&enabled); err != nil {
+	kindIn, args := supportedKindsIn()
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM media_servers WHERE enabled = 1 AND `+kindIn,
+		args...).Scan(&enabled); err != nil {
 		return wrap(err, "count media servers")
 	}
 	if enabled < 2 {

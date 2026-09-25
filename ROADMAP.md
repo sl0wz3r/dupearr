@@ -57,8 +57,9 @@ still needs a design.
 ## Jellyfin and Emby
 
 - **Today:** Plex only. `models.MediaServerKind` has one value (`plex`). The scanner, the executor
-  and the health checks reach Plex through small client interfaces (`PlexFactory` in
-  [docs/CONTRACTS.md](docs/CONTRACTS.md)).
+  and the health checks reach media servers through the kind-neutral contract of
+  `internal/mediaserver` (`MediaServerFactory` in [docs/CONTRACTS.md](docs/CONTRACTS.md)); Plex is
+  its only implementation. This refactor (Phase 0) changed no behaviour.
 - **Goal:** Jellyfin and Emby behind the same media-server layer. Dupearr would collect their
   versions and ids (TMDB/IMDb/TVDB), group and decide exactly as it does for Plex, and remove files
   through the \*arr or Dupearr's recycle bin.

@@ -280,12 +280,41 @@ type Profile struct {
 // Connections
 // ---------------------------------------------------------------------------
 
-// MediaServerKind identifies a media server implementation.
+// MediaServerKind identifies a media server implementation. "" is a Plex server (rows and API
+// bodies from before kinds were checked); kinds are compared exactly ("Plex" is not "plex").
 type MediaServerKind string
 
 const (
 	MediaServerPlex MediaServerKind = "plex"
 )
+
+// IsPlex reports a Plex server: kind "plex" or "".
+func (k MediaServerKind) IsPlex() bool { return k == MediaServerPlex || k == "" }
+
+// Supported reports a kind Dupearr has a client for: its servers are scanned, compared with the
+// other servers (docs/DECISIONS.md D11) and acted on. Every such check in Dupearr asks this one
+// method, so adding a kind changes them all at once. SupportedMediaServerKinds lists the same
+// kinds for SQL (and the kinds stored keys can carry, keys.go). Adding a kind here is necessary but
+// not sufficient: docs/CONTRACTS.md "internal/mediaserver" lists what must be in place first.
+func (k MediaServerKind) Supported() bool {
+	switch k {
+	case MediaServerPlex, "":
+		return true
+	}
+	return false
+}
+
+// KeyPrefix is the kind's prefix in version and item keys ("plex:<serverID>:…"); "" is Plex.
+func (k MediaServerKind) KeyPrefix() string {
+	if k == "" {
+		return string(MediaServerPlex)
+	}
+	return string(k)
+}
+
+// SupportedMediaServerKinds returns the stored kind values Supported accepts, for SQL filters
+// ("kind IN (…)"), in the order the queries have always listed them.
+func SupportedMediaServerKinds() []string { return []string{string(MediaServerPlex), ""} }
 
 // StorageSeparate is MediaServer.Storage for a server on storage of its own (another host, a
 // friend's server): its raw paths and file names are never compared with other servers', it is
@@ -298,9 +327,9 @@ type MediaServer struct {
 	ID                int64           `json:"id"`
 	Name              string          `json:"name"`
 	Kind              MediaServerKind `json:"kind"`
-	URL               string          `json:"url"`   // e.g. http://192.168.1.10:32400
-	Token             string          `json:"token"` // X-Plex-Token (masked in API responses)
-	MachineIdentifier string          `json:"machineIdentifier"`
+	URL               string          `json:"url"`               // e.g. http://192.168.1.10:32400
+	Token             string          `json:"token"`             // the server's credential (Plex: X-Plex-Token); masked in API responses
+	MachineIdentifier string          `json:"machineIdentifier"` // server identity (Plex: machineIdentifier)
 	VerifyTLS         bool            `json:"verifyTls"`
 	Enabled           bool            `json:"enabled"`
 	// Storage is "" (the server may share storage with the other servers: compare paths) or
@@ -316,7 +345,7 @@ type Library struct {
 	ServerID   int64     `json:"serverId"`
 	SectionKey string    `json:"sectionKey"`
 	Title      string    `json:"title"`
-	Type       string    `json:"type"`      // plex section type: "movie" | "show"
+	Type       string    `json:"type"`      // "movie" | "show" (clients normalise their library kinds to these)
 	Locations  []string  `json:"locations"` // library root paths as the server sees them
 	Enabled    bool      `json:"enabled"`
 	ProfileID  *int64    `json:"profileId"`  // nil = default profile

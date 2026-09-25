@@ -16,7 +16,8 @@ import (
 // ---------------------------------------------------------------------------
 
 // ID spaces in key priority order (docs/ARCHITECTURE.md §4.2; conventions: "tmdb", "imdb",
-// "tvdb" and "plex" = the plex:// GUID).
+// "tvdb" and "plex" = the plex:// GUID). "plex" is Plex's metadata-agent namespace, an external id
+// like the others, not a media-server kind: it stays whichever server listed the item.
 func movieIDSpaces() []string   { return []string{"tmdb", "imdb", "tvdb", "plex"} }
 func episodeIDSpaces() []string { return []string{"tvdb", "tmdb", "imdb", "plex"} }
 
@@ -56,7 +57,8 @@ func firstID(ids map[string]string, spaces []string) (space, id string) {
 //   - movie:   "movie:<space>:<id>" with the first available of tmdb, imdb, tvdb, plex;
 //   - episode: "episode:<space>:<id>" from the episode's own ids (tvdb, tmdb, imdb, plex), else
 //     "episode:<showSpace>:<showId>:s<season>e<episode>" from the show ids;
-//   - fallback "plex:<serverID>:<ratingKey>".
+//   - fallback "<kind>:<serverID>:<itemID>" (models.ServerItemKey with the item's ServerKind and
+//     KeyItemID; Plex: "plex:<serverID>:<ratingKey>").
 //
 // Variant suffixes ("#ed-…", "#3d", "#lang-…") are appended by BuildGroups.
 func GroupKey(item models.MediaItem, serverID int64) string {
@@ -72,7 +74,7 @@ func GroupKey(item models.MediaItem, serverID int64) string {
 	} else if sp, id := firstID(item.ExternalIDs, movieIDSpaces()); id != "" {
 		return "movie:" + sp + ":" + id
 	}
-	return fmt.Sprintf("plex:%d:%s", serverID, strings.TrimSpace(item.RatingKey))
+	return models.ServerItemKey(item.ServerKind, serverID, item.KeyItemID())
 }
 
 // ---------------------------------------------------------------------------
@@ -244,7 +246,9 @@ func CloneOtherListings(in []models.OtherListing) []models.OtherListing {
 	return out
 }
 
-// fillVersionIdentity completes version identity fields the mapper leaves to the caller.
+// fillVersionIdentity completes version identity fields the mapper leaves to the caller. The key is
+// built with the item's server kind ("plex:<serverID>:<mediaID>" for Plex); an item with a stable
+// KeyID passes it on to its versions (ItemKeyID), so the scanner's key helpers use it too.
 func fillVersionIdentity(v *models.MediaVersion, it *models.MediaItem) {
 	if v.ServerID == 0 {
 		v.ServerID = it.ServerID
@@ -264,9 +268,12 @@ func fillVersionIdentity(v *models.MediaVersion, it *models.MediaItem) {
 	if v.ItemTitle == "" {
 		v.ItemTitle = it.Title
 	}
+	if v.ItemKeyID == "" && it.KeyID != "" {
+		v.ItemKeyID = it.KeyID
+	}
 	v.Key = strings.TrimSpace(v.Key)
-	if v.Key == "" && v.MediaID > 0 {
-		v.Key = fmt.Sprintf("plex:%d:%d", v.ServerID, v.MediaID)
+	if id := v.ServerVersionID(); v.Key == "" && id != "" {
+		v.Key = models.VersionKey(it.ServerKind, v.ServerID, id)
 	}
 }
 
@@ -603,9 +610,10 @@ func distinctLibraries(es []*itemEntry) int {
 
 // disambiguateKeys makes unit keys unique: when several units that can form a group (≥ 2
 // candidates) share a key (the same title as separate items in unrelated libraries, on several
-// servers, or as separate Plex edition items), each colliding key gets the plex identity of the
-// unit's primary item appended ("@plex:<s>:<rk>"). Units with a single candidate never produce a
-// group, so they do not force a suffix on the others (keeps keys stable across scans).
+// servers, or as separate Plex edition items), each colliding key gets the server identity of the
+// unit's primary item appended ("@<kind>:<s>:<itemID>", models.ServerItemKey; Plex:
+// "@plex:<s>:<rk>"). Units with a single candidate never produce a group, so they do not force a
+// suffix on the others (keeps keys stable across scans).
 func disambiguateKeys(units []*unit) {
 	count := map[string]int{}
 	for _, u := range units {
@@ -616,7 +624,7 @@ func disambiguateKeys(units []*unit) {
 	for _, u := range units {
 		if len(u.cands) >= 2 && count[u.key] > 1 {
 			p := u.entries[0].item
-			u.key += fmt.Sprintf("@plex:%d:%s", p.ServerID, strings.TrimSpace(p.RatingKey))
+			u.key += "@" + models.ServerItemKey(p.ServerKind, p.ServerID, p.KeyItemID())
 		}
 	}
 	sort.SliceStable(units, func(i, j int) bool {

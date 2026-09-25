@@ -48,26 +48,36 @@ import (
 	"github.com/sl0wz3r/dupearr/internal/events"
 	"github.com/sl0wz3r/dupearr/internal/fileid"
 	"github.com/sl0wz3r/dupearr/internal/integrations/arr"
-	"github.com/sl0wz3r/dupearr/internal/integrations/plex"
+	"github.com/sl0wz3r/dupearr/internal/mediaserver"
 	"github.com/sl0wz3r/dupearr/internal/models"
 	"github.com/sl0wz3r/dupearr/internal/notifications"
 	"github.com/sl0wz3r/dupearr/internal/store"
 )
 
-// PlexClient is the subset of *plex.Client the executor uses (fakes in tests).
-type PlexClient interface {
+// MediaServerClient is what the executor reads from a media server of any kind (the core of
+// mediaserver.Client it uses; docs/CONTRACTS.md "internal/mediaserver"). Everything that changes
+// the server is an optional capability, type-asserted where it is used: mediaserver.VersionDeleter
+// (the "plex" method and the stale-entry cleanup; without it the method is unavailable),
+// mediaserver.ItemRefresher and mediaserver.FolderScanner (after a removal or a restore; without
+// them the server is not asked).
+type MediaServerClient interface {
 	// Identity is read before a group is re-verified and right before every Plex delete: the
 	// server must still be the one Dupearr stored (models.MediaServer.MachineIdentifier).
-	Identity(ctx context.Context) (*plex.Identity, error)
+	Identity(ctx context.Context) (*mediaserver.Identity, error)
 	Item(ctx context.Context, ratingKey string) (*models.MediaItem, error)
-	DeleteMedia(ctx context.Context, ratingKey string, mediaID int64) error
-	RefreshItem(ctx context.Context, ratingKey string) error
-	ScanPath(ctx context.Context, sectionKey, dir string) error
-	MediaDeletionAllowed(ctx context.Context) (bool, error)
 	ActiveSessions(ctx context.Context) (map[string]bool, error)
 	// Sections is read, with two or more enabled media servers, from the other servers right before
 	// a removal: a library that changed since the scan may list the file (docs/DECISIONS.md D11).
-	Sections(ctx context.Context) ([]plex.Section, error)
+	Sections(ctx context.Context) ([]mediaserver.Section, error)
+}
+
+// PlexClient is the subset of *plex.Client the executor uses (fakes in tests): the core plus every
+// Plex capability. Deps.PlexFactory keeps this type.
+type PlexClient interface {
+	MediaServerClient
+	mediaserver.VersionDeleter // DeleteMedia, MediaDeletionAllowed
+	mediaserver.ItemRefresher  // RefreshItem
+	mediaserver.FolderScanner  // ScanPath
 }
 
 // ArrClient is the subset of *arr.Client the executor uses (fakes in tests).
@@ -91,6 +101,10 @@ type Deps struct {
 	PlexFactory func(s models.MediaServer) PlexClient
 	ArrFactory  func(a models.ArrInstance) ArrClient
 	Now         func() time.Time
+	// MediaServerFactory returns the client of a media server of any supported kind (nil when there
+	// is none for its kind). When set it is used instead of PlexFactory, which stays for tests and
+	// callers wired before the kind-neutral contract; cmd/dupearr wires only this one.
+	MediaServerFactory mediaserver.Factory
 	// Enqueue schedules a command (used to queue a TargetedScan after a stale-data skip). May be nil.
 	Enqueue func(ctx context.Context, name string, body any, trigger string) error
 	// DataDir is Dupearr's data folder (config.xml, the database, backups): the recycle bin must

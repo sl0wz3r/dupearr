@@ -12,8 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/sl0wz3r/dupearr/internal/integrations/plex"
 	"github.com/sl0wz3r/dupearr/internal/integrations/upstreamerr"
+	"github.com/sl0wz3r/dupearr/internal/mediaserver"
 	"github.com/sl0wz3r/dupearr/internal/models"
 	"github.com/sl0wz3r/dupearr/internal/pathmap"
 )
@@ -60,7 +60,7 @@ func sharedKey(p string) string {
 
 // indexedRef is one listed item with the library and server it was listed from.
 type indexedRef struct {
-	ref    plex.ItemRef
+	ref    mediaserver.ItemRef
 	lib    models.Library
 	server models.MediaServer
 	// indexOnly: listed only for the shared-file index (never a candidate or partner).
@@ -71,7 +71,7 @@ type indexedRef struct {
 type libListing struct {
 	lib       models.Library
 	server    models.MediaServer
-	refs      []plex.ItemRef
+	refs      []mediaserver.ItemRef
 	indexOnly bool
 }
 
@@ -298,7 +298,7 @@ func (p *pipeline) listLibraries(libs []models.Library, indexOnly map[int64]mode
 			p.libFailed(lib, errors.New("its media server is not enabled"))
 			continue
 		}
-		client, err := p.plexClient(srv)
+		client, err := p.serverClient(srv)
 		if err != nil {
 			p.libFailed(lib, err)
 			continue
@@ -470,7 +470,7 @@ func (p *pipeline) fetchItem(k refKey) (item *models.MediaItem, err error) {
 	if ir == nil {
 		return nil, fmt.Errorf("item %s is not in the library listing", k.rk)
 	}
-	client, err := p.plexClient(ir.server)
+	client, err := p.serverClient(ir.server)
 	if err != nil {
 		return nil, err
 	}
@@ -485,13 +485,15 @@ func (p *pipeline) fetchItem(k refKey) (item *models.MediaItem, err error) {
 	return item, nil
 }
 
-// decorate completes a fetched item: identity fields of the item and its versions (server,
-// Dupearr library, version key "plex:<serverID>:<mediaID>"), listing data the detail lacks,
-// SharedWith from the shared-file index, local paths (media-server path mappings) and, when the
-// local file exists, its hardlink count and "<device>:<inode>".
+// decorate completes a fetched item: identity fields of the item and its versions (server and its
+// kind, Dupearr library, version key "<kind>:<serverID>:<versionID>", for Plex
+// "plex:<serverID>:<mediaID>"), listing data the detail lacks, SharedWith from the shared-file
+// index, local paths (media-server path mappings) and, when the local file exists, its hardlink
+// count and "<device>:<inode>".
 func (p *pipeline) decorate(item *models.MediaItem, ir *indexedRef) {
 	srv, lib, ref := ir.server, ir.lib, &ir.ref
 	item.ServerID = srv.ID
+	item.ServerKind = srv.Kind
 	item.LibraryID = lib.ID
 	item.LibraryTitle = lib.Title
 	item.SectionKey = lib.SectionKey
@@ -552,8 +554,10 @@ func (p *pipeline) decorate(item *models.MediaItem, ir *indexedRef) {
 			v.AddedAt = item.AddedAt
 		}
 		v.Key = ""
-		if v.MediaID > 0 {
-			v.Key = fmt.Sprintf("plex:%d:%d", srv.ID, v.MediaID)
+		// ServerVersionID is the one place a kind's version id is defined (for Plex: set exactly
+		// when MediaID > 0); a version without one is not identifiable and never grouped.
+		if id := v.ServerVersionID(); id != "" {
+			v.Key = models.VersionKey(srv.Kind, srv.ID, id)
 		}
 		var placed time.Time // when the version's newest file was put in place (see fileAges)
 		unavailable := false // Plex reports a file missing that is not confirmed deleted

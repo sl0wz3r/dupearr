@@ -12,6 +12,7 @@ import (
 
 	"github.com/sl0wz3r/dupearr/internal/disc"
 	"github.com/sl0wz3r/dupearr/internal/integrations/arr"
+	"github.com/sl0wz3r/dupearr/internal/mediaserver"
 	"github.com/sl0wz3r/dupearr/internal/models"
 	"github.com/sl0wz3r/dupearr/internal/pathmap"
 )
@@ -690,12 +691,16 @@ func (r *run) scanDiscFolders(ctx context.Context, g *models.DuplicateGroup, rem
 		if dir == "" {
 			continue
 		}
-		c, reason := r.plexClient(serverOf(g, v))
+		c, reason := r.serverClient(serverOf(g, v))
 		if c == nil {
 			r.appendNote(oc.t.a, "Plex was not asked to scan the folder: "+reason)
 			continue
 		}
-		if err := c.ScanPath(ctx, v.SectionKey, dir); err != nil {
+		fsc, ok := c.(mediaserver.FolderScanner)
+		if !ok {
+			continue // a server without folder scans (Plex always has them)
+		}
+		if err := fsc.ScanPath(ctx, v.SectionKey, dir); err != nil {
 			r.appendNote(oc.t.a, fmt.Sprintf("could not ask Plex to scan %s: %v", dir, err))
 		}
 	}

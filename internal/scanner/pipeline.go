@@ -16,9 +16,9 @@ import (
 	"github.com/sl0wz3r/dupearr/internal/engine"
 	"github.com/sl0wz3r/dupearr/internal/events"
 	"github.com/sl0wz3r/dupearr/internal/fileid"
-	"github.com/sl0wz3r/dupearr/internal/integrations/plex"
 	"github.com/sl0wz3r/dupearr/internal/integrations/upstreamerr"
 	"github.com/sl0wz3r/dupearr/internal/logging"
+	"github.com/sl0wz3r/dupearr/internal/mediaserver"
 	"github.com/sl0wz3r/dupearr/internal/models"
 	"github.com/sl0wz3r/dupearr/internal/notifications"
 	"github.com/sl0wz3r/dupearr/internal/pathmap"
@@ -217,7 +217,7 @@ func (s *Service) loadScanConfig(ctx context.Context) (*scanConfig, error) {
 		}
 	}
 	for _, srv := range servers {
-		if srv.Enabled && (srv.Kind == models.MediaServerPlex || srv.Kind == "") {
+		if srv.Enabled && srv.Kind.Supported() {
 			c.servers[srv.ID] = srv
 			if isSeparate(srv) {
 				c.separate[srv.ID] = true
@@ -467,7 +467,7 @@ type pipeline struct {
 	// Several Plex servers (crossserver.go; only with scanConfig.multi).
 	fileIDs *fileid.Prober
 	// sections are the libraries each enabled server reported in this run (readSections).
-	sections map[int64][]plex.Section
+	sections map[int64][]mediaserver.Section
 	// indexed: the libraries whose listing is in this run's index (scanned or index-only); only
 	// they are recorded as compared in a group's cross-server record.
 	indexed map[int64]bool
@@ -483,10 +483,10 @@ type pipeline struct {
 	// crossGroups are the ids of groups this run stored whose versions other servers list.
 	crossGroups []int64
 
-	mu          sync.Mutex // guards run.Stats, failedRKs, the maps written by workers and clients
-	progMu      sync.Mutex // serializes progress callbacks
-	plexClients map[int64]PlexClient
-	plexErrs    map[int64]error
+	mu            sync.Mutex // guards run.Stats, failedRKs, the maps written by workers and clients
+	progMu        sync.Mutex // serializes progress callbacks
+	serverClients map[int64]MediaServerClient
+	serverErrs    map[int64]error
 }
 
 func newPipeline(ctx context.Context, s *Service, run *models.ScanRun, progress func(string)) *pipeline {
@@ -515,10 +515,10 @@ func newPipeline(ctx context.Context, s *Service, run *models.ScanRun, progress 
 		discNearby:          map[refKey]bool{},
 		protect:             map[int64]bool{},
 		unsafeLibs:          map[int64]bool{},
-		plexClients:         map[int64]PlexClient{},
-		plexErrs:            map[int64]error{},
+		serverClients:       map[int64]MediaServerClient{},
+		serverErrs:          map[int64]error{},
 
-		sections:      map[int64][]plex.Section{},
+		sections:      map[int64][]mediaserver.Section{},
 		indexed:       map[int64]bool{},
 		unreadServers: map[int64]string{},
 		identities:    map[int64]string{},
@@ -564,32 +564,32 @@ func (p *pipeline) addError() {
 	p.mu.Unlock()
 }
 
-// plexClient returns (and caches) the client of a server. The server's identity is verified
+// serverClient returns (and caches) the client of a server. The server's identity is verified
 // once per run against the stored machine identifier: a different Plex server answering at the
 // configured URL must never be scanned with another server's libraries, profiles and groups.
-func (p *pipeline) plexClient(srv models.MediaServer) (PlexClient, error) {
+func (p *pipeline) serverClient(srv models.MediaServer) (MediaServerClient, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if c, ok := p.plexClients[srv.ID]; ok {
+	if c, ok := p.serverClients[srv.ID]; ok {
 		return c, nil
 	}
-	if err, ok := p.plexErrs[srv.ID]; ok {
+	if err, ok := p.serverErrs[srv.ID]; ok {
 		return nil, err
 	}
-	c, err := p.newPlexClient(srv)
+	c, err := p.newServerClient(srv)
 	if err != nil {
-		p.plexErrs[srv.ID] = err
+		p.serverErrs[srv.ID] = err
 		return nil, err
 	}
-	p.plexClients[srv.ID] = c
+	p.serverClients[srv.ID] = c
 	return c, nil
 }
 
-func (p *pipeline) newPlexClient(srv models.MediaServer) (PlexClient, error) {
-	if p.s.d.PlexFactory == nil {
+func (p *pipeline) newServerClient(srv models.MediaServer) (MediaServerClient, error) {
+	if !p.s.hasServerFactory() {
 		return nil, errors.New("no media server client factory configured")
 	}
-	c := p.s.d.PlexFactory(srv)
+	c := p.s.serverClient(srv)
 	if c == nil {
 		return nil, fmt.Errorf("media server %q: no client available", srv.Name)
 	}

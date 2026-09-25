@@ -12,7 +12,7 @@ import (
 
 	"github.com/sl0wz3r/dupearr/internal/disc"
 	"github.com/sl0wz3r/dupearr/internal/integrations/arr"
-	"github.com/sl0wz3r/dupearr/internal/integrations/plex"
+	"github.com/sl0wz3r/dupearr/internal/mediaserver"
 	"github.com/sl0wz3r/dupearr/internal/models"
 )
 
@@ -35,8 +35,15 @@ type arrTarget struct {
 	recycleBin string // "" = permanent
 }
 
+// versionDeleter is a media server client with the mediaserver.VersionDeleter capability: the only
+// kind of client the "plex" method removes through.
+type versionDeleter interface {
+	MediaServerClient
+	mediaserver.VersionDeleter
+}
+
 type plexTarget struct {
-	client    PlexClient
+	client    versionDeleter
 	server    models.MediaServer
 	ratingKey string
 	mediaID   int64
@@ -177,11 +184,17 @@ func (r *run) arrChoice(v *models.MediaVersion) (c *methodChoice, why string, st
 // the Plex item keeps another version afterwards.
 func (r *run) plexChoice(v *models.MediaVersion, vr *verification) (*methodChoice, string) {
 	sid := v.ServerID
-	c, reason := r.plexClient(sid)
-	if c == nil {
+	sc, reason := r.serverClient(sid)
+	if sc == nil {
 		return nil, reason
 	}
 	srv := r.servers[sid]
+	// Structurally unavailable for a server that cannot delete one version (docs/research/
+	// jellyfin-emby.md §5.1): never another server call instead. Every Plex client can.
+	c, ok := sc.(versionDeleter)
+	if !ok {
+		return nil, fmt.Sprintf("%s cannot delete single versions", srv.Name)
+	}
 	switch {
 	case v.Disc != nil:
 		return nil, "a full-disc backup is never removed through Plex"
@@ -398,7 +411,7 @@ func (r *run) performPlex(t *target, pt *plexTarget, lv *verifiedVersion) perfor
 	err := pt.client.DeleteMedia(r.ctx, pt.ratingKey, pt.mediaID)
 	switch {
 	case err == nil:
-	case errors.Is(err, plex.ErrNotFound):
+	case errors.Is(err, mediaserver.ErrNotFound):
 		return performResult{stale: fmt.Sprintf("Plex no longer has media %d of item %s", pt.mediaID, pt.ratingKey)}
 	case r.ctx.Err() != nil:
 		return performResult{err: fmt.Errorf("cancelled while Plex was deleting %s; check whether the file still exists: %w", paths, err)}

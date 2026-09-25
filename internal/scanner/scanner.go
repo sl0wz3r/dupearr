@@ -67,12 +67,23 @@ import (
 	"github.com/sl0wz3r/dupearr/internal/integrations/arr"
 	"github.com/sl0wz3r/dupearr/internal/integrations/plex"
 	"github.com/sl0wz3r/dupearr/internal/integrations/tautulli"
+	"github.com/sl0wz3r/dupearr/internal/mediaserver"
 	"github.com/sl0wz3r/dupearr/internal/models"
 	"github.com/sl0wz3r/dupearr/internal/notifications"
 	"github.com/sl0wz3r/dupearr/internal/store"
 )
 
-// PlexClient is the subset of *plex.Client the scanner uses (fakes in tests).
+// MediaServerClient is what the scanner reads from a media server of any kind (the core of
+// mediaserver.Client it uses; docs/CONTRACTS.md "internal/mediaserver").
+type MediaServerClient interface {
+	Identity(ctx context.Context) (*mediaserver.Identity, error)
+	Sections(ctx context.Context) ([]mediaserver.Section, error)
+	AllItems(ctx context.Context, sectionKey string, mt models.MediaType) ([]mediaserver.ItemRef, error)
+	Item(ctx context.Context, ratingKey string) (*models.MediaItem, error)
+}
+
+// PlexClient is the subset of *plex.Client the scanner uses (fakes in tests). It is
+// MediaServerClient plus DuplicateItems, which no scan calls; Deps.PlexFactory keeps this type.
 type PlexClient interface {
 	Identity(ctx context.Context) (*plex.Identity, error)
 	Sections(ctx context.Context) ([]plex.Section, error)
@@ -105,6 +116,11 @@ type Deps struct {
 	Notifier    *notifications.Service // may be nil in tests
 	PlexFactory func(s models.MediaServer) PlexClient
 	ArrFactory  func(a models.ArrInstance) ArrClient
+	// MediaServerFactory (additive to docs/CONTRACTS.md) returns the client of a media server of
+	// any supported kind (nil when there is none for its kind). When set it is used instead of
+	// PlexFactory, which stays for tests and callers wired before the kind-neutral contract;
+	// cmd/dupearr wires only this one.
+	MediaServerFactory mediaserver.Factory
 	// TautulliFactory (additive to docs/CONTRACTS.md) returns the play-history client of a Tautulli
 	// connection (docs/DECISIONS.md D10). nil: a configured, enabled connection cannot be read, and
 	// its server's versions get a "failed" play history.
@@ -126,6 +142,27 @@ type Deps struct {
 	// cross-server index (docs/DECISIONS.md D11). nil = fileid.Default() per scan (tests inject a
 	// prober that declares the test tree's filesystem type).
 	FileIdentity *fileid.Prober
+}
+
+// serverClient returns a new client for srv: from MediaServerFactory when it is set, else from
+// PlexFactory, else nil. A factory's nil stays a nil interface.
+func (s *Service) serverClient(srv models.MediaServer) MediaServerClient {
+	switch {
+	case s.d.MediaServerFactory != nil:
+		if c := s.d.MediaServerFactory(srv); c != nil {
+			return c
+		}
+	case s.d.PlexFactory != nil:
+		if c := s.d.PlexFactory(srv); c != nil {
+			return c
+		}
+	}
+	return nil
+}
+
+// hasServerFactory reports whether a media server client factory is configured.
+func (s *Service) hasServerFactory() bool {
+	return s.d.MediaServerFactory != nil || s.d.PlexFactory != nil
 }
 
 // fileIdentity returns the file identity prober of a scan.

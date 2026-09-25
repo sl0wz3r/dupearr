@@ -10,8 +10,8 @@ import (
 
 	"github.com/sl0wz3r/dupearr/internal/engine"
 	"github.com/sl0wz3r/dupearr/internal/fileid"
-	"github.com/sl0wz3r/dupearr/internal/integrations/plex"
 	"github.com/sl0wz3r/dupearr/internal/integrations/upstreamerr"
+	"github.com/sl0wz3r/dupearr/internal/mediaserver"
 	"github.com/sl0wz3r/dupearr/internal/models"
 	"github.com/sl0wz3r/dupearr/internal/pathmap"
 	"github.com/sl0wz3r/dupearr/internal/store"
@@ -40,7 +40,7 @@ import (
 // never be proven; the executor proves distinctness on open files right before a removal.
 
 // readSections reads the libraries of every enabled server (its identity is confirmed first by
-// plexClient). A server that cannot be read, or a server with a movie or TV library Dupearr has
+// serverClient). A server that cannot be read, or a server with a movie or TV library Dupearr has
 // not synced (it would not be listed), is recorded as unread; for a separate server only such a
 // library with a mapped folder counts (only its mapped folders are compared, and unreadAffects
 // limits the effect to the groups with files under them).
@@ -51,13 +51,13 @@ func (p *pipeline) readSections() {
 		}
 		srv := p.cfg.servers[id]
 		p.identities[id] = strings.TrimSpace(srv.MachineIdentifier)
-		client, err := p.plexClient(srv)
+		client, err := p.serverClient(srv)
 		if err != nil {
 			p.markUnread(id, strings.TrimPrefix(upstreamerr.Message(err), fmt.Sprintf("media server %q: ", srv.Name)))
 			continue
 		}
 		if p.identities[id] == "" {
-			// plexClient may just have stored the identity the server answered with.
+			// serverClient may just have stored the identity the server answered with.
 			if cur, err := p.s.d.Store.MediaServers().Get(p.ctx, id); err == nil {
 				p.identities[id] = strings.TrimSpace(cur.MachineIdentifier)
 			}
@@ -113,7 +113,7 @@ func (p *pipeline) markUnread(id int64, why string) {
 // The folders compared for a separate server are the ones stored by the last library sync plus
 // the ones the server reported in this run (sections, readSections): a library whose folders
 // changed on the server since the sync is compared by both.
-func (c *scanConfig) crossServerPartners(selected map[int64]models.Library, sections map[int64][]plex.Section) map[int64]models.Library {
+func (c *scanConfig) crossServerPartners(selected map[int64]models.Library, sections map[int64][]mediaserver.Section) map[int64]models.Library {
 	out := map[int64]models.Library{}
 	if !c.multi || len(selected) == 0 {
 		return out
@@ -168,7 +168,7 @@ func (c *scanConfig) mappedFolders(id int64, locations []string) []string {
 
 // libraryFolders returns the mapped local folders of library l: the stored ones and the ones its
 // server reported for its section in this run (sections), which may be newer than the last sync.
-func (c *scanConfig) libraryFolders(l models.Library, sections map[int64][]plex.Section) []string {
+func (c *scanConfig) libraryFolders(l models.Library, sections map[int64][]mediaserver.Section) []string {
 	out := c.localFolders(l)
 	for _, sec := range sections[l.ServerID] {
 		if strings.TrimSpace(sec.Key) == strings.TrimSpace(l.SectionKey) {
@@ -180,7 +180,7 @@ func (c *scanConfig) libraryFolders(l models.Library, sections map[int64][]plex.
 
 // serverFolders returns every mapped local folder of server id's movie and TV libraries: stored
 // by the last sync or reported in this run (sections), synced or not.
-func (c *scanConfig) serverFolders(id int64, sections map[int64][]plex.Section) []string {
+func (c *scanConfig) serverFolders(id int64, sections map[int64][]mediaserver.Section) []string {
 	var out []string
 	for _, l := range c.libraries {
 		if l.ServerID == id && mediaTypeOf(l.Type) != "" {
@@ -231,8 +231,8 @@ func (c *scanConfig) serverMapped(id int64) bool {
 // xref is one part of one listed media of another server's item.
 type xref struct {
 	ir    *indexedRef
-	media *plex.MediaRef
-	part  plex.PartRef
+	media *mediaserver.MediaRef
+	part  mediaserver.PartRef
 	local string // mapped local path ("" when unmapped)
 }
 
@@ -346,10 +346,14 @@ func (p *pipeline) identityOf(local string) (fileid.Info, error) {
 // Annotation
 // ---------------------------------------------------------------------------
 
-// listingKey identifies a media of another server.
+// listingKey identifies a media of another server. media is the numeric media id, which keeps the
+// stored order of OtherServers (by server, then Plex media id); version is its version id
+// (mediaserver.VersionIDOf), which tells apart the versions of a server whose ids are not numbers
+// (media 0). For Plex, version follows from media, so it never changes a key or the order.
 type listingKey struct {
-	server int64
-	media  int64
+	server  int64
+	media   int64
+	version string
 }
 
 // annotateCrossServer attaches OtherServers to every version of groups and stores each group's
@@ -417,7 +421,7 @@ func (p *pipeline) otherListings(g *models.DuplicateGroup, v *models.MediaVersio
 		if x.ir.server.ID == v.ServerID {
 			return // the same server: the shared-file index and same-file rules apply
 		}
-		k := listingKey{server: x.ir.server.ID, media: x.media.ID}
+		k := listingKey{server: x.ir.server.ID, media: x.media.ID, version: mediaserver.VersionIDOf(x.media)}
 		a := found[k]
 		if a == nil {
 			a = &agg{x: x}
@@ -508,7 +512,10 @@ func (p *pipeline) otherListings(g *models.DuplicateGroup, v *models.MediaVersio
 		if order[i].server != order[j].server {
 			return order[i].server < order[j].server
 		}
-		return order[i].media < order[j].media
+		if order[i].media != order[j].media {
+			return order[i].media < order[j].media
+		}
+		return order[i].version < order[j].version
 	})
 	out := make([]models.OtherListing, 0, len(order))
 	for _, k := range order {
@@ -545,15 +552,16 @@ func (p *pipeline) listingFor(g *models.DuplicateGroup, x *xref, same bool) mode
 	}
 	e := models.OtherListing{
 		ServerID: ir.server.ID, ServerName: ir.server.Name, LibraryID: ir.lib.ID, LibraryTitle: ir.lib.Title,
-		RatingKey: ir.ref.RatingKey, MediaID: x.media.ID, VersionKey: fmt.Sprintf("plex:%d:%d", ir.server.ID, x.media.ID),
-		ItemTitle: refLabel(&ir.ref), Path: x.part.File, Match: match,
+		RatingKey: ir.ref.RatingKey, MediaID: x.media.ID, ItemTitle: refLabel(&ir.ref), Path: x.part.File, Match: match,
 	}
+	e.VersionKey = models.VersionKey(ir.server.Kind, ir.server.ID, mediaserver.VersionIDOf(x.media))
 	for mi := range ir.ref.Media {
 		o := &ir.ref.Media[mi]
-		if o.ID == x.media.ID || o.Optimized || len(o.Parts) == 0 {
+		if mediaserver.VersionIDOf(o) == mediaserver.VersionIDOf(x.media) || o.Optimized || len(o.Parts) == 0 {
 			continue
 		}
-		om := models.OtherMedia{MediaID: o.ID, VersionKey: fmt.Sprintf("plex:%d:%d", ir.server.ID, o.ID), Path: o.Parts[0].File}
+		om := models.OtherMedia{MediaID: o.ID, VersionKey: models.VersionKey(ir.server.Kind, ir.server.ID, mediaserver.VersionIDOf(o)),
+			Path: o.Parts[0].File}
 		for i := range g.Files {
 			w := &g.Files[i].Version
 			rel, hint := p.mediaRelation(ir.server, o, w)
@@ -574,7 +582,7 @@ func (p *pipeline) listingFor(g *models.DuplicateGroup, x *xref, same bool) mode
 }
 
 // refLabel is a short human label of a listed item ("Heat (1995)", "Show S01E02").
-func refLabel(r *plex.ItemRef) string {
+func refLabel(r *mediaserver.ItemRef) string {
 	switch {
 	case r.MediaType == models.MediaTypeEpisode && r.ShowTitle != "":
 		return r.ShowTitle + " " + engine.EpisodeLabel(r.Season, r.Episode)
@@ -597,7 +605,7 @@ const (
 // be) w's file, relDistinct when every part pair could be proven different files (both mapped,
 // same device, allowlisted filesystem type, different inodes), otherwise relUnknown with a hint
 // saying what would let Dupearr tell them apart.
-func (p *pipeline) mediaRelation(srv models.MediaServer, o *plex.MediaRef, w *models.MediaVersion) (int, string) {
+func (p *pipeline) mediaRelation(srv models.MediaServer, o *mediaserver.MediaRef, w *models.MediaVersion) (int, string) {
 	oSep, wSep := p.cfg.separate[srv.ID], p.cfg.separate[w.ServerID]
 	distinct := len(o.Parts) > 0 && len(w.Parts) > 0 && w.Disc == nil
 	hint := ""

@@ -57,6 +57,9 @@ func (d *DB) upgradeArrLinks(ctx context.Context) error {
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM arr_instances`).Scan(&instances); err != nil {
 			return wrap(err, "upgrade *arr links: count instances")
 		}
+		// The Plex kinds are a literal on purpose (not models.SupportedMediaServerKinds): this is the
+		// frozen one-time D11 upgrade, and whether a later kind takes part in it is decided with that
+		// kind, never as a side effect of supporting it.
 		servers, err := queryAll(ctx, tx, func(s scanner) (int64, error) {
 			var id int64
 			err := s.Scan(&id)

@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/sl0wz3r/dupearr/internal/engine"
-	"github.com/sl0wz3r/dupearr/internal/integrations/plex"
 	"github.com/sl0wz3r/dupearr/internal/integrations/upstreamerr"
+	"github.com/sl0wz3r/dupearr/internal/mediaserver"
 	"github.com/sl0wz3r/dupearr/internal/models"
 	"github.com/sl0wz3r/dupearr/internal/store"
 )
@@ -152,7 +152,7 @@ func (p *pipeline) runTargeted(body models.TargetedScanBody) error {
 		if len(body.RatingKeys) == 0 {
 			break
 		}
-		client, err := p.plexClient(srv)
+		client, err := p.serverClient(srv)
 		if err != nil {
 			for _, rk := range body.RatingKeys {
 				p.itemFailed(refKey{server: srv.ID, rk: rk}, err)
@@ -165,8 +165,8 @@ func (p *pipeline) runTargeted(body models.TargetedScanBody) error {
 			switch {
 			case p.ctx.Err() != nil:
 				return canceled(p.ctx.Err())
-			case errors.Is(err, plex.ErrNotFound):
-				gone[k] = true // deleted from Plex: its groups may be resolved
+			case errors.Is(err, mediaserver.ErrNotFound):
+				gone[k] = true // deleted from the server: its groups may be resolved
 				continue
 			case err != nil:
 				p.itemFailed(k, fmt.Errorf("item %s: %w", rk, err))

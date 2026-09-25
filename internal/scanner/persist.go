@@ -134,9 +134,10 @@ func (p *pipeline) persistGroup(g *models.DuplicateGroup) {
 }
 
 // lookupStored finds the stored state of a freshly built group (groupMu held). Group keys are
-// content identities, but the engine appends "@plex:<server>:<ratingKey>" to a key several
-// titles share only while they collide, so the same content can come back under another key
-// (and a targeted scan, which sees fewer titles, disambiguates differently than a full scan).
+// content identities, but the engine appends "@<kind>:<server>:<itemID>" (Plex:
+// "@plex:<server>:<ratingKey>") to a key several titles share only while they collide, so the
+// same content can come back under another key (and a targeted scan, which sees fewer titles,
+// disambiguates differently than a full scan).
 // Therefore:
 //
 //   - a stored open or ignored group of the key that shares no item with g belongs to other
@@ -307,7 +308,7 @@ func (inh inheritance) apply(g *models.DuplicateGroup) {
 }
 
 // adoptable returns the stored group of the same content as g under the other form of its key
-// (with or without the engine's "@plex:…" disambiguation), or nil when there is none or several.
+// (with or without the engine's "@<kind>:…" disambiguation), or nil when there is none or several.
 func adoptable(g *models.DuplicateGroup, preds []models.DuplicateGroup) *models.DuplicateGroup {
 	want := stripDisambiguation(g.Key)
 	var found *models.DuplicateGroup
@@ -353,21 +354,23 @@ func splitGroupKey(key string) (base, suffix string) {
 	return key, ""
 }
 
-// stripDisambiguation removes the engine's "@plex:<server>:<ratingKey>" collision suffix.
+// stripDisambiguation removes the engine's "@<kind>:<server>:<itemID>" collision suffix
+// (models.DisambiguationIndex; Plex: "@plex:<server>:<ratingKey>").
 func stripDisambiguation(key string) string {
 	base, suffix := splitGroupKey(key)
-	if i := strings.Index(base, "@plex:"); i >= 0 {
+	if i, _ := models.DisambiguationIndex(base); i >= 0 {
 		base = base[:i]
 	}
 	return base + suffix
 }
 
 // disambiguatedKey returns g's key with the engine's collision suffix
-// ("<base>@plex:<server>:<ratingKey><variant>", rating key of the primary item: lowest library,
-// server, then rating key), or the key unchanged when it already carries one.
+// ("<base>@<kind>:<server>:<itemID><variant>" of the primary item: lowest library, server, then
+// rating key; Plex: "<base>@plex:<server>:<ratingKey><variant>"), or the key unchanged when it
+// already carries one.
 func disambiguatedKey(g *models.DuplicateGroup) string {
 	base, suffix := splitGroupKey(g.Key)
-	if strings.Contains(base, "@plex:") {
+	if i, _ := models.DisambiguationIndex(base); i >= 0 {
 		return g.Key
 	}
 	var primary *models.MediaVersion
@@ -383,7 +386,23 @@ func disambiguatedKey(g *models.DuplicateGroup) string {
 	if primary == nil {
 		return g.Key
 	}
-	return fmt.Sprintf("%s@plex:%d:%s%s", base, primary.ServerID, strings.TrimSpace(primary.RatingKey), suffix)
+	return base + "@" + models.ServerItemKey(serverKindIn(g, primary.ServerID), primary.ServerID, primary.KeyItemID()) + suffix
+}
+
+// serverKindIn returns the kind of media server serverID as the version keys of g name it; a group
+// whose versions of that server carry no media-server key (only discs found on disk, or no key)
+// is Plex's, the only kind stored groups had before kinds were part of keys.
+func serverKindIn(g *models.DuplicateGroup, serverID int64) models.MediaServerKind {
+	for i := range g.Files {
+		v := &g.Files[i].Version
+		if v.ServerID != serverID {
+			continue
+		}
+		if k, ok := models.KindOfVersionKey(v.Key); ok {
+			return k
+		}
+	}
+	return models.MediaServerPlex
 }
 
 // versionItemLess orders versions by their item like the engine orders a unit's items.

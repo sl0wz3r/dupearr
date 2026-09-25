@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/sl0wz3r/dupearr/internal/fileid"
-	"github.com/sl0wz3r/dupearr/internal/integrations/plex"
+	"github.com/sl0wz3r/dupearr/internal/mediaserver"
 	"github.com/sl0wz3r/dupearr/internal/models"
 	"github.com/sl0wz3r/dupearr/internal/pathmap"
 )
@@ -35,7 +35,7 @@ import (
 func (r *run) multiServer() bool {
 	n := 0
 	for _, s := range r.servers {
-		if s.Enabled && (s.Kind == models.MediaServerPlex || s.Kind == "") {
+		if s.Enabled && s.Kind.Supported() {
 			n++
 		}
 	}
@@ -46,7 +46,7 @@ func (r *run) multiServer() bool {
 func (r *run) enabledServerIDs() []int64 {
 	var out []int64
 	for _, id := range sortedKeys(r.servers) {
-		if s := r.servers[id]; s.Enabled && (s.Kind == models.MediaServerPlex || s.Kind == "") {
+		if s := r.servers[id]; s.Enabled && s.Kind.Supported() {
 			out = append(out, id)
 		}
 	}
@@ -127,7 +127,7 @@ func (r *run) otherServerProblem(g *models.DuplicateGroup, targets []*target, vr
 			if !ok || !srv.Enabled {
 				continue // a server deleted or disabled since is not protected (M23)
 			}
-			c, reason := r.plexClient(e.ServerID)
+			c, reason := r.serverClient(e.ServerID)
 			if reason != "" {
 				out.wait = fmt.Sprintf("cannot check %s, which lists %s: %s", srv.Name, describeVersion(&t.file.Version), reason)
 				return out
@@ -144,10 +144,16 @@ func (r *run) otherServerProblem(g *models.DuplicateGroup, targets []*target, vr
 					return out
 				}
 				for _, t2 := range targets {
-					for _, e2 := range t2.file.Version.OtherServers {
-						if e2.ServerID == e.ServerID && sessions[strings.TrimSpace(e2.RatingKey)] {
-							out.wait, out.playing = fmt.Sprintf("%s is playing %s", srv.Name, e2.ItemTitle), true
-							return out
+					for k2 := range t2.file.Version.OtherServers {
+						e2 := &t2.file.Version.OtherServers[k2]
+						if e2.ServerID != e.ServerID {
+							continue
+						}
+						for _, id := range listingPlayingIDs(e2) {
+							if sessions[id] {
+								out.wait, out.playing = fmt.Sprintf("%s is playing %s", srv.Name, e2.ItemTitle), true
+								return out
+							}
 						}
 					}
 				}
@@ -159,7 +165,7 @@ func (r *run) otherServerProblem(g *models.DuplicateGroup, targets []*target, vr
 				it, err = c.Item(r.ctx, ref.ratingKey)
 				switch {
 				case err == nil && it != nil:
-				case err == nil || errors.Is(err, plex.ErrNotFound):
+				case err == nil || errors.Is(err, mediaserver.ErrNotFound):
 					out.wait = fmt.Sprintf("%s no longer lists item %s (%s), which listed %s; waiting for its next scan",
 						srv.Name, e.RatingKey, e.ItemTitle, describeVersion(&t.file.Version))
 					return out
@@ -182,7 +188,7 @@ func (r *run) otherServerProblem(g *models.DuplicateGroup, targets []*target, vr
 // otherIdentity confirms another server's identity: a server stored without a machine identifier
 // cannot be confirmed (M26: another server at its URL could answer), so the group waits; a
 // different identity is a problem.
-func (r *run) otherIdentity(srv models.MediaServer, c PlexClient) (wait, problem string, failure bool) {
+func (r *run) otherIdentity(srv models.MediaServer, c MediaServerClient) (wait, problem string, failure bool) {
 	if strings.TrimSpace(srv.MachineIdentifier) == "" {
 		return fmt.Sprintf("the media server %s is stored without its identity, so its answers cannot be trusted; test and save it (Settings → Media Servers)", srv.Name), "", false
 	}
@@ -223,7 +229,7 @@ func (r *run) sectionsProblem(g *models.DuplicateGroup, targets []*target) cross
 		if sep && !r.serverHasMapping(id) {
 			continue // only its mapped folders are compared (docs/DECISIONS.md D11)
 		}
-		c, reason := r.plexClient(id)
+		c, reason := r.serverClient(id)
 		if reason != "" {
 			out.wait = fmt.Sprintf("cannot check the libraries of %s: %s", srv.Name, reason)
 			return out

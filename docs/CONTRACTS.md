@@ -155,6 +155,95 @@ func Normalize(p string) string
 func Stat(local string) (size int64, linkCount int, err error)
 ```
 
+## internal/models (added: media-server kinds and keys, issue #4 Phase 0)
+```go
+func (k MediaServerKind) IsPlex() bool     // "plex" or "" (rows and bodies from before kinds were checked)
+// Supported: a kind Dupearr has a client for (scanned, compared across servers — D11 —, acted on).
+// Every such check asks it (scanner, executor, health, API, database), so a new kind changes them
+// together. Phase 0: exactly IsPlex; kinds are compared exactly ("Plex" is not supported).
+// Necessary, not sufficient, for a new kind: see "Phase 1 prerequisites" under internal/mediaserver.
+func (k MediaServerKind) Supported() bool
+func (k MediaServerKind) KeyPrefix() string // "plex" for ""
+func SupportedMediaServerKinds() []string   // ["plex", ""]: the SQL form of Supported ("kind IN (…)")
+// Keys (docs/ARCHITECTURE.md §4.1, §4.2). For Plex byte-identical to the legacy fmt.Sprintf forms.
+func VersionKey(kind MediaServerKind, serverID int64, versionID string) string    // "<kind>:<serverID>:<versionID>"
+func ServerItemKey(kind MediaServerKind, serverID int64, itemID string) string    // "<kind>:<serverID>:<itemID>"
+// The kinds stored keys can carry are those of SupportedMediaServerKinds (one per prefix; Phase 0:
+// plex), so a kind added there is also recognised here; a kind ever dropped there while its keys
+// are stored must stay recognised.
+func DisambiguationIndex(s string) (i, n int) // first "@<kind>:" of a kind stored keys can carry; -1, 0 = none
+func KindOfVersionKey(key string) (MediaServerKind, bool) // "plex:…" → plex; "disc:…" and unknown kinds → false
+// MediaItem: ServerKind MediaServerKind `json:"serverKind,omitempty"` (set by the scanner; "" = Plex)
+//            KeyID string `json:"keyId,omitempty"` (a stable item id for keys; "" = RatingKey, always for Plex)
+// MediaVersion: ItemKeyID string `json:"itemKeyId,omitempty"` (the item's KeyID; never set for Plex)
+func (it *MediaItem) KeyItemID() string       // trimmed KeyID, else trimmed RatingKey
+func (v *MediaVersion) KeyItemID() string     // trimmed ItemKeyID, else trimmed RatingKey
+// ServerVersionID: the Plex media id when > 0, else "". A version gets a version key exactly when it
+// is non-empty (scanner decorate, engine fillVersionIdentity): the one place a kind's id is added.
+func (v *MediaVersion) ServerVersionID() string
+```
+The new fields are omitted while empty, so stored versions and API answers keep their bytes for
+Plex. Q11 (research `jellyfin-emby.md` §7), decided for Phase 1: a Jellyfin item's `KeyID` is the
+lexicographically smallest media source id among the row's file versions in the row's library. It
+depends only on which files exist (ids are MD5 of type + path, reproducible), not on which version
+Jellyfin makes the primary (S9) or on merges; it changes only when that file leaves or a file with a
+smaller id arrives, and either changes the group's signature anyway (`adoptable` keeps the stored
+key when the base key and content still match). Prerequisite: `sameContent`, `adoptable` and
+`inherit` must also accept a shared non-Plex version key; until then `KeyID` stays empty.
+
+## internal/mediaserver (added, issue #4 Phase 0 — types and contracts only; imports models)
+```go
+// The listing types (fields unchanged from the Plex era; integrations/plex aliases them).
+type Identity struct { MachineIdentifier, Version, FriendlyName string } // MachineIdentifier: the server's stable identity
+type Section  struct { Key, Type, Title, UUID string; Locations []string // Type "movie" | "show"
+    Refreshing bool; ScannedAt, ContentChangedAt int64 }                 // 0/false when the server does not report them (D11 then refuses: see below)
+type ItemRef  struct { RatingKey string /* the server's item id */; MediaType models.MediaType; Title string; Year int
+    ShowTitle string; Season, Episode int; GUID string; ExternalIDs map[string]string; MediaCount int
+    Media []MediaRef; AddedAt time.Time }
+type MediaRef struct { ID int64; Optimized bool; Width, Height int; DurationMs int64; Parts []PartRef
+    VersionID string } // VersionID: the server's version id when it is not a Plex media id ("" for Plex)
+type PartRef  struct { ID int64; File string; Size int64 }
+func VersionIDOf(m *MediaRef) string // VersionID, else strconv.FormatInt(ID)
+
+// Client is read-only: no call deletes, changes or notifies anything.
+type Client interface {
+    Identity(ctx context.Context) (*Identity, error)
+    Sections(ctx context.Context) ([]Section, error)
+    AllItems(ctx context.Context, sectionKey string, mt models.MediaType) ([]ItemRef, error) // an error, never a partial listing
+    Item(ctx context.Context, itemID string) (*models.MediaItem, error) // ServerID, LibraryID and version Keys left to the caller
+    ActiveSessions(ctx context.Context) (map[string]bool, error)        // every id a session names, playing or paused (Plex: item rating keys; kinds whose sessions name versions or parts add those)
+}
+type Factory func(s models.MediaServer) Client // nil interface (never a typed nil) = no client for the kind
+
+// Optional capabilities, found by type assertion where used. Without one the feature that needs it
+// is structurally unavailable (VersionDeleter: the "plex" deletion method), never replaced by
+// another server call.
+type VersionDeleter interface {                    // Plex
+    DeleteMedia(ctx context.Context, itemID string, mediaID int64) error
+    MediaDeletionAllowed(ctx context.Context) (bool, error)
+}
+type ItemRefresher  interface { RefreshItem(ctx context.Context, itemID string) error }        // Plex
+type FolderScanner  interface { ScanPath(ctx context.Context, sectionKey, dir string) error }  // Plex
+type ChangeNotifier interface { NotifyChanged(ctx context.Context, libraryKey string, paths []string) error } // defined for Jellyfin/Emby (Phase 1); nothing calls it yet
+
+var ErrNotFound = errors.New("media server: not found") // matched by every client's "no longer has it"
+```
+Other servers' listings (scanner `otherListings`) are told apart by server, media id and
+`VersionIDOf`, and keep their stored order (server, then numeric media id). The executor's two
+playing checks look up the ids of `playingKeys` (the group's own servers) and `listingPlayingIDs`
+(another server's listing); for Plex both are the items' rating keys.
+
+Phase 1 prerequisites (found in Phase 0; each fails closed today, research `jellyfin-emby.md` §5.2):
+flipping `Supported()` alone is not enough. (1) The executor matches versions by the Plex media id
+(`executor/verify.go` `checkPlexVersion`, `sharedWithOtherMedia`, `targetMedia`, `remainsInItem`;
+`executor/crossserver.go` `listingProblem` against `OtherListing.MediaID`, 0 for a non-Plex
+listing): it must match by version key once `ServerVersionID` knows another kind's id. (2) The D11
+re-check refuses a removal when another server's library reports no scan times (`ScannedAt` or
+`ContentChangedAt` 0), so a kind without them needs another change signal first or it blocks the
+removals of every other server. (3) Sessions: `playingKeys` and `listingPlayingIDs` add a kind's
+version and part ids. (4) Q11: `sameContent`, `adoptable` and `inherit` accept a shared non-Plex
+version key before `KeyID` is set.
+
 ## internal/integrations/plex
 ```go
 type Options struct {
@@ -168,24 +257,18 @@ type Options struct {
 type Client struct{ /* unexported */ }
 func New(baseURL, token string, opts Options) *Client
 
-type Identity struct { MachineIdentifier, Version, FriendlyName string }
-type Section  struct { Key, Type, Title, UUID string; Locations []string
-    Refreshing bool; ScannedAt, ContentChangedAt int64 } // added (D11): Unix seconds, 0 = not reported
-// ItemRef is a lightweight listing row.
-type ItemRef struct {
-    RatingKey  string
-    MediaType  models.MediaType
-    Title      string
-    Year       int
-    ShowTitle  string
-    Season     int
-    Episode    int
-    GUID       string            // plex://movie/… or legacy
-    ExternalIDs map[string]string // from Guid[] (tmdb/imdb/tvdb)
-    MediaCount int        // NON-optimized media count
-    Media      []MediaRef // {ID, Optimized, Width, Height, DurationMs, Parts []PartRef{ID, File, Size}}
-    AddedAt    time.Time
-}
+// Changed (issue #4 Phase 0): the listing types are aliases of the kind-neutral ones, so every
+// plex.* name and value is unchanged (MediaRef.VersionID stays "" for Plex). The client implements
+// mediaserver.Client, VersionDeleter, ItemRefresher and FolderScanner (compile-time assertions).
+type Identity = mediaserver.Identity // { MachineIdentifier, Version, FriendlyName string }
+type Section  = mediaserver.Section  // added (D11): Refreshing; ScannedAt, ContentChangedAt Unix seconds, 0 = not reported
+// ItemRef is a lightweight listing row: RatingKey, MediaType, Title, Year, ShowTitle, Season,
+// Episode, GUID (plex://movie/… or legacy), ExternalIDs (from Guid[]: tmdb/imdb/tvdb), MediaCount
+// (NON-optimized media), Media []MediaRef {ID, Optimized, Width, Height, DurationMs, Parts
+// []PartRef{ID, File, Size}}, AddedAt.
+type ItemRef  = mediaserver.ItemRef
+type MediaRef = mediaserver.MediaRef
+type PartRef  = mediaserver.PartRef
 
 // Identity: GET / (machineIdentifier). The executor reads it before re-verifying a group and
 // right before every Plex delete (a re-pointed URL must never delete on another server).
@@ -213,7 +296,7 @@ func (c *Client) Photo(ctx context.Context, thumbPath string, w, h int) (body io
 
 // Errors
 var ErrUnauthorized = errors.New("plex: unauthorized (check token)")
-var ErrNotFound     = errors.New("plex: not found")
+var ErrNotFound     error // "plex: not found"; changed: also matches mediaserver.ErrNotFound (errors.Is)
 var ErrDeletionNotAllowed = errors.New("plex: media deletion is disabled in Plex server settings")
 var ErrForbidden, ErrInvalidArgument error // added: 403 (not the owner's token); input refused before any request
 type StatusError struct { Method, Path string; StatusCode int; Body string } // added: other unexpected statuses
@@ -342,6 +425,12 @@ func GroupOptionsFromSettings(s models.Settings, exclusions []models.Exclusion, 
 // Also flags suspect merges: different folder titles/years, and — when a folder has no year —
 // different years in the file names ("The Thing (1982).mkv" vs "The Thing (2011).mkv").
 func BuildGroups(items []models.MediaItem, opts GroupOptions) []*models.DuplicateGroup
+// GroupKey: "movie:<space>:<id>" / "episode:…"; fallback "<kind>:<serverID>:<itemID>"
+// (models.ServerItemKey with item.ServerKind and item.KeyItemID(); Plex: "plex:<serverID>:<ratingKey>").
+// BuildGroups appends "@<kind>:<serverID>:<itemID>" of a unit's primary item to colliding keys (Plex:
+// "@plex:<serverID>:<ratingKey>") and fills missing version keys with models.VersionKey (Plex:
+// "plex:<serverID>:<mediaID>"), passing an item's KeyID on as MediaVersion.ItemKeyID. Changed
+// (issue #4 Phase 0): kind-neutral; for Plex byte-identical, so no stored group is re-keyed.
 func GroupKey(item models.MediaItem, serverID int64) string
 
 type EvalEnv struct {
@@ -472,7 +561,16 @@ const EventTest = "test"; const MaskedValue = "********"
 
 ## internal/scanner
 ```go
+// MediaServerClient (added, issue #4 Phase 0) is what the scanner reads from a media server of any
+// kind (the core of mediaserver.Client it uses).
+type MediaServerClient interface {
+    Identity(ctx context.Context) (*mediaserver.Identity, error)
+    Sections(ctx context.Context) ([]mediaserver.Section, error)
+    AllItems(ctx context.Context, sectionKey string, mt models.MediaType) ([]mediaserver.ItemRef, error)
+    Item(ctx context.Context, ratingKey string) (*models.MediaItem, error)
+}
 // PlexClient / ArrClient are the subsets of the integration clients the scanner uses (fakes in tests).
+// PlexClient is MediaServerClient plus DuplicateItems (the plex.* types are aliases).
 type PlexClient interface {
     Identity(ctx context.Context) (*plex.Identity, error)
     Sections(ctx context.Context) ([]plex.Section, error)
@@ -497,8 +595,11 @@ type Deps struct {
     Bus           *events.Bus
     Log           *slog.Logger
     Notifier      *notifications.Service // may be nil in tests
-    PlexFactory   func(s models.MediaServer) PlexClient
+    PlexFactory   func(s models.MediaServer) PlexClient // used only when MediaServerFactory is nil
     ArrFactory    func(a models.ArrInstance) ArrClient
+    // MediaServerFactory (added, issue #4 Phase 0): the client of a server of any supported kind
+    // (nil = none for its kind, never a fallback to PlexFactory). cmd/dupearr wires only this one.
+    MediaServerFactory mediaserver.Factory
     // TautulliFactory (added, D10): the play-history client of a Tautulli connection. nil: an
     // enabled connection cannot be read and its server's versions get a "failed" history.
     TautulliFactory func(t models.TautulliInstance) WatchClient
@@ -576,15 +677,24 @@ func (mt *Matcher) SetServers(p MatchPolicy)
 
 ## internal/executor
 ```go
-type PlexClient interface {
-    Identity(ctx context.Context) (*plex.Identity, error) // added: server identity guard (before re-verify and every Plex delete)
+// MediaServerClient (added, issue #4 Phase 0) is what the executor reads from a media server of any
+// kind. The Plex abilities are capabilities type-asserted where used: mediaserver.VersionDeleter
+// (the "plex" method — "<server> cannot delete single versions" without it, never another call —
+// and the stale-entry cleanup, skipped without it), ItemRefresher and FolderScanner (after a
+// removal or restore; the server is not asked without them).
+type MediaServerClient interface {
+    Identity(ctx context.Context) (*mediaserver.Identity, error) // added: server identity guard (before re-verify and every Plex delete)
     Item(ctx context.Context, ratingKey string) (*models.MediaItem, error)
-    DeleteMedia(ctx context.Context, ratingKey string, mediaID int64) error
-    RefreshItem(ctx context.Context, ratingKey string) error
-    ScanPath(ctx context.Context, sectionKey, dir string) error
-    MediaDeletionAllowed(ctx context.Context) (bool, error)
     ActiveSessions(ctx context.Context) (map[string]bool, error)
-    Sections(ctx context.Context) ([]plex.Section, error) // added (D11): other servers' libraries, re-read before a removal
+    Sections(ctx context.Context) ([]mediaserver.Section, error) // added (D11): other servers' libraries, re-read before a removal
+}
+// PlexClient: the same method set as before (Identity, Item, DeleteMedia, RefreshItem, ScanPath,
+// MediaDeletionAllowed, ActiveSessions, Sections), now written as the core plus the capabilities.
+type PlexClient interface {
+    MediaServerClient
+    mediaserver.VersionDeleter // DeleteMedia, MediaDeletionAllowed
+    mediaserver.ItemRefresher  // RefreshItem
+    mediaserver.FolderScanner  // ScanPath
 }
 type ArrClient interface {
     File(ctx context.Context, fileID int64) (*arr.TrackedFileRef, error) // added: file identity guard (planning + right before DeleteFile)
@@ -599,9 +709,12 @@ type Deps struct {
     Bus         *events.Bus
     Log         *slog.Logger
     Notifier    *notifications.Service // may be nil
-    PlexFactory func(s models.MediaServer) PlexClient
+    PlexFactory func(s models.MediaServer) PlexClient // used only when MediaServerFactory is nil
     ArrFactory  func(a models.ArrInstance) ArrClient
     Now         func() time.Time
+    // MediaServerFactory (added, issue #4 Phase 0): the client of a server of any supported kind (nil
+    // = none: "no client for media server <name>"; with neither factory: "no Plex client is configured").
+    MediaServerFactory mediaserver.Factory
     // Enqueue schedules a command (used to queue a TargetedScan after a stale-data skip). May be nil.
     Enqueue     func(ctx context.Context, name string, body any, trigger string) error
     // FileIdentity (added, D11) proves another server's remaining copy a different file right
@@ -686,13 +799,16 @@ type Deps struct {
     Bus         *events.Bus
     Notifier    *notifications.Service
     Log         *slog.Logger
-    PlexFactory func(s models.MediaServer) interface{ Identity(context.Context) (*plex.Identity, error); MediaDeletionAllowed(context.Context) (bool, error) }
+    PlexFactory func(s models.MediaServer) interface{ Identity(context.Context) (*plex.Identity, error); MediaDeletionAllowed(context.Context) (bool, error) } // used only when MediaServerFactory is nil
     ArrFactory  func(a models.ArrInstance) interface{ Status(context.Context) (*arr.SystemStatus, error) }
+    MediaServerFactory mediaserver.Factory // added (issue #4 Phase 0): clients of any supported kind; cmd/dupearr wires only this one
     TautulliFactory func(t models.TautulliInstance) TautulliClient // added (D10); nil skips the Tautulli probes
     StartTime       time.Time     // added: OnHealthIssue notifications wait until StartTime + BootGracePeriod
     BootGracePeriod time.Duration // added: > 0 overrides the default (15 min); < 0 disables
 }
 // added: optional capabilities of the factory results (type-asserted)
+type MediaServerClient interface { Identity(context.Context) (*mediaserver.Identity, error) } // added (Phase 0): what every media server client answers
+type PlexDeletionSetting interface { MediaDeletionAllowed(context.Context) (bool, error) }       // added (Phase 0): PlexMediaDeletionCheck skips clients without it
 type PlexOwnership interface { Ownership(ctx context.Context, machineID string) (owned, known bool, err error) }
 type ArrMediaManagement interface { MediaManagement(context.Context) (*arr.MediaManagement, error) }
 type TautulliClient interface { Info(context.Context) (*tautulli.Info, error); Users(context.Context) ([]tautulli.User, error); Library(ctx context.Context, sectionID string) (*tautulli.Library, error) } // added
@@ -725,6 +841,11 @@ same folders; a disabled server overlapping an enabled one is not protected), Ar
 SeparateServerCheck (warning: a separate server listed files with the same name and size as
 another server's in the last full scan) and MediaServerIdentityCheck (warning: an enabled server
 is stored without its identity). Details: `docs/API.md` → Health.
+Server lists (changed, issue #4 Phase 0): MediaServerConnectivityCheck and the several-servers
+checks consider the enabled servers of a supported kind (`MediaServerKind.Supported`), the
+Plex-only checks (PlexMediaDeletionCheck, PlexOwnerCheck, the Tautulli and play-history checks)
+the enabled Plex servers (`IsPlex`); in Phase 0 both are the same servers, and sources and
+messages are unchanged.
 
 ## internal/backup
 ```go
@@ -862,7 +983,7 @@ type Deps struct {
     Backups   *backup.Service
     Notifier  *notifications.Service
     PlexOpts  plex.Options
-    PlexFactory func(s models.MediaServer) *plex.Client
+    PlexFactory func(s models.MediaServer) *plex.Client // the Plex-only routes: connection test (Plex kinds only; others are refused "Only Plex media servers are supported" first), identity probe and poster proxy (Plex kinds only: another kind gets no probe and a 404 poster, never a Plex request)
     ArrFactory  func(a models.ArrInstance) *arr.Client
     TautulliFactory func(t models.TautulliInstance) *tautulli.Client // added (D10): connection tests
     WebFS     fs.FS            // embedded SPA (web/dist); may lack index.html in dev
@@ -896,7 +1017,9 @@ exclusive PID file; a second server on the same directory exits with a message; 
 take it; an in-place restart hands the lock over). The Docker entrypoint also locks
 `/config/.dupearr.lock` (a different file, inherited on fd 9). Then it wires everything:
 config → logging → backup.ApplyPendingRestore → database.Open(dataDir/dupearr.db) (+migrations,
-seed default profile templates + settings) → events → notifications → factories → scanner
+seed default profile templates + settings) → events → notifications → factories (the concrete Plex
+factory for the API; the kind-neutral `mediaserver.Factory` for scanner, executor and health: a
+`*plex.Client` for kind "plex" or "", a nil interface for any other kind) → scanner
 (AutoApprove → executor.ApproveReviewed) → executor → health → backup → commands (register
 handlers + tasks) → auth → api → `executor.RecoverInterrupted` (before any command runs) →
 commands start → http.Server(s) (HTTP + optional HTTPS) → graceful shutdown on SIGINT/SIGTERM
@@ -925,7 +1048,10 @@ D11, additive): `media_servers.storage`, `arr_instances.links_confirmed`, table 
 (both keys cascading) and `duplicate_groups.cross_server` ('' = no record); the data upgrade
 `upgrade.arrServerLinks` (recorded only when instances and an enabled server exist) links every
 unlinked instance to the only enabled Plex server and confirms it, and stores nothing with two or
-more servers (the fail-closed state, which a restored older backup also starts in).
+more servers (the fail-closed state, which a restored older backup also starts in). Which kinds
+count (changed, issue #4 Phase 0): the repository's compared servers and counts use
+`models.MediaServerKind.Supported` / `SupportedMediaServerKinds` (the backup restore summary too);
+the frozen one-time `upgrade.arrServerLinks` keeps its literal Plex kinds.
 
 ## internal/store (persistence interfaces; additions)
 The interfaces live in `internal/store/store.go` (their comments carry the database layer's safety

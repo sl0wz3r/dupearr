@@ -30,8 +30,10 @@ document disagree, fix one of them in the same change.
 - Ship as a multi-arch Docker image (amd64/arm64) with an Unraid template; also docker-compose and
   native binaries.
 
-**Later (designed for, not built in v1)**: Jellyfin/Emby (`MediaServer` abstraction), Lidarr/music,
-multiple Plex servers cross-matching, hash-based duplicate detection of files outside Plex.
+**Later (designed for, not built in v1)**: Jellyfin/Emby (the kind-neutral media-server contract,
+`internal/mediaserver`, exists and Plex implements it; no Jellyfin or Emby client yet — issue #4,
+`docs/research/jellyfin-emby.md`), Lidarr/music, multiple Plex servers cross-matching, hash-based
+duplicate detection of files outside Plex.
 
 ---
 
@@ -64,8 +66,11 @@ internal/
   store/                persistence interfaces (Store + repositories)
   database/             SQLite implementation of store.Store, embedded migrations
   events/               in-process pub/sub bus (feeds SSE + notifications)
+  mediaserver/          kind-neutral media-server contract: listing types, read-only Client,
+                        optional capabilities (types only; imports models)
   integrations/
     plex/               PMS client, plex.tv PIN auth + resource discovery, → models.MediaVersion
+                        (implements mediaserver.Client + the Plex capabilities)
     arr/                Radarr & Sonarr v3 clients, webhook payload types
     tautulli/           Tautulli API v2 client (read only: play history) — DECISIONS D10
   pathmap/              remote→local path translation + cross-system file matching
@@ -90,9 +95,10 @@ docs/                   this spec, API reference, research notes, user docs
 ```
 
 Dependency direction (no cycles): `models` ← `store` ← `database`; `models` ← `disc`;
-`models`, `disc` ← `mediainfo`, `engine`; `models` ← `integrations/*`, `pathmap`;
-`scanner`/`executor` depend on store + integrations + engine + pathmap + disc; `commands` depends
-on scanner/executor/health/backup via small interfaces; `api` depends on all.
+`models`, `disc` ← `mediainfo`, `engine`; `models` ← `mediaserver` ← `integrations/plex`;
+`models` ← `integrations/*`, `pathmap`; `scanner`/`executor`/`health` depend on store +
+`mediaserver` (their clients) + integrations + engine + pathmap + disc; `commands` depends on
+scanner/executor/health/backup via small interfaces; `api` depends on all.
 
 ---
 
@@ -100,7 +106,9 @@ on scanner/executor/health/backup via small interfaces; `api` depends on all.
 
 ### 4.1 MediaVersion — one physical copy
 A **version** is one Plex `Media` element (one copy of a movie/episode; may have several `Part`s
-when stacked, e.g. `cd1/cd2`). Identity: `Key = "plex:<serverID>:<mediaID>"`. A **full-disc
+when stacked, e.g. `cd1/cd2`). Identity: `Key = "<kind>:<serverID>:<versionID>"`
+(`models.VersionKey`; for Plex, kind `plex` or "", `plex:<serverID>:<mediaID>`, byte for byte the
+key stored since the first release). A **full-disc
 backup** (a BDMV/VIDEO_TS structure of hundreds of files, a multi-disc set, or an `.iso`/`.img`) is
 also ONE version (DECISIONS D9): found on disk next to a movie it has
 `Key = "disc:<serverID>:<disc.RootHash(local root)>"` and one part per disc root; listed by a custom
@@ -158,9 +166,17 @@ Normalized attributes (computed by the Plex mapper, overridable/enriched by *arr
 ### 4.2 DuplicateGroup
 A set of ≥2 versions that represent the same content. Identity key (stable across scans):
 - movie: `movie:<idspace>:<id>` using the first available of tmdb, imdb, tvdb, then
-  `plex:<serverID>:<ratingKey>`; with edition splitting, `#<edition>` is appended.
+  `<kind>:<serverID>:<itemID>`; with edition splitting, `#<edition>` is appended.
 - episode: `episode:<showIdspace>:<showId>:s<season>e<episode>` (show id from grandparent guids),
-  falling back to `plex:<serverID>:<ratingKey>`.
+  falling back to `<kind>:<serverID>:<itemID>`.
+- when two units that can form groups share a key (the same title as separate items, or on several
+  servers), each gets the suffix `@<kind>:<serverID>:<itemID>` of its primary item.
+
+`<kind>` is the media server's kind (`plex` for kind "" too) and `<itemID>` the item's rating key,
+unless its client sets a stable `MediaItem.KeyID` (never for Plex, whose keys stay
+`plex:<serverID>:<ratingKey>` and `@plex:<serverID>:<ratingKey>` byte for byte; `models.ServerItemKey`,
+`models.DisambiguationIndex`). The engine's last id space, `plex` (`movie:plex:<id>`), is Plex's
+`plex://` metadata GUID, an external id like tmdb, not a server kind.
 
 Group **status** lifecycle:
 
@@ -333,7 +349,7 @@ For each queued group (its pending actions = versions V to remove):
 1. **Re-verify** against live data:
    - **Identity**: every involved Plex server must still answer with the stored
      `machineIdentifier` (a re-pointed URL never deletes on another server).
-   - **Changes after the approval win**: an exclusion created since (key, `@plex:` key, title
+   - **Changes after the approval win**: an exclusion created since (key, `@<kind>:` key, title
      regex, path prefix, library), a disabled library or a profile protection now covering V skips
      the group; so does a version kept by a group that already removed files in this run.
    - **Item**: re-fetch the Plex items (`checkFiles=1`); V must still exist with the same media

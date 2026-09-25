@@ -13,7 +13,7 @@ import (
 	"github.com/sl0wz3r/dupearr/internal/engine"
 	"github.com/sl0wz3r/dupearr/internal/events"
 	"github.com/sl0wz3r/dupearr/internal/fileid"
-	"github.com/sl0wz3r/dupearr/internal/integrations/plex"
+	"github.com/sl0wz3r/dupearr/internal/mediaserver"
 	"github.com/sl0wz3r/dupearr/internal/models"
 	"github.com/sl0wz3r/dupearr/internal/pathmap"
 	"github.com/sl0wz3r/dupearr/internal/store"
@@ -57,12 +57,12 @@ type run struct {
 	// group's label: a later (stale, overlapping) group must not remove them.
 	keptInRun map[string]string
 
-	plexClients map[int64]PlexClient
-	arrClients  map[int64]ArrClient
-	deletionOK  map[int64]cachedBool   // Plex "Allow media deletion" per server
-	arrBins     map[int64]cachedString // *arr recycle bin per instance
-	bin         *cachedString          // validated local recycle bin
-	ids         *fileid.Prober         // file identities (several media servers; fileIDs)
+	serverClients map[int64]MediaServerClient
+	arrClients    map[int64]ArrClient
+	deletionOK    map[int64]cachedBool   // Plex "Allow media deletion" per server
+	arrBins       map[int64]cachedString // *arr recycle bin per instance
+	bin           *cachedString          // validated local recycle bin
+	ids           *fileid.Prober         // file identities (several media servers; fileIDs)
 	// rescans collects, with several media servers, the re-scans of skipped groups (server →
 	// rating keys): one targeted scan per server at the end of the run (flushRescans), since each
 	// one lists every movie and TV library of the other servers.
@@ -208,7 +208,7 @@ func (s *Service) newRun(ctx context.Context, progress func(string)) (*run, erro
 		libraries:     make(map[int64]models.Library, len(libs)),
 		exclusions:    exclusions,
 		keptInRun:     map[string]string{},
-		plexClients:   map[int64]PlexClient{},
+		serverClients: map[int64]MediaServerClient{},
 		arrClients:    map[int64]ArrClient{},
 		deletionOK:    map[int64]cachedBool{},
 		arrBins:       map[int64]cachedString{},
@@ -402,7 +402,7 @@ func (r *run) processGroup(groupID int64, actions []models.Action) {
 
 	byServer := involvedRatingKeys(g)
 	for _, sid := range sortedKeys(byServer) {
-		if _, reason := r.plexClient(sid); reason != "" {
+		if _, reason := r.serverClient(sid); reason != "" {
 			r.skipGroup(g, targets, "Cannot re-verify the group: "+reason, false)
 			return
 		}
@@ -410,7 +410,7 @@ func (r *run) processGroup(groupID int64, actions []models.Action) {
 	// Every involved media server must still be the server the group was scanned from: after its
 	// URL was pointed at another server, the stored rating keys and media ids name unrelated items.
 	for _, sid := range sortedKeys(byServer) {
-		c, _ := r.plexClient(sid)
+		c, _ := r.serverClient(sid)
 		problem, err := r.serverIdentityProblem(ctx, sid, c)
 		switch {
 		case err != nil:
@@ -427,7 +427,7 @@ func (r *run) processGroup(groupID int64, actions []models.Action) {
 
 	// F10: never remove anything while a version of the group is playing.
 	for _, sid := range sortedKeys(byServer) {
-		c, _ := r.plexClient(sid)
+		c, _ := r.serverClient(sid)
 		sessions, err := c.ActiveSessions(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -436,8 +436,8 @@ func (r *run) processGroup(groupID int64, actions []models.Action) {
 			r.deferGroup(g, fmt.Sprintf("could not check whether a version is playing on %s (%v)", r.servers[sid].Name, err), true, false)
 			return
 		}
-		for _, rk := range byServer[sid] {
-			if sessions[rk] {
+		for _, id := range playingKeys(g, sid) {
+			if sessions[id] {
 				r.deferGroup(g, "a version is currently playing", false, true)
 				return
 			}
@@ -447,13 +447,13 @@ func (r *run) processGroup(groupID int64, actions []models.Action) {
 	// Fresh state of every involved item (checkFiles).
 	fresh := map[itemRef]*models.MediaItem{}
 	for _, sid := range sortedKeys(byServer) {
-		c, _ := r.plexClient(sid)
+		c, _ := r.serverClient(sid)
 		for _, rk := range byServer[sid] {
 			it, err := c.Item(ctx, rk)
 			switch {
 			case err == nil && it != nil:
 				fresh[itemRef{sid, rk}] = it
-			case err == nil || errors.Is(err, plex.ErrNotFound):
+			case err == nil || errors.Is(err, mediaserver.ErrNotFound):
 				fresh[itemRef{sid, rk}] = nil // the item is gone
 			case ctx.Err() != nil:
 				return
@@ -1075,9 +1075,9 @@ func (r *run) finish() (Summary, error) {
 // Clients and cached lookups
 // ---------------------------------------------------------------------------
 
-// plexClient returns the client of an enabled media server, or why there is none.
-func (r *run) plexClient(serverID int64) (PlexClient, string) {
-	if c, ok := r.plexClients[serverID]; ok {
+// serverClient returns the client of an enabled media server, or why there is none.
+func (r *run) serverClient(serverID int64) (MediaServerClient, string) {
+	if c, ok := r.serverClients[serverID]; ok {
 		return c, ""
 	}
 	srv, ok := r.servers[serverID]
@@ -1086,15 +1086,36 @@ func (r *run) plexClient(serverID int64) (PlexClient, string) {
 		return nil, fmt.Sprintf("media server #%d no longer exists", serverID)
 	case !srv.Enabled:
 		return nil, fmt.Sprintf("media server %s is disabled", srv.Name)
-	case r.s.d.PlexFactory == nil:
+	case !r.s.hasServerFactory():
 		return nil, "no Plex client is configured"
 	}
-	c := r.s.d.PlexFactory(srv)
+	c := r.s.newServerClient(srv)
 	if c == nil {
 		return nil, fmt.Sprintf("no client for media server %s", srv.Name)
 	}
-	r.plexClients[serverID] = c
+	r.serverClients[serverID] = c
 	return c, ""
+}
+
+// newServerClient returns a new client for srv: from MediaServerFactory when it is set, else from
+// PlexFactory, else nil. A factory's nil stays a nil interface.
+func (s *Service) newServerClient(srv models.MediaServer) MediaServerClient {
+	switch {
+	case s.d.MediaServerFactory != nil:
+		if c := s.d.MediaServerFactory(srv); c != nil {
+			return c
+		}
+	case s.d.PlexFactory != nil:
+		if c := s.d.PlexFactory(srv); c != nil {
+			return c
+		}
+	}
+	return nil
+}
+
+// hasServerFactory reports whether a media server client factory is configured.
+func (s *Service) hasServerFactory() bool {
+	return s.d.MediaServerFactory != nil || s.d.PlexFactory != nil
 }
 
 // arrClient returns the client of an *arr instance (nil when none can be built).
@@ -1113,7 +1134,7 @@ func (r *run) arrClient(inst models.ArrInstance) ArrClient {
 }
 
 // plexDeletionAllowed caches the server's "Allow media deletion" setting for the run.
-func (r *run) plexDeletionAllowed(serverID int64, c PlexClient) (bool, error) {
+func (r *run) plexDeletionAllowed(serverID int64, c mediaserver.VersionDeleter) (bool, error) {
 	if v, ok := r.deletionOK[serverID]; ok {
 		return v.v, v.err
 	}
@@ -1165,6 +1186,20 @@ func serverOf(g *models.DuplicateGroup, v *models.MediaVersion) int64 {
 		return v.ServerID
 	}
 	return g.ServerID
+}
+
+// playingKeys returns the ids a session of server sid reports while it plays a version of g: the
+// rating keys of the group's items on that server (Plex sessions name the item). Kinds whose
+// sessions also name versions or parts add those here and in listingPlayingIDs, its counterpart
+// for another server's listing of a file to remove (both feed the F10 "never while playing" checks).
+func playingKeys(g *models.DuplicateGroup, sid int64) []string {
+	return involvedRatingKeys(g)[sid]
+}
+
+// listingPlayingIDs returns the ids a session of another server reports while it plays the
+// version listed by e: the listing's item (Plex sessions name the item). See playingKeys.
+func listingPlayingIDs(e *models.OtherListing) []string {
+	return []string{strings.TrimSpace(e.RatingKey)}
 }
 
 // involvedRatingKeys returns the sorted rating keys of every file of the group, per server.

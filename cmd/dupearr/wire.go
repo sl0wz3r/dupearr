@@ -26,6 +26,7 @@ import (
 	"github.com/sl0wz3r/dupearr/internal/integrations/plex"
 	"github.com/sl0wz3r/dupearr/internal/integrations/tautulli"
 	"github.com/sl0wz3r/dupearr/internal/logging"
+	"github.com/sl0wz3r/dupearr/internal/mediaserver"
 	"github.com/sl0wz3r/dupearr/internal/models"
 	"github.com/sl0wz3r/dupearr/internal/notifications"
 	"github.com/sl0wz3r/dupearr/internal/scanner"
@@ -48,6 +49,7 @@ var (
 	_ scanner.ArrClient   = (*arr.Client)(nil)
 	_ executor.PlexClient = (*plex.Client)(nil)
 	_ executor.ArrClient  = (*arr.Client)(nil)
+	_ mediaserver.Client  = (*plex.Client)(nil)
 )
 
 // app holds every long-lived service of a running server.
@@ -64,6 +66,7 @@ type app struct {
 	notifier        *notifications.Service
 	plexOpts        plex.Options
 	plexFactory     func(models.MediaServer) *plex.Client
+	serverFactory   mediaserver.Factory // scanner, executor, health (mediaServerFactory)
 	arrFactory      func(models.ArrInstance) *arr.Client
 	tautulliFactory func(models.TautulliInstance) *tautulli.Client
 
@@ -182,6 +185,7 @@ func (a *app) wire(ctx context.Context) error {
 		o.VerifyTLS = s.VerifyTLS
 		return plex.New(s.URL, s.Token, o)
 	}
+	a.serverFactory = mediaServerFactory(a.plexFactory)
 	a.arrFactory = func(inst models.ArrInstance) *arr.Client {
 		return arr.New(inst, arr.Options{VerifyTLS: inst.VerifyTLS, Timeout: httpClientTimeout})
 	}
@@ -192,12 +196,12 @@ func (a *app) wire(ctx context.Context) error {
 	// scanner → executor. The closures below reference services built later in this function;
 	// they are only invoked once commands run, after wiring has finished.
 	a.scanner = scanner.New(scanner.Deps{
-		Store:       a.db,
-		Bus:         a.bus,
-		Log:         component(log, "Scanner"),
-		Notifier:    a.notifier,
-		PlexFactory: func(s models.MediaServer) scanner.PlexClient { return a.plexFactory(s) },
-		ArrFactory:  func(i models.ArrInstance) scanner.ArrClient { return a.arrFactory(i) },
+		Store:              a.db,
+		Bus:                a.bus,
+		Log:                component(log, "Scanner"),
+		Notifier:           a.notifier,
+		MediaServerFactory: a.serverFactory,
+		ArrFactory:         func(i models.ArrInstance) scanner.ArrClient { return a.arrFactory(i) },
 		TautulliFactory: func(t models.TautulliInstance) scanner.WatchClient {
 			return a.tautulliFactory(t)
 		},
@@ -211,13 +215,13 @@ func (a *app) wire(ctx context.Context) error {
 		},
 	})
 	a.executor = executor.New(executor.Deps{
-		Store:       a.db,
-		Bus:         a.bus,
-		Log:         component(log, "Executor"),
-		Notifier:    a.notifier,
-		PlexFactory: func(s models.MediaServer) executor.PlexClient { return a.plexFactory(s) },
-		ArrFactory:  func(i models.ArrInstance) executor.ArrClient { return a.arrFactory(i) },
-		Now:         time.Now,
+		Store:              a.db,
+		Bus:                a.bus,
+		Log:                component(log, "Executor"),
+		Notifier:           a.notifier,
+		MediaServerFactory: a.serverFactory,
+		ArrFactory:         func(i models.ArrInstance) executor.ArrClient { return a.arrFactory(i) },
+		Now:                time.Now,
 		Enqueue: func(ctx context.Context, name string, body any, trigger string) error {
 			_, err := a.commands.Enqueue(ctx, name, body, trigger)
 			return err
@@ -255,12 +259,7 @@ func (a *app) wire(ctx context.Context) error {
 			}
 			return a.auth.UntrustedProxySeen()
 		},
-		PlexFactory: func(s models.MediaServer) interface {
-			Identity(context.Context) (*plex.Identity, error)
-			MediaDeletionAllowed(context.Context) (bool, error)
-		} {
-			return a.plexFactory(s)
-		},
+		MediaServerFactory: a.serverFactory,
 		ArrFactory: func(i models.ArrInstance) interface {
 			Status(context.Context) (*arr.SystemStatus, error)
 		} {
@@ -345,6 +344,19 @@ func (a *app) onConfigChange(prev, next config.Config) {
 // component derives a service logger; logging maps the "component" attribute to Entry.Logger.
 func component(l *slog.Logger, name string) *slog.Logger {
 	return l.With("component", name)
+}
+
+// mediaServerFactory returns the production media server factory: a Plex client for a Plex server
+// (kind "plex" or ""), and a nil interface (never a typed nil) for any other kind, which the
+// scanner, the executor and the health checks treat as "no client" and skip. The API keeps the
+// concrete Plex factory for the Plex-only routes (connection test, plex.tv, posters).
+func mediaServerFactory(plexFactory func(models.MediaServer) *plex.Client) mediaserver.Factory {
+	return func(s models.MediaServer) mediaserver.Client {
+		if !s.Kind.IsPlex() {
+			return nil
+		}
+		return plexFactory(s)
+	}
 }
 
 // plexClientIdentifier returns the install's stable X-Plex-Client-Identifier, generating and

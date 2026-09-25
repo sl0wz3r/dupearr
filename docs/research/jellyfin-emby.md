@@ -2,7 +2,8 @@
 
 Status: research reference and design proposal, written 2026-09-24 for issue #4 ("Today Dupearr
 supports Plex only … How does each server model several copies of one movie or episode? What do its
-delete endpoints remove?"). Nothing here is implemented. Scope: how Jellyfin and Emby model versions,
+delete endpoints remove?"). Only Phase 0 (§5.2, the behaviour-neutral contract refactor) is
+implemented; nothing else here is. Scope: how Jellyfin and Emby model versions,
 multi-part files and external ids; what their delete endpoints remove on disk; permissions, playback
 sessions, authentication and change notifications; and a phased design in which Dupearr reads from
 Jellyfin/Emby but removes files only through Radarr/Sonarr or its own recycle bin.
@@ -741,6 +742,48 @@ deny list; the allowlist of §5.3.3 is the actual control):
 
 ### 5.2 Phase 0: neutral media-server contract (no behaviour change)
 
+**Status: done** (issue #4 Phase 0; `docs/CONTRACTS.md` "internal/mediaserver" and
+"internal/models"). What was built differs from the sketch below where existing tests and stored
+data pin the Plex shapes: the core methods keep their Plex-era names (`Sections`, `AllItems`,
+`Item`, `ActiveSessions`); `Deps.PlexFactory`, `scanner.PlexClient` and `executor.PlexClient` stay
+and `Deps.MediaServerFactory` is added next to them (production wires only the new one); the plex
+listing types are aliases of the neutral ones; `Photo` and plex.tv `Ownership` stay with the API and
+the health check. `MediaServerKind.Supported()` is the single kind check (scan, sync, health, D11,
+API, database), so adding a kind there changes all of them together; the kinds whose `@<kind>:`
+suffix and version keys the parsers recognise follow the same list. The Plex keys, signatures, API
+JSON and request sequences are unchanged (the single-server goldens pass unchanged, also through the
+production `MediaServerFactory` wiring). `NotifyChanged` is the optional
+`mediaserver.ChangeNotifier`, defined but not yet called.
+
+Flipping `Supported()` is necessary but not sufficient. These Phase 1 prerequisites were found while
+doing Phase 0; each fails closed today (a removal is refused or waits, nothing is removed wrongly),
+but together they would stall Jellyfin groups and block Plex removals:
+
+* **A neutral version id.** `MediaVersion.ServerVersionID()` is the one place a kind's version id is
+  defined (the scanner and the engine build a version key exactly when it is non-empty); Phase 1
+  adds `SourceID` there. The executor still matches versions by the Plex media id:
+  `checkPlexVersion` ("its Plex media id is unknown", then `MediaID ==`), `sharedWithOtherMedia`,
+  `targetMedia` and `remainsInItem` (`mediaRef{server, MediaID}`) in `executor/verify.go`, and the
+  D11 `listingProblem` in `executor/crossserver.go`, which matches `OtherListing.MediaID` (0 for a
+  non-Plex listing). They must match by version key (`models.VersionKey(kind, server,
+  ServerVersionID())` against `Key` / `OtherListing.VersionKey`) before a Jellyfin version can be
+  checked, and before a Plex group that a Jellyfin server also lists can pass the D11 re-check.
+* **A library change signal.** The D11 re-check refuses a removal when another server's library
+  reports no scan times (`Section.ScannedAt`/`ContentChangedAt` 0: "a change since the scan cannot
+  be ruled out"). Jellyfin reports none, so one enabled Jellyfin server whose libraries may list
+  the files (not separate, or separate with a mapped folder over them) would block every Plex
+  removal of a multi-server install. Phase 1 needs a substitute (for example a listing
+  fingerprint recorded by the scan and re-read before a removal, or a capability).
+* **Sessions by version and part.** Both playing checks look up the ids `playingKeys` (the group's
+  own servers) and `listingPlayingIDs` (another server's listing) return; Phase 1 adds the source
+  and stack-part ids there (S13), and its `ActiveSessions` reports them.
+* **Q11 matching.** `sameContent`, `adoptable` and `inherit` must accept a shared non-Plex version
+  key before `KeyID` is set (§7 Q11).
+* **API.** The connection test, the forced save's identity probe and the poster proxy are Plex-only
+  and never send another kind's server a Plex request; Jellyfin needs its own test and probe.
+
+The sketch as proposed before Phase 0:
+
 * New package `internal/mediaserver` with neutral types and the interface below. The Plex client
   implements it (adapters over today's methods). Scanner, executor and health take a
   `MediaServerFactory` instead of `PlexFactory` (`scanner.go:75-81`, `:105`; `executor.go:48-58`,
@@ -1129,6 +1172,15 @@ tens of thousands of episodes.
     it would wrongly pair.
 11. **Stable group-key id for Jellyfin (Phase 0).** Which item id survives a change of primary
     (S9) and can be used in the `GroupKey` fallback and the `disambiguateKeys` suffix?
+    **Answered (Phase 0, PROPOSED for Phase 1):** `MediaItem.KeyID` = the lexicographically
+    smallest media source id among the row's file versions in the row's library. It depends only
+    on which files exist (ids are MD5 of type + path, reproducible), not on which version Jellyfin
+    makes the primary or on merges. It changes only when that file leaves or a file with a smaller
+    id arrives; either event changes the group's signature anyway, and `adoptable` keeps the stored
+    key when the base key and content still match. Prerequisite before Phase 1 sets it:
+    `sameContent`, `adoptable` and `inherit` must also accept a shared non-Plex version key (a
+    stable key over changed rating keys would otherwise be taken for another title's group and
+    stall it). Until then `KeyID` stays empty and the rating key is used.
 12. **`.ignore` after a bin is prepared.** Confirm live on Jellyfin that a `.ignore` added to an
     already looked-up bin is ignored until a library scan (S25), and choose how Dupearr learns that
     the scan ran (for example from the *Scan Media Library* task's last run, which would need a new
