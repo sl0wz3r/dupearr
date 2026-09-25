@@ -143,6 +143,10 @@ func (p *pipeline) enrich(items []models.MediaItem) queueState {
 			continue
 		}
 		matcher := NewMatcher(p.cfg.mapper)
+		if p.cfg.multi {
+			matcher.SetServers(p.cfg.matchPolicy())
+		}
+		unconfirmed := map[int64]*unconfirmedTitles{} // docs/DECISIONS.md D11
 		busyIDs := map[string]bool{}
 		for _, inst := range insts {
 			if p.ctx.Err() != nil {
@@ -157,6 +161,9 @@ func (p *pipeline) enrich(items []models.MediaItem) queueState {
 				continue
 			}
 			matcher.Add(inst.ID, files)
+			if p.cfg.multi && !p.cfg.confirmed[inst.ID] {
+				unconfirmed[inst.ID] = p.unconfirmedTitles(inst, files, mt)
+			}
 			busy[inst.ID] = queue
 			for i := range files {
 				if id := files[i].Info.ItemID; id > 0 && queue[id] {
@@ -167,7 +174,7 @@ func (p *pipeline) enrich(items []models.MediaItem) queueState {
 			}
 		}
 		p.markBusyItems(items, mt, busyIDs)
-		matched := p.applyMatches(items, mt, matcher)
+		matched := p.applyMatches(items, mt, matcher, unconfirmed)
 		p.log.Debug("Matched versions to *arr files", "mediaType", mt, "matched", matched)
 	}
 	return busy
@@ -180,12 +187,73 @@ type versionMatch struct {
 	kind matchKind
 }
 
+// unconfirmedTitles are the titles an *arr instance whose media server links are not confirmed
+// tracks (by id token), with whether each title's tracked file maps to a local path.
+type unconfirmedTitles struct {
+	inst   models.ArrInstance
+	mapped map[string]bool // id token → every tracked file of the title maps
+}
+
+// unconfirmedTitles indexes the tracked files of an instance whose links are not confirmed.
+func (p *pipeline) unconfirmedTitles(inst models.ArrInstance, files []arr.TrackedFile, mt models.MediaType) *unconfirmedTitles {
+	u := &unconfirmedTitles{inst: inst, mapped: map[string]bool{}}
+	for i := range files {
+		_, ok := p.cfg.mapper.ToLocal(models.PathSourceArr, inst.ID, files[i].Path)
+		for _, tok := range trackedArrIDs(&files[i], mt) {
+			if prev, seen := u.mapped[tok]; seen {
+				u.mapped[tok] = prev && ok
+			} else {
+				u.mapped[tok] = ok
+			}
+		}
+	}
+	return u
+}
+
+// arrTrackingUnknownReason marks the incomplete-data reason of a group with a version whose *arr
+// tracking is unknown (see ArrTrackingUnknown).
+const arrTrackingUnknownReason = "(whether an *arr tracks a version is unknown)"
+
+// ArrTrackingUnknown reports whether g is in review because the *arr tracking of one of its
+// versions is unknown (docs/DECISIONS.md D11): a mapped *arr file and a version of a media server
+// without a mapping for it, or an instance whose media server links are not confirmed. It must not
+// be approved until a scan could decide (add the path mapping, or confirm the links).
+func ArrTrackingUnknown(g *models.DuplicateGroup) bool {
+	return g != nil && g.Status == models.GroupReview && strings.HasPrefix(g.StatusReason, incompletePrefix) &&
+		strings.Contains(g.StatusReason, arrTrackingUnknownReason)
+}
+
+// noteArrUnknown records why the *arr tracking of version v is unknown.
+func (p *pipeline) noteArrUnknown(v *models.MediaVersion, reason string) {
+	if v.Key == "" {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, ok := p.arrUnknown[v.Key]; !ok {
+		p.arrUnknown[v.Key] = reason + " " + arrTrackingUnknownReason
+	}
+}
+
+// serverName names a media server in messages.
+func (p *pipeline) serverName(id int64) string {
+	if s, ok := p.cfg.servers[id]; ok && strings.TrimSpace(s.Name) != "" {
+		return s.Name
+	}
+	return fmt.Sprintf("media server #%d", id)
+}
+
 // applyMatches matches the versions of the items of media type mt and attaches the results. A
 // file-name + size match is a heuristic and is dropped when it is not unambiguous on the
 // version side too: another candidate version has a part with the same name and size, or the
 // tracked file was matched by another version as well (deleting it through the *arr would then
 // remove a file other than the version's own). Returns the number of versions matched.
-func (p *pipeline) applyMatches(items []models.MediaItem, mt models.MediaType, matcher *Matcher) int {
+//
+// With two or more servers (docs/DECISIONS.md D11), a version that is not matched while its *arr
+// tracking cannot be decided is recorded as unknown (arrUnknown): the matcher refused a mapped *arr
+// file for a part the server has no mapping for, or an instance whose links are not confirmed
+// tracks a file of the same title that rule 1 could not compare (either side unmapped).
+func (p *pipeline) applyMatches(items []models.MediaItem, mt models.MediaType, matcher *Matcher, unconfirmed map[int64]*unconfirmedTitles) int {
 	names := map[nameSize]int{} // candidate versions having a part with this name + size
 	var found []versionMatch
 	for i := range items {
@@ -207,13 +275,25 @@ func (p *pipeline) applyMatches(items []models.MediaItem, mt models.MediaType, m
 					}
 				}
 			}
-			match := matcher.match
+			var (
+				tf      *arr.TrackedFile
+				kind    matchKind
+				unknown string
+			)
 			if v.Disc != nil {
-				match = matcher.matchDisc
+				tf, kind, unknown = matcher.matchDisc(v.ServerID, v)
+			} else {
+				tf, kind, unknown = matcher.match(v.ServerID, v)
 			}
-			if tf, kind := match(v.ServerID, v); tf != nil {
+			if tf != nil {
 				found = append(found, versionMatch{v: v, tf: tf, kind: kind})
+				continue
 			}
+			if unknown != "" {
+				p.noteArrUnknown(v, fmt.Sprintf("add a path mapping for %s: its version may be a file an *arr tracks", p.serverName(v.ServerID)))
+				continue
+			}
+			p.noteUnconfirmed(&items[i], v, mt, unconfirmed)
 		}
 	}
 	claims := map[trackedRef]int{}
@@ -249,6 +329,31 @@ func (p *pipeline) applyMatches(items []models.MediaItem, mt models.MediaType, m
 		}
 	}
 	return matched
+}
+
+// noteUnconfirmed records an unmatched version whose *arr tracking an instance with unconfirmed
+// links could hold: it tracks a file of the same title and rule 1 could not compare the two
+// (the version or that file is unmapped).
+func (p *pipeline) noteUnconfirmed(it *models.MediaItem, v *models.MediaVersion, mt models.MediaType, unconfirmed map[int64]*unconfirmedTitles) {
+	if len(unconfirmed) == 0 {
+		return
+	}
+	versionMapped := len(v.Parts) > 0
+	for _, pt := range v.Parts {
+		if _, ok := p.cfg.mapper.ToLocal(models.PathSourceServer, v.ServerID, pt.Path); !ok {
+			versionMapped = false
+		}
+	}
+	for _, id := range sortedIDs(unconfirmed) {
+		u := unconfirmed[id]
+		for _, tok := range itemArrIDs(it, mt) {
+			fileMapped, tracks := u.mapped[tok]
+			if tracks && (!versionMapped || !fileMapped) {
+				p.noteArrUnknown(v, fmt.Sprintf("confirm which Plex servers %s feeds (Settings → Applications)", u.inst.Name))
+				return
+			}
+		}
+	}
 }
 
 // noteUnlookable records the items of media type mt the *arrs of kind cannot be asked about:

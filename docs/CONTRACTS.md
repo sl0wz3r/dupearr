@@ -145,6 +145,9 @@ func New(mappings []models.PathMapping) *Mapper
 // (path-segment aware: "/data/movies" must not match "/data/movies2"). ok=false when no mapping.
 func (m *Mapper) ToLocal(sourceType string, sourceID int64, remote string) (local string, ok bool)
 func (m *Mapper) ToRemote(sourceType string, sourceID int64, local string) (remote string, ok bool)
+// Fingerprint (added, D11) identifies the mappings of one source ("" when it has none); a group's
+// cross-server record stores it per server so the executor notices a mapping changed since the scan.
+func (m *Mapper) Fingerprint(sourceType string, sourceID int64) string
 // Normalize cleans a path for comparison (forward slashes, no trailing slash, Clean; Windows
 // drive letters lower-cased; UNC preserved).
 func Normalize(p string) string
@@ -166,7 +169,8 @@ type Client struct{ /* unexported */ }
 func New(baseURL, token string, opts Options) *Client
 
 type Identity struct { MachineIdentifier, Version, FriendlyName string }
-type Section  struct { Key, Type, Title, UUID string; Locations []string }
+type Section  struct { Key, Type, Title, UUID string; Locations []string
+    Refreshing bool; ScannedAt, ContentChangedAt int64 } // added (D11): Unix seconds, 0 = not reported
 // ItemRef is a lightweight listing row.
 type ItemRef struct {
     RatingKey  string
@@ -505,12 +509,20 @@ type Deps struct {
     // executor.ApproveReviewed, so an approval of a group something changed since is refused.
     // Within the per-scan budget (maxDeletionsPerRun / maxBytesPerRunGb; ≤ 0 approves nothing).
     AutoApprove   func(ctx context.Context, groupID int64, trigger, signature string) error
+    // FileIdentity (added, D11): file identities for the cross-server index; nil = fileid.Default().
+    FileIdentity  *fileid.Prober
 }
 const DefaultConcurrency = 4; const DefaultArrRetryDelay = 3 * time.Second // added: a failed *arr read is retried once
 var ErrNothingToScan = errors.New("targeted scan: no rating keys or external ids given") // added
 // ArrDataMissing (added): the group went to review because an *arr could not be read in its last
 // scan; the API refuses to approve it (409) until a scan read every instance.
 func ArrDataMissing(g *models.DuplicateGroup) bool
+// ArrTrackingUnknown / CrossServerDataMissing (added, D11): the group went to review because a
+// version's *arr tracking is unknown (a mapped *arr file and an unmapped server's part, or an
+// instance with unconfirmed media server links), or because a media server that may list its files
+// could not be read. The API refuses to approve either (409).
+func ArrTrackingUnknown(g *models.DuplicateGroup) bool
+func CrossServerDataMissing(g *models.DuplicateGroup) bool
 type Service struct{ /* unexported */ }
 func New(d Deps) *Service
 // FullScan scans the given (or all enabled) libraries; progress receives human messages.
@@ -544,11 +556,22 @@ func GroupUsesLibrary(g *models.DuplicateGroup, id int64) bool // added (match h
 // Tautulli and set MediaVersion.Watch on every version (known / unknown with a reason / failed); a
 // failed read counts in Stats.Errors, never yields "no plays", and a group with watch_unreadable
 // never counts as a stable scan (scans and re-evaluations set StableCount 0).
+// Several Plex servers (added, D11): with two or more enabled servers every scan (full or targeted,
+// whatever its media type) reads the servers' libraries, lists the other servers' movie and TV
+// libraries (index-only; a separate server's where its mapped folders, stored or reported now,
+// overlap), attaches
+// MediaVersion.OtherServers and DuplicateGroup.CrossServer, counts ScanStats.SeparateNameMatches
+// (full scans) and marks OtherListing.KeptByGroup after the resolution; with one server none of it
+// runs and nothing changes.
 // Matcher (exported for tests): matches versions to *arr files.
 type Matcher struct{ /* unexported */ }
-func NewMatcher(m *pathmap.Mapper) *Matcher
+func NewMatcher(m *pathmap.Mapper) *Matcher // one-server policy: every instance feeds the only server
 func (mt *Matcher) Add(instanceID int64, files []arr.TrackedFile)
 func (mt *Matcher) Match(serverID int64, v *models.MediaVersion) *arr.TrackedFile
+// added (D11): rules 2 (raw path) and 3 (name and size) only between an instance and a server it is
+// confirmed to feed (not separate), and never for a mapped *arr file and an unmapped part.
+type MatchPolicy struct { Multi bool; Links map[int64]map[int64]bool; Confirmed, Separate map[int64]bool }
+func (mt *Matcher) SetServers(p MatchPolicy)
 ```
 
 ## internal/executor
@@ -561,6 +584,7 @@ type PlexClient interface {
     ScanPath(ctx context.Context, sectionKey, dir string) error
     MediaDeletionAllowed(ctx context.Context) (bool, error)
     ActiveSessions(ctx context.Context) (map[string]bool, error)
+    Sections(ctx context.Context) ([]plex.Section, error) // added (D11): other servers' libraries, re-read before a removal
 }
 type ArrClient interface {
     File(ctx context.Context, fileID int64) (*arr.TrackedFileRef, error) // added: file identity guard (planning + right before DeleteFile)
@@ -580,6 +604,9 @@ type Deps struct {
     Now         func() time.Time
     // Enqueue schedules a command (used to queue a TargetedScan after a stale-data skip). May be nil.
     Enqueue     func(ctx context.Context, name string, body any, trigger string) error
+    // FileIdentity (added, D11) proves another server's remaining copy a different file right
+    // before a removal; nil = fileid.Default() per queue run.
+    FileIdentity *fileid.Prober
 }
 type Summary struct { Processed, Succeeded, DryRun, Skipped, Failed int; BytesFreed int64; Aborted bool; Message string
     Deferred int } // added: groups left pending (playing, Plex unreachable, *arr unreachable, …)
@@ -621,6 +648,35 @@ is removed only by the filesystem method as a whole: re-detected, re-inspected a
 bin; Restore moves them back. Every method refuses a regular version with a file inside a disc
 structure; Plex refuses media with more than 8 parts. After a disc removal Plex scans the movie
 folder and an *arr that tracked a clip of it is rescanned.
+Several Plex servers (added, D11; only with two or more enabled servers): a queued group needs a
+complete cross-server record naming every enabled server with its current identity, storage and
+path mappings (`pathmap.Mapper.Fingerprint`; else review + re-scan); the other servers' libraries (`Sections`) must be unchanged since the scan
+(else review + targeted scan; unreadable: defer); every other server that lists a file to remove
+must be reachable, identity-confirmed (none stored: defer), not playing the item, still list the
+file and keep another version proven a different file on disk (`fileid.Compare`); `keptElsewhere`
+and `keptInRun` also check every listing's version key; an *arr file is never confirmed by raw path
+for an unlinked or separate server, nor for an unmapped part when the *arr's path maps. The
+re-scans of the groups a run skips are queued once per server at the end of the run.
+
+## internal/fileid (added, D11 — read only)
+```go
+type Verdict int; const ( Unknown Verdict = iota; Same; Distinct )
+type Stat struct { Dev, Ino, Nlink uint64; Size int64; Regular bool }
+type Info struct { Dev, Ino, Nlink uint64; Size int64; FSType string; Allowlisted bool }
+type Hooks struct { FStat func(*os.File) (Stat, error); Stat func(string) (Stat, error); FStatfs func(*os.File) (int64, error)
+    Statfs func(string) (int64, error); Mountinfo func() ([]byte, error); Supported bool; AssumeType string } // tests
+const ShfsAllowlisted = false // Unraid user shares: not until the Phase 0 checks (research Q2)
+type Prober struct{ /* unexported; caches filesystem types per device */ }
+func Default() *Prober // Linux: fstat, fstatfs, /proc/self/mountinfo; elsewhere Compare is always Unknown
+func New(h Hooks) *Prober
+func (p *Prober) PathInfo(path string) (Info, error)        // scan time: find same / possibly-same files
+func CouldBeDistinct(a, b Info) bool                         // same device, different inode, both allowlisted
+func (p *Prober) Compare(a, b string) (Verdict, string)     // run time: both files open at the same time
+func ParseMountinfo(data []byte) []mountEntry
+```
+The allowlist is ext4, XFS and btrfs (fstatfs magic and mountinfo type agree) and ZFS (mountinfo).
+`fuse.shfs`, NFS, CIFS/SMB, 9p, virtiofs, overlay, other FUSE types, an undeterminable type and
+different devices are never `Distinct`.
 
 ## internal/health
 ```go
@@ -661,8 +717,14 @@ DiscDetectionUnavailable (added, notice: `detectDiscs` on but no enabled movie l
 mapped), TautulliConnectivityCheck (added, error: a Tautulli connection is unreachable, rejects the
 key, is older than 2.18.0 or monitors another Plex server), WatchHistoryCheck (added: warning when
 a profile ranks by play history for a server without an enabled Tautulli; notice when Tautulli
-keeps no history for some of those libraries or users), LastScanCheck, DatabaseCheck. Details:
-`docs/API.md` → Health.
+keeps no history for some of those libraries or users), LastScanCheck, DatabaseCheck; with two or
+more enabled Plex servers only (added, D11): MultiServerFoldersCheck (notice: two servers index the
+same folders; a disabled server overlapping an enabled one is not protected), ArrServerLinksCheck
+(warning: an *arr instance's media server links are not confirmed), MultiServerMappingCheck
+(warning: a server not declared separate has an unmapped enabled library folder),
+SeparateServerCheck (warning: a separate server listed files with the same name and size as
+another server's in the last full scan) and MediaServerIdentityCheck (warning: an enabled server
+is stored without its identity). Details: `docs/API.md` → Health.
 
 ## internal/backup
 ```go
@@ -858,12 +920,22 @@ group_files(group_id), actions(status, group_id), history(created_at, event_type
 Data upgrades (added): once per database, recorded by a settings entry (`upgrade.discProfiles`) and
 only when profiles exist (a backup restore copies its rows — and its entry — into an empty
 database, so an older backup is upgraded when opened): the D9 profile upgrade adds `disc` after
-`remux` to non-empty source orders and `m2ts` after the common containers.
+`remux` to non-empty source orders and `m2ts` after the common containers. Migration 0004 (added,
+D11, additive): `media_servers.storage`, `arr_instances.links_confirmed`, table `arr_server_links`
+(both keys cascading) and `duplicate_groups.cross_server` ('' = no record); the data upgrade
+`upgrade.arrServerLinks` (recorded only when instances and an enabled server exist) links every
+unlinked instance to the only enabled Plex server and confirms it, and stores nothing with two or
+more servers (the fail-closed state, which a restored older backup also starts in).
 
 ## internal/store (persistence interfaces; additions)
 The interfaces live in `internal/store/store.go` (their comments carry the database layer's safety
 rules). `Store.Tautullis() TautulliRepo` (added, D10: List/Get/Create/Update/Delete of
-`models.TautulliInstance`). Added during implementation — atomic operations so concurrent writers
+`models.TautulliInstance`). `ArrInstanceRepo` stores `ServerIDs`/`LinksConfirmed` with the instance
+in one transaction (added, D11; Update keeps the stored links when `ServerIDs` is nil);
+`MediaServerRepo.Create`/`Update` of an enabled, non-separate Plex server that was not one before
+sets `links_confirmed = 0` on the instances not linked to it, in the same transaction, when two or
+more Plex servers are then enabled (a confirmation only covers the servers it could choose from); and
+`GroupRepo.Upsert` stores `CrossServer` as given. Added during implementation — atomic operations so concurrent writers
 (a scan, the executor, the API) can never overwrite each other's status changes:
 ```go
 type GroupRepo interface {

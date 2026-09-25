@@ -14,6 +14,7 @@ undo. This page explains every guard and how to tune it.
 - [Deletion methods and permanence](#deletion-methods-and-permanence)
 - [Recycle bins](#recycle-bins)
 - [Multi-episode files, hardlinks and other edge cases](#multi-episode-files-hardlinks-and-other-edge-cases)
+- [Several Plex servers](#several-plex-servers)
 - [Things Dupearr never does](#things-dupearr-never-does)
 - [A safe way to start](#a-safe-way-to-start)
 
@@ -82,7 +83,9 @@ These send a group to **review** (never auto-approved):
 | Unanalyzed | Plex has no codec/resolution/bitrate for a copy yet; the decision would be guesswork. |
 | Same file | Two entries point at the same file (same path or inode), or two copies have the same file name and size in different folders (possibly one file reached through two paths). A copy that shares its file with a kept copy is never removed. |
 | Kept copy unavailable | Plex reports a copy that would be kept as not accessible. |
-| Incomplete data | A Radarr/Sonarr instance could not be read during the scan: its files would look untracked. Approval is refused until a scan reads every instance (or you disable the instance). |
+| Incomplete data | A Radarr/Sonarr instance could not be read during the scan: its files would look untracked. Approval is refused until a scan reads every instance (or you disable the instance). With several Plex servers also: another media server that may list these files could not be read (flag *Media server not read*), or Dupearr could not tell whether Radarr/Sonarr tracks a copy (a server without path mappings, or an instance whose Plex servers are not confirmed). |
+| Kept by another server | Another Plex server's duplicate group keeps a file this group would remove (the two servers' profiles disagree). |
+| Maybe on another server | Another Plex server lists a file with the same name and size as a copy this group would remove, and Dupearr cannot tell whether it is the same file. |
 | Stale data | Right before a removal, the live data no longer matched what was reviewed (including the \*arr now tracking another copy than the kept one), or a scan kept a different copy than the one you approved. |
 | Disc unreadable | A full-disc backup could not be read or checked completely (a damaged or half-copied disc, symbolic links inside, an unclear "Disc N" set, or a disc Dupearr cannot reach). It is always kept. |
 | Play history unreadable | The profile ranks by play history (*Played* / *Last played*), the group holds copies of different Plex items and Tautulli could not be read during the scan (down, wrong key, too old, another Plex server, an incomplete answer). The unreadable history counts as unknown — a tie, never "not played" — so the ranking may differ from what the history would say. You can still approve after looking; auto mode never does. |
@@ -92,7 +95,9 @@ Other flags are shown on the group without sending it to review: cross-library, 
 also keep auto mode away, so you approve these yourself — stacked (multi-part), sample,
 multi-episode file, unavailable version, the keeper is not tracked by the \*arr that tracked a
 removed copy, **full disc** (the group holds a Blu-ray/DVD backup) and **\*arr tracks a clip of a
-disc**.
+disc**. With several Plex servers, **also on another server** marks a copy that another
+server's item lists while that item keeps a different file; the removal re-checks it (see
+[Several Plex servers](#several-plex-servers)).
 
 ## Minimum age, caps and circuit breakers
 
@@ -129,7 +134,9 @@ For each queued removal, immediately before acting, Dupearr:
    another copy (it imported the "duplicate" or upgraded the keeper), the group goes to review —
    otherwise the \*arr would lose its file and download it again;
 6. skips copies that are **currently playing** (retried on the next run), and items with active
-   \*arr downloads/imports.
+   \*arr downloads/imports;
+7. with several Plex servers, re-reads the other servers first (see
+   [Several Plex servers](#several-plex-servers)).
 
 If anything does not match, the action is **skipped**, the group goes to **review** and a targeted
 re-scan is queued. When Plex or the \*arr cannot be reached, the removal stays queued (or, right
@@ -193,6 +200,55 @@ badge (dry runs show what *would* happen).
 - **Shared files**: a copy that shares its file with a kept copy is never removed.
 - **Protected copies** (path glob, library, instance, `dupearr-keep` tag) are always kept.
 
+## Several Plex servers
+
+Duplicates are still grouped per server, but with two or more **enabled** Plex servers Dupearr
+never removes a file that leaves another server's item without a file.
+
+**The protection rule.** When another server's item lists a file this group would remove (the same
+mapped path, the same file on disk — also under another name, such as a renamed symbolic link or
+hard link —, or, when a server has no path mapping, the same path as Plex reports it), the copy is
+only removed if that item keeps **another version that Dupearr can prove is a different file**: mapped to a local file on the same disk as the one being removed, on a
+filesystem where the file identity means something (ext4, XFS, btrfs, ZFS), with a different
+identity. Otherwise the copy is kept, even over a manual *remove* override, with the reason "the only
+copy of … on …" and a hint of what would let Dupearr tell the files apart (usually a path mapping
+for the other server). A file with the same name and size on another server that could not be told
+apart sends the group to review, and so does the same file name in the same folder with another
+size (a server that has not re-scanned a file replaced in place still reports its old size).
+Symbolic links of another name are only recognized on a server with path mappings.
+
+**Right before each removal** (in addition to the steps above), Dupearr:
+
+- re-reads every other enabled server's libraries and refuses if one was scanned, is being scanned,
+  was added or changed its folders since the group's scan, or was not compared by that scan (it may
+  list the file now), or if a server was enabled or its identity, storage setting or path mappings
+  changed;
+- re-reads the other server's item: it must still list the same files, not be playing the copy,
+  and keep a version that is proven, from the open files, to be a different file than the one being
+  removed;
+- refuses a file another server's duplicate group keeps (the two profiles disagree: the group goes
+  to review), and a file whose other version was removed earlier in the same run.
+
+A duplicate group scanned before this check existed is never acted on until it has been re-scanned.
+
+**What stays protected, by design:**
+
+- a server Dupearr **could not read** never counts as "does not list it": the groups whose files it
+  may list go to review and cannot be approved until a scan reads it;
+- Dupearr never removes a copy on a server whose files it **cannot see**: a server without path
+  mappings keeps every file it also lists, and Radarr/Sonarr are only matched to its files through
+  confirmed links (a Radarr/Sonarr whose paths are mapped never is). With **neither** side mapped,
+  a link confirmed by mistake to a server on another host with the same folders makes its copy
+  count as the file Radarr/Sonarr tracks (see
+  [Configuration](configuration.md#radarr-and-sonarr-applications)); path mappings rule this out;
+- **Unraid user shares** (`/mnt/user`) are not yet on the list of filesystems where a different file
+  can be proven, so a file on a user share that a second server also lists stays protected. This
+  fails closed on purpose until the behaviour of user-share file identities has been confirmed;
+- a **disabled** server is not read, so it is not protected (with two or more enabled servers,
+  Health warns when it indexes the same folders as an enabled server; disabling one of two servers
+  removes all cross-server protection). A server declared **separate storage** is only protected
+  where its folders are mapped ([Configuration](configuration.md#several-plex-servers)).
+
 ## Full-disc backups
 
 A Blu-ray/DVD backup (`BDMV/`, `VIDEO_TS/`, a "Disc N" set, an `.iso`) is hundreds of files that
@@ -250,6 +306,8 @@ Removing "the duplicates" would destroy the backup. Dupearr therefore:
 ## Things Dupearr never does
 
 - delete a whole Plex item, season, show or library, merge/split items, or empty the Plex trash;
+- remove a file another Plex server lists unless that server's item keeps a file proven to be a
+  different one, or count a server it could not read as not listing a file;
 - use the \*arrs' bulk delete endpoints (only one file at a time, by id);
 - touch Plex Optimized Versions;
 - remove a single file of a Blu-ray/DVD backup (or a single loose disc clip such as `00800.m2ts`),

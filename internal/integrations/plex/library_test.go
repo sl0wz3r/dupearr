@@ -88,6 +88,28 @@ func TestSections(t *testing.T) {
 	}
 }
 
+// The library scan times and the refreshing flag (docs/DECISIONS.md D11): numbers or numeric
+// strings; absent or unparseable values are 0 ("not reported"), never a time.
+func TestSectionsScanTimes(t *testing.T) {
+	f := newFakeServer(t, routes(map[string]string{"/library/sections": `{ "MediaContainer": { "size": 3, "Directory": [
+    { "key": "1", "type": "movie", "title": "Movies", "refreshing": true, "scannedAt": 1758700000, "contentChangedAt": "1758690000",
+      "Location": [ { "id": 1, "path": "/data/media/movies" } ] },
+    { "key": "2", "type": "show", "title": "TV", "refreshing": "0", "scannedAt": "junk", "Location": [] },
+    { "key": "3", "type": "movie", "title": "Old", "scannedAt": -5, "contentChangedAt": 0, "Location": [] } ] } }`}))
+	secs, err := newTestClient(f, "").Sections(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Section{
+		{Key: "1", Type: "movie", Title: "Movies", Locations: []string{"/data/media/movies"}, Refreshing: true, ScannedAt: 1758700000, ContentChangedAt: 1758690000},
+		{Key: "2", Type: "show", Title: "TV", Locations: []string{}},
+		{Key: "3", Type: "movie", Title: "Old", Locations: []string{}},
+	}
+	if !reflect.DeepEqual(secs, want) {
+		t.Errorf("Sections =\n%+v\nwant\n%+v", secs, want)
+	}
+}
+
 func TestSectionsEmptyIsNotNil(t *testing.T) {
 	f := newFakeServer(t, routes(map[string]string{"/library/sections": `{"MediaContainer":{"size":0}}`}))
 	secs, err := newTestClient(f, "").Sections(context.Background())

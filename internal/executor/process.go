@@ -12,6 +12,7 @@ import (
 
 	"github.com/sl0wz3r/dupearr/internal/engine"
 	"github.com/sl0wz3r/dupearr/internal/events"
+	"github.com/sl0wz3r/dupearr/internal/fileid"
 	"github.com/sl0wz3r/dupearr/internal/integrations/plex"
 	"github.com/sl0wz3r/dupearr/internal/models"
 	"github.com/sl0wz3r/dupearr/internal/pathmap"
@@ -61,6 +62,11 @@ type run struct {
 	deletionOK  map[int64]cachedBool   // Plex "Allow media deletion" per server
 	arrBins     map[int64]cachedString // *arr recycle bin per instance
 	bin         *cachedString          // validated local recycle bin
+	ids         *fileid.Prober         // file identities (several media servers; fileIDs)
+	// rescans collects, with several media servers, the re-scans of skipped groups (server →
+	// rating keys): one targeted scan per server at the end of the run (flushRescans), since each
+	// one lists every movie and TV library of the other servers.
+	rescans map[int64][]string
 
 	maxCount    int
 	maxBytes    int64
@@ -368,6 +374,11 @@ func (r *run) processGroup(groupID int64, actions []models.Action) {
 		r.skipGroup(g, targets, "Not removed: "+reason, true)
 		return
 	}
+	// Several media servers (M25): the scan must have compared the group with every server.
+	if reason := r.crossServerRecordProblem(g); reason != "" {
+		r.skipGroup(g, targets, "Not removed: "+reason, true)
+		return
+	}
 	if len(problems) == 0 {
 		switch conflict, err := r.keptElsewhere(g, targets); {
 		case err != nil:
@@ -461,6 +472,21 @@ func (r *run) processGroup(groupID int64, actions []models.Action) {
 		r.deferGroup(g, vr.wait, false, false)
 		return
 	}
+	// Several media servers: the other servers that list a file to remove, and their libraries.
+	if r.multiServer() {
+		cc := r.otherServerProblem(g, targets, vr)
+		switch {
+		case cc.problem != "":
+			r.skipGroupRescan(g, targets, "Not removed: "+cc.problem, cc.rescan)
+			return
+		case cc.wait != "":
+			if ctx.Err() != nil {
+				return
+			}
+			r.deferGroup(g, cc.wait, cc.failure, cc.playing)
+			return
+		}
+	}
 
 	stamps := map[time.Time]bool{}
 	for _, t := range targets {
@@ -542,6 +568,10 @@ func (r *run) processGroup(groupID int64, actions []models.Action) {
 		r.postActions(g, done, vr)
 		for _, k := range vr.keepers {
 			r.keptInRun[k.file.Version.Key] = fmt.Sprintf("%s, #%d", title, g.ID)
+			// The other servers' listings of a kept file are that file too (docs/DECISIONS.md D11).
+			for _, e := range k.file.Version.OtherServers {
+				r.keptInRun[e.VersionKey] = fmt.Sprintf("%s, #%d", title, g.ID)
+			}
 		}
 	}
 	switch {
@@ -562,6 +592,11 @@ func (r *run) processGroup(groupID int64, actions []models.Action) {
 // (e.g. a targeted scan files it under a new key) an older group can linger until the next full
 // scan; acting on its approval could remove the newer group's keeper.
 func (r *run) keptElsewhere(g *models.DuplicateGroup, targets []*target) (string, error) {
+	// Another server's listing of a file to remove is the same file (or may be): its groups'
+	// decisions count too (docs/DECISIONS.md D11).
+	if conflict, err := r.crossKept(targets); conflict != "" || err != nil {
+		return conflict, err
+	}
 	byServer := map[int64][]string{}
 	removing := map[string]bool{}
 	for _, t := range targets {
@@ -764,6 +799,16 @@ func (s *Service) cancelActions(ctx context.Context, actions []models.Action, me
 // skipGroup marks the given not-yet-started removals skipped, sends the group to review and
 // (for stale data) queues a targeted re-scan of its items.
 func (r *run) skipGroup(g *models.DuplicateGroup, targets []*target, reason string, rescan bool) {
+	r.skipGroupAndScan(g, targets, reason, rescan, nil)
+}
+
+// skipGroupRescan is skipGroup with a re-scan of the group's items plus targeted scans of other
+// servers' items (server → rating keys) whose data changed.
+func (r *run) skipGroupRescan(g *models.DuplicateGroup, targets []*target, reason string, extra map[int64][]string) {
+	r.skipGroupAndScan(g, targets, reason, true, extra)
+}
+
+func (r *run) skipGroupAndScan(g *models.DuplicateGroup, targets []*target, reason string, rescan bool, extra map[int64][]string) {
 	ctx := context.WithoutCancel(r.ctx)
 	for _, t := range targets {
 		if t.a.Status != models.ActionPending {
@@ -775,6 +820,28 @@ func (r *run) skipGroup(g *models.DuplicateGroup, targets []*target, reason stri
 	r.s.d.Log.Warn("Duplicate group skipped and sent to review", "group", g.ID, "title", displayTitle(g), "reason", reason)
 	if rescan && r.s.d.Enqueue != nil {
 		byServer := involvedRatingKeys(g)
+		for sid, rks := range extra {
+			for _, rk := range rks {
+				if !slices.Contains(byServer[sid], rk) {
+					byServer[sid] = append(byServer[sid], rk)
+				}
+			}
+			slices.Sort(byServer[sid])
+		}
+		if r.multiServer() {
+			// Merged per server and queued at the end of the run (see run.rescans).
+			if r.rescans == nil {
+				r.rescans = map[int64][]string{}
+			}
+			for sid, rks := range byServer {
+				for _, rk := range rks {
+					if !slices.Contains(r.rescans[sid], rk) {
+						r.rescans[sid] = append(r.rescans[sid], rk)
+					}
+				}
+			}
+			byServer = nil
+		}
 		for _, sid := range sortedKeys(byServer) {
 			body := models.TargetedScanBody{ServerID: sid, RatingKeys: byServer[sid]}
 			if err := r.s.d.Enqueue(ctx, models.CmdTargetedScan, body, models.TriggerScheduled); err != nil {
@@ -784,6 +851,23 @@ func (r *run) skipGroup(g *models.DuplicateGroup, targets []*target, reason stri
 	}
 	r.s.publishGroup(ctx, g.ID)
 	r.report("Skipped %s: %s", displayTitle(g), reason)
+}
+
+// flushRescans queues the re-scans collected in this run, one targeted scan per server.
+func (r *run) flushRescans() {
+	if len(r.rescans) == 0 || r.s.d.Enqueue == nil {
+		return
+	}
+	ctx := context.WithoutCancel(r.ctx)
+	for _, sid := range sortedKeys(r.rescans) {
+		rks := r.rescans[sid]
+		slices.Sort(rks)
+		body := models.TargetedScanBody{ServerID: sid, RatingKeys: rks}
+		if err := r.s.d.Enqueue(ctx, models.CmdTargetedScan, body, models.TriggerScheduled); err != nil {
+			r.s.d.Log.Error("Could not queue a re-scan of skipped groups", "serverId", sid, "error", err)
+		}
+	}
+	r.rescans = nil
 }
 
 // deferGroup leaves a group's removals queued for a later run.
@@ -948,6 +1032,7 @@ func (r *run) report(format string, args ...any) {
 
 // finish renders the summary and the run's error.
 func (r *run) finish() (Summary, error) {
+	r.flushRescans()
 	var parts []string
 	parts = append(parts, fmt.Sprintf("%d removal(s) processed", r.sum.Processed))
 	if r.sum.Succeeded > 0 {

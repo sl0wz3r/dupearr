@@ -118,6 +118,9 @@ type fakePlex struct {
 	// machineID / identityErr are what Identity answers.
 	machineID   string
 	identityErr error
+	// sections / sectionsErr are what Sections answers (several media servers).
+	sections    []plex.Section
+	sectionsErr error
 }
 
 func (p *fakePlex) Identity(context.Context) (*plex.Identity, error) {
@@ -223,6 +226,16 @@ func (p *fakePlex) ActiveSessions(context.Context) (map[string]bool, error) {
 		return nil, p.sessionsErr
 	}
 	return maps(p.sessions), nil
+}
+
+func (p *fakePlex) Sections(context.Context) ([]plex.Section, error) {
+	p.log.add("plex.Sections")
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.sectionsErr != nil {
+		return nil, p.sectionsErr
+	}
+	return slices.Clone(p.sections), nil
 }
 
 func maps(m map[string]bool) map[string]bool {

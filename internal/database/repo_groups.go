@@ -24,7 +24,7 @@ const resolvedReason = "No longer detected as a duplicate by the last full scan"
 const groupColumns = `g.id, g.key, g.status, g.status_reason, g.media_type, g.title, g.show_title,
 	g.year, g.season, g.episode, g.server_id, g.library_ids, g.flags, g.external_ids, g.thumb,
 	g.profile_id, g.reclaimable_bytes, g.signature, g.stable_count, g.first_seen_at, g.last_seen_at,
-	g.updated_at, g.last_scan_id`
+	g.updated_at, g.last_scan_id, g.cross_server`
 
 const fileColumns = `id, group_id, version_key, decision, engine_decision, override, rank, protected,
 	protected_reason, deciding_criterion, reasons, criterion_values, version`
@@ -87,12 +87,21 @@ func scanGroup(s scanner) (models.DuplicateGroup, error) {
 		g                                models.DuplicateGroup
 		libraryIDs, flags, externalIDs   string
 		firstSeen, lastSeen, updatedTime string
+		crossServer                      string
 	)
 	if err := s.Scan(&g.ID, &g.Key, &g.Status, &g.StatusReason, &g.MediaType, &g.Title, &g.ShowTitle,
 		&g.Year, &g.Season, &g.Episode, &g.ServerID, &libraryIDs, &flags, &externalIDs, &g.Thumb,
 		&g.ProfileID, &g.ReclaimableBytes, &g.Signature, &g.StableCount, &firstSeen, &lastSeen,
-		&updatedTime, &g.LastScanID); err != nil {
+		&updatedTime, &g.LastScanID, &crossServer); err != nil {
 		return models.DuplicateGroup{}, err
+	}
+	if strings.TrimSpace(crossServer) != "" {
+		// '' is "no record" (a group stored before multi-server support, or by a one-server scan).
+		var rec models.CrossServerRecord
+		if err := fromJSON(crossServer, &rec); err != nil {
+			return models.DuplicateGroup{}, fmt.Errorf("group %d cross-server record: %w", g.ID, err)
+		}
+		g.CrossServer = &rec
 	}
 	if err := fromJSON(libraryIDs, &g.LibraryIDs); err != nil {
 		return models.DuplicateGroup{}, fmt.Errorf("group %d library ids: %w", g.ID, err)
@@ -521,15 +530,21 @@ func (r groupRepo) Upsert(ctx context.Context, g *models.DuplicateGroup) (bool, 
 		}
 
 		search := searchText(g.Title, g.ShowTitle)
+		crossServer := ""
+		if g.CrossServer != nil {
+			if crossServer, err = toJSON(g.CrossServer); err != nil {
+				return fmt.Errorf("cross-server record: %w", err)
+			}
+		}
 		if created {
 			res, err := tx.ExecContext(ctx, `INSERT INTO duplicate_groups
 				(key, status, status_reason, media_type, title, show_title, year, season, episode, server_id,
 				 library_ids, flags, external_ids, thumb, profile_id, reclaimable_bytes, signature, stable_count,
-				 search_text, first_seen_at, last_seen_at, updated_at, last_scan_id, retained_overrides)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				 search_text, first_seen_at, last_seen_at, updated_at, last_scan_id, retained_overrides, cross_server)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				g.Key, string(status), reason, string(g.MediaType), g.Title, g.ShowTitle, g.Year, g.Season, g.Episode,
 				g.ServerID, libraryIDs, flags, externalIDs, g.Thumb, g.ProfileID, reclaimable, g.Signature,
-				g.StableCount, search, fmtTime(firstSeen), fmtTime(lastSeen), fmtTime(now), g.LastScanID, retainedJSON)
+				g.StableCount, search, fmtTime(firstSeen), fmtTime(lastSeen), fmtTime(now), g.LastScanID, retainedJSON, crossServer)
 			if err != nil {
 				return wrap(err, "insert group")
 			}
@@ -541,11 +556,11 @@ func (r groupRepo) Upsert(ctx context.Context, g *models.DuplicateGroup) (bool, 
 				status = ?, status_reason = ?, media_type = ?, title = ?, show_title = ?, year = ?, season = ?,
 				episode = ?, server_id = ?, library_ids = ?, flags = ?, external_ids = ?, thumb = ?, profile_id = ?,
 				reclaimable_bytes = ?, signature = ?, stable_count = ?, search_text = ?, last_seen_at = ?,
-				updated_at = ?, last_scan_id = ?, retained_overrides = ?
+				updated_at = ?, last_scan_id = ?, retained_overrides = ?, cross_server = ?
 				WHERE id = ?`,
 				string(status), reason, string(g.MediaType), g.Title, g.ShowTitle, g.Year, g.Season, g.Episode,
 				g.ServerID, libraryIDs, flags, externalIDs, g.Thumb, g.ProfileID, reclaimable, g.Signature,
-				g.StableCount, search, fmtTime(lastSeen), fmtTime(now), g.LastScanID, retainedJSON, groupID); err != nil {
+				g.StableCount, search, fmtTime(lastSeen), fmtTime(now), g.LastScanID, retainedJSON, crossServer, groupID); err != nil {
 				return wrap(err, "update group")
 			}
 		}

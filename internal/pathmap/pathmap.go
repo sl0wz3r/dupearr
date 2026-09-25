@@ -8,6 +8,8 @@
 package pathmap
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path"
 	"path/filepath"
@@ -81,6 +83,28 @@ func (m *Mapper) ToLocal(sourceType string, sourceID int64, remote string) (loca
 		}
 	}
 	return "", false
+}
+
+// Fingerprint identifies the mappings of one source ("" when it has none): equal fingerprints
+// translate every path of that source alike. With several media servers a group's cross-server
+// record stores each server's fingerprint, so the executor notices a mapping changed since the
+// scan (the scan compared the servers' files through the mappings it had).
+func (m *Mapper) Fingerprint(sourceType string, sourceID int64) string {
+	if m == nil {
+		return ""
+	}
+	var lines []string
+	for _, e := range m.byRemote {
+		if e.sourceType == sourceType && e.sourceID == sourceID {
+			lines = append(lines, e.remote+"\x00"+e.local)
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	sort.Strings(lines)
+	sum := sha256.Sum256([]byte(strings.Join(lines, "\n")))
+	return hex.EncodeToString(sum[:8])
 }
 
 // ToRemote translates a local path back to the path the given source sees, using the longest

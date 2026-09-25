@@ -35,6 +35,7 @@ token can scan but not delete through Plex, so sign in with the **owner's** acco
 | URL | Must be reachable from Dupearr (container name if both share a Docker network, else the host's LAN IP). |
 | Token | Stored in the database, shown masked. Must belong to the **server owner** for the Plex deletion method: Plex does not let shared users delete media. |
 | Verify TLS | Turn off only for self-signed `https://` URLs you trust. |
+| Storage | Shown once you have more than one media server; see [Several Plex servers](#several-plex-servers). |
 
 **Test** shows the server version, whether the token is the owner's (*Unknown* when plex.tv cannot
 be asked, e.g. on a LAN-only setup), and whether **Allow media deletion** is enabled. Saving tests
@@ -43,6 +44,44 @@ server as a new one). That Plex setting (Plex Web → *Settings → (your server
 media deletion*, an advanced setting) is only needed if `plex` is one of your deletion methods;
 Dupearr never changes it for you.
 
+### Several Plex servers
+
+Each server is still scanned and grouped on its own: the same film on two servers is not a
+duplicate. What changes with two or more **enabled** servers is that Dupearr looks at every server
+before it removes a file, because two servers often index the same share (a 4K server and a
+1080p server, or a second server for family members):
+
+- A file that another server's item also lists is only removed while that item keeps **another
+  file** that Dupearr can prove is a different file. Otherwise the copy is kept, with the reason
+  "the only copy of … on …" (see [Safety](safety.md#several-plex-servers)).
+- A server that cannot be read during a scan sends the duplicates whose files it may list to
+  review; the approval is refused until a new scan has read it. Make it reachable (or disable it,
+  or declare it separate storage), then re-scan: the setting alone does not change what the last
+  scan recorded.
+- Add a **path mapping for every server**: files are compared by their local path and on-disk
+  identity. A server without mappings is compared by the raw path Plex reports and by file name
+  and size, which keeps more duplicates protected or in review; a Radarr/Sonarr whose paths are
+  mapped is never matched to its files by raw path or by name and size (Health warns). Symbolic
+  links of another name are only recognized through a mapping.
+
+**Storage** (*Settings → Media Servers → (server) → Storage*, shown once there is a second server):
+
+| Value | Use it for |
+|---|---|
+| Same storage as the other servers (default) | Servers on this host or reading the same share. Their paths, file names and sizes are compared with the other servers'. |
+| Separate storage | A server on another host with its own disks, or a friend's server. Its raw paths and file names are never compared with other servers', its files are never matched to Radarr/Sonarr by raw path or name, and its copies never count as a keeper for another server. Only its mapped folders are still compared. |
+
+Declaring a server **separate** removes the protection of every file of it that Dupearr cannot see
+through a path mapping. If a server that actually reads the same share is declared separate by
+mistake, a removal on another server can take its last copy. Health warns when the last full scan
+found files of a separate server with the same name and size as another server's: set it back to
+the same storage unless you are sure.
+
+A **disabled** server is not read at all, so it is not protected. With two or more enabled
+servers, Health reports a disabled server that indexes the same folders as an enabled one. Disabling
+one of **two** servers turns Dupearr back into a one-server installation: nothing protects the
+disabled server's files then, and no health check mentions it.
+
 ## Libraries and scope groups
 
 After adding a server, *Settings → Media Servers → (server) → Libraries* lists its movie and TV
@@ -50,13 +89,14 @@ libraries (use **Sync** after creating libraries in Plex).
 
 | Setting | Meaning |
 |---|---|
-| Enabled | Scan this library. Nothing outside enabled libraries is ever examined. |
+| Enabled | Scan this library. Nothing outside enabled libraries is ever examined for duplicates. With several Plex servers, every movie and TV library of the other enabled servers (enabled here or not) is also read, only to protect the files it lists. |
 | Profile | Decision profile for groups in this library (empty = the default profile). |
 | Scope group | Free text. Libraries with the **same non-empty** scope group are compared **with each other** (the same movie in *Movies* and *Movies 4K*). Leave it empty to find duplicates only *within* the library. |
 
 Example: *Movies* and *Movies 4K* both in scope group `movies` → a film in both is one group, and
 the profile decides which copy (or, with *Keep One Per Resolution*, whether both) to keep.
-Duplicates are only matched within one Plex server.
+Duplicates are only matched within one Plex server; with several servers, a file another server
+also lists is protected ([Several Plex servers](#several-plex-servers)).
 
 ## Radarr and Sonarr (applications)
 
@@ -68,6 +108,7 @@ Duplicates are only matched within one Plex server.
 | URL | Including the \*arr's URL base if it has one: `http://radarr:7878` or `https://proxy.example/radarr`. A missing URL base shows up as a redirect error on **Test**. |
 | API key | Radarr/Sonarr → *Settings → General → Security → API Key*. Sent only in the `X-Api-Key` header. |
 | Verify TLS | As for Plex. |
+| Plex servers it feeds | Shown once there are two or more media servers. Tick the servers that see the same files as this instance (the same disks or share), never a server on another host that only holds copies of them, then tick the confirmation below the list. |
 
 Add **every** instance, including a separate 4K instance: Dupearr matches each Plex copy to the
 instance that tracks it (by path, then name + size), which unlocks quality/source/custom-format
@@ -84,6 +125,18 @@ Recommendations:
 - **Separate 4K instance?** By default versions tracked by *different* instances are treated as an
   intentional pair and the group is *protected*
   ([setting](#media-management-settings): *Different \*arr instances are intentional*).
+- **Several Plex servers?** Choose the servers each instance feeds, tick the confirmation and save
+  (saving without the tick, for instance after changing only the API key, confirms nothing). Until
+  you confirm, the instance is only matched to files through path mappings, duplicates it may track
+  go to review, and Health warns. With one server there is nothing to choose: the instance is
+  linked to it (an upgrade from an earlier version links the existing instances the same way).
+  **Adding or enabling another Plex server** makes the links of every instance not linked to it
+  unconfirmed again: check them after each new server.
+- **How links are used.** A Radarr/Sonarr whose paths are mapped is only ever matched by those
+  mapped paths to a server without a mapping for them, whatever the links say. With **neither**
+  side mapped, raw paths (and names and sizes) are matched only for the servers you confirmed:
+  ticking a server on another host with the same folder layout by mistake makes Dupearr take its
+  copy for the file Radarr/Sonarr tracks. Add path mappings to rule this out.
 
 ## Tautulli (watch history)
 

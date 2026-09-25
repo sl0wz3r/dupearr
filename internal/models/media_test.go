@@ -2,6 +2,7 @@ package models
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -73,5 +74,56 @@ func TestDefaultSettingsDiscs(t *testing.T) {
 	}
 	if !s.DetectDiscs || s.AllowDiscRemoval || !s.KeepPlayableCopy {
 		t.Fatal("decoding an older document lost the disc defaults")
+	}
+}
+
+// Several Plex servers (docs/DECISIONS.md D11): the new fields are absent from the JSON of a
+// one-server installation, and a listing round-trips with nil and set pointers.
+func TestMultiServerJSONOmittedWhenAbsent(t *testing.T) {
+	v, err := json.Marshal(MediaVersion{Key: "plex:1:1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(v), "otherServers") {
+		t.Fatalf("version JSON has otherServers: %s", v)
+	}
+	g, err := json.Marshal(DuplicateGroup{Key: "movie:tmdb:1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(g), "crossServer") {
+		t.Fatalf("group JSON has crossServer: %s", g)
+	}
+	st, err := json.Marshal(ScanStats{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(st), "separateNameMatches") {
+		t.Fatalf("scan stats JSON has separateNameMatches: %s", st)
+	}
+}
+
+func TestOtherListingRoundTrip(t *testing.T) {
+	yes := true
+	for _, l := range []OtherListing{
+		{ServerID: 2, VersionKey: "plex:2:9", Match: OtherSameFile},
+		{ServerID: 2, VersionKey: "plex:2:9", Match: OtherPossiblySame, ItemKeepsAnother: &yes, KeptByGroup: &yes,
+			Others: []OtherMedia{{MediaID: 10, VersionKey: "plex:2:10", Same: []string{"plex:1:1"}, Distinct: []string{"plex:1:2"}}}, Hint: "map it"},
+	} {
+		data, err := json.Marshal(MediaVersion{Key: "plex:1:1", OtherServers: []OtherListing{l}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var back MediaVersion
+		if err := json.Unmarshal(data, &back); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(back.OtherServers, []OtherListing{l}) {
+			t.Fatalf("round trip %+v, want %+v", back.OtherServers, l)
+		}
+		// Unknown stays unknown (null), never false.
+		if l.ItemKeepsAnother == nil && !strings.Contains(string(data), `"itemKeepsAnother":null`) {
+			t.Fatalf("nil itemKeepsAnother encoded as %s", data)
+		}
 	}
 }

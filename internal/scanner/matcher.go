@@ -29,13 +29,48 @@ import (
 // Several tracked files at the same path (the same file tracked by two instances) resolve
 // deterministically to the lowest instance id, then the lowest file id. The file-name fallback
 // never guesses: an ambiguous name+size matches nothing. A Matcher is safe for concurrent use.
+//
+// With two or more enabled media servers (SetServers, docs/DECISIONS.md D11) rules 2 and 3 assume
+// one filesystem namespace only where it is known: they apply only between an instance and a
+// server it is confirmed to feed (and never for a server declared separate storage), and never
+// attribute a version of a server that has no mapping for the part to an *arr file that maps
+// (a remote server with the same folder layout, research scenario D): its tracking is then
+// unknown, never "untracked". Rule 1 works in Dupearr's own view and applies to every server.
 type Matcher struct {
 	mapper *pathmap.Mapper
+	policy MatchPolicy
 
 	mu      sync.RWMutex
 	byLocal map[string][]matchEntry
 	byRaw   map[string][]matchEntry
 	byName  map[nameSize][]matchEntry
+}
+
+// MatchPolicy is the multi-server matching policy (docs/DECISIONS.md D11). The zero value is the
+// one-server policy: every instance feeds the only server.
+type MatchPolicy struct {
+	// Multi: two or more media servers are enabled.
+	Multi bool
+	// Links maps an *arr instance to the media servers it feeds; Confirmed reports instances whose
+	// links a person confirmed; Separate reports servers declared separate storage.
+	Links     map[int64]map[int64]bool
+	Confirmed map[int64]bool
+	Separate  map[int64]bool
+}
+
+// linked reports whether rules 2 and 3 may pair instance with server.
+func (mp MatchPolicy) linked(instance, server int64) bool {
+	if !mp.Multi {
+		return true
+	}
+	return mp.Confirmed[instance] && mp.Links[instance][server] && !mp.Separate[server]
+}
+
+// SetServers sets the multi-server policy (call before matching).
+func (mt *Matcher) SetServers(p MatchPolicy) {
+	mt.mu.Lock()
+	defer mt.mu.Unlock()
+	mt.policy = p
 }
 
 // matchEntry is one indexed tracked file.
@@ -103,17 +138,32 @@ const (
 // Match returns the tracked file for version v of server serverID, or nil. The result is a copy:
 // callers may keep or modify it.
 func (mt *Matcher) Match(serverID int64, v *models.MediaVersion) *arr.TrackedFile {
-	tf, _ := mt.match(serverID, v)
+	tf, _, _ := mt.match(serverID, v)
 	return tf
 }
 
-// match is Match reporting which rule matched.
-func (mt *Matcher) match(serverID int64, v *models.MediaVersion) (*arr.TrackedFile, matchKind) {
+// match is Match reporting which rule matched and, when nothing matched although a mapped *arr file
+// would have matched a part the server has no mapping for (Multi), why the tracking is unknown.
+func (mt *Matcher) match(serverID int64, v *models.MediaVersion) (*arr.TrackedFile, matchKind, string) {
 	if mt == nil || v == nil || len(v.Parts) == 0 {
-		return nil, matchNone
+		return nil, matchNone, ""
 	}
 	mt.mu.RLock()
 	defer mt.mu.RUnlock()
+	pol := mt.policy
+	unknown := ""
+	refuse := func(e matchEntry, local string) bool {
+		if !pol.Multi {
+			return false
+		}
+		if e.mapped && local == "" {
+			// A mapped *arr file and a part this server has no mapping for: Dupearr sees the *arr's
+			// file but cannot tell whether the version is that file (whatever the links say).
+			unknown = "unmapped"
+			return true
+		}
+		return !pol.linked(e.instanceID, serverID)
+	}
 
 	// 1. Mapped local path equality.
 	locals := make([]string, len(v.Parts))
@@ -127,7 +177,7 @@ func (mt *Matcher) match(serverID int64, v *models.MediaVersion) (*arr.TrackedFi
 			continue
 		}
 		if es := mt.byLocal[locals[i]]; len(es) > 0 {
-			return pick(es), matchLocal
+			return pick(es), matchLocal, ""
 		}
 	}
 	// 2. Raw path equality, unless both sides were mapped (then their local paths differ, which
@@ -142,10 +192,13 @@ func (mt *Matcher) match(serverID int64, v *models.MediaVersion) (*arr.TrackedFi
 			if e.mapped && locals[i] != "" {
 				continue
 			}
+			if refuse(e, locals[i]) {
+				continue
+			}
 			usable = append(usable, e)
 		}
 		if len(usable) > 0 {
-			return pick(usable), matchRaw
+			return pick(usable), matchRaw, ""
 		}
 	}
 	// 3. File name + size, only when unambiguous — and, like step 2, never against a tracked
@@ -155,31 +208,40 @@ func (mt *Matcher) match(serverID int64, v *models.MediaVersion) (*arr.TrackedFi
 		if n == "" || p.Size <= 0 {
 			continue
 		}
-		if es := mt.byName[nameSize{name: n, size: p.Size}]; len(es) == 1 && !(es[0].mapped && locals[i] != "") {
+		if es := mt.byName[nameSize{name: n, size: p.Size}]; len(es) == 1 && !(es[0].mapped && locals[i] != "") && !refuse(es[0], locals[i]) {
 			f := es[0].file
-			return &f, matchName
+			return &f, matchName, ""
 		}
 	}
-	return nil, matchNone
+	if unknown != "" {
+		return nil, matchNone, unknownUnmapped
+	}
+	return nil, matchNone, ""
 }
+
+// unknownUnmapped is match's unknown reason for a mapped *arr file and an unmapped part.
+const unknownUnmapped = "unmapped"
 
 // matchDisc returns the tracked file of a full-disc version: for a disc image, the image file
 // (Match's rules); for a disc folder structure, a file tracked INSIDE the disc — an *arr can only
 // track one file, usually a clip it imported in place (BDMV/STREAM/00800.m2ts) — whose mapped local
 // path lies inside one of the disc's owned entries or, when the *arr path cannot be mapped, whose
 // raw path lies below a disc root inside the disc structure. Several such files (two instances)
-// resolve like Match: lowest instance id, then file id.
-func (mt *Matcher) matchDisc(serverID int64, v *models.MediaVersion) (*arr.TrackedFile, matchKind) {
+// resolve like Match: lowest instance id, then file id. Like match, it reports why the tracking is
+// unknown when nothing matched because a mapped *arr file would have matched a disc of a server
+// with no mapping for it (Multi).
+func (mt *Matcher) matchDisc(serverID int64, v *models.MediaVersion) (*arr.TrackedFile, matchKind, string) {
 	d := v.Disc
 	if mt == nil || d == nil {
-		return nil, matchNone
+		return nil, matchNone, ""
 	}
 	if d.IsImage() {
 		return mt.match(serverID, v)
 	}
 	// A custom Plex scanner lists the clips as parts: a tracked clip among them matches by path.
-	if tf, kind := mt.match(serverID, v); tf != nil && kind != matchName {
-		return tf, kind
+	tf, kind, unknown := mt.match(serverID, v)
+	if tf != nil && kind != matchName {
+		return tf, kind, ""
 	}
 	var owned, roots []string
 	for _, e := range d.OwnedEntries {
@@ -204,7 +266,7 @@ func (mt *Matcher) matchDisc(serverID int64, v *models.MediaVersion) (*arr.Track
 		}
 	}
 	if len(found) > 0 {
-		return pick(found), matchLocal
+		return pick(found), matchLocal, ""
 	}
 	for k, es := range mt.byRaw {
 		for _, e := range es {
@@ -212,17 +274,27 @@ func (mt *Matcher) matchDisc(serverID int64, v *models.MediaVersion) (*arr.Track
 				continue // its local path was compared above
 			}
 			for _, r := range roots {
-				if withinPathKey(k, r) && k != r && disc.IsDiscPath(strings.TrimPrefix(k, strings.TrimSuffix(r, "/"))) {
-					found = append(found, e)
-					break
+				if !withinPathKey(k, r) || k == r || !disc.IsDiscPath(strings.TrimPrefix(k, strings.TrimSuffix(r, "/"))) {
+					continue
 				}
+				switch {
+				case mt.policy.Multi && e.mapped && len(owned) == 0:
+					// docs/DECISIONS.md D11: a mapped *arr file inside the raw path of a disc its
+					// server has no mapping for may be another host's copy: unknown, not untracked.
+					unknown = unknownUnmapped
+				case mt.policy.Multi && !mt.policy.linked(e.instanceID, serverID):
+					// Raw paths are only compared within a known namespace.
+				default:
+					found = append(found, e)
+				}
+				break
 			}
 		}
 	}
 	if len(found) > 0 {
-		return pick(found), matchRaw
+		return pick(found), matchRaw, ""
 	}
-	return nil, matchNone
+	return nil, matchNone, unknown
 }
 
 // trackedRef identifies a tracked file across matches: its instance and file id (or path when

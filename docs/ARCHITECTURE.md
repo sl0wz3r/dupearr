@@ -146,6 +146,14 @@ Normalized attributes (computed by the Plex mapper, overridable/enriched by *arr
   `failed` (the read failed); `plays`, distinct `users`, `lastPlayed`, `readAt`. The versions of
   one item share it; a full disc is always `unknown`. Only counts and dates are stored, never user
   names.
+- `OtherServers` (DECISIONS D11; only with two or more enabled Plex servers, omitted otherwise):
+  the media of **other servers' items** that list the version's file (`match` `same_file`: an
+  equal mapped local path, equal device and inode, or an equal raw path while a side is unmapped
+  and neither server is separate) or a file with the same name and size (`possibly_same`), with
+  that item's other versions (`others[]`: which group versions each is, or may be, the file of —
+  `same` — and which it could be proven a different file from — `distinct`), `itemKeepsAnother`
+  (for a removed version), `keptByGroup` (another server's live group keeps the listing) and a
+  `hint` saying what would let Dupearr tell the files apart.
 
 ### 4.2 DuplicateGroup
 A set of ≥2 versions that represent the same content. Identity key (stable across scans):
@@ -178,7 +186,15 @@ Group **flags** (informational + safety): `cross_library`, `duration_mismatch` (
 `disc_unreadable` (a disc could not be read or verified → review, kept), `disc_tracked_clip` (an
 *arr tracks a clip inside a disc), `watch_unreadable` (the profile ranks by play history, something
 would be removed, a copy's history could not be read and copies of different Plex items could be
-told apart by it → review, never auto-approved; D10).
+told apart by it → review, never auto-approved; D10). With two or more enabled Plex servers
+(D11): `other_server_listing` (another server lists a removed file and keeps a copy that can be
+proven different; information), `other_server_keeps` (another server's live group keeps a removed
+file → review), `other_server_possible` (another server lists a file with the same name and size →
+review) and `other_server_unread` (a server that may list the files could not be read → review,
+not approvable). A group also stores its **cross-server record** (`crossServer`: the enabled
+servers with identity, storage, a fingerprint of their path mappings and read state; the other
+servers' movie and TV libraries the scan listed and compared, with `scannedAt`, `contentChangedAt`,
+`refreshing`), which the executor compares right before a removal.
 
 ### 4.3 Decision profiles (the rules)
 A profile is an **ordered tiebreaker chain** of criteria plus keep options and protections.
@@ -273,8 +289,21 @@ full-disc backups, DECISIONS D9.
    churn guard per zero-play item) and attach `MediaVersion.watch` to every version. Any read error
    marks every copy of that server `failed` (counted as a scan error); nothing is ever inferred as
    "not played" from a failure.
+2c. **Other servers** (DECISIONS D11; only with two or more enabled Plex servers): every enabled
+   server's libraries are read first (`GET /library/sections`, after its identity check), the
+   other servers' movie and TV libraries are listed too (index-only when not scanned; a server
+   declared separate only where its mapped folders overlap), and a cross-server file index (mapped
+   local path, raw path, name and size) records, per version, the other servers' items that list
+   its file (`OtherServers`, with their other versions compared through `internal/fileid`: same
+   device, allowlisted filesystem type, different inode). *arr matching by raw path or by name and
+   size then applies only between an instance and a server it is confirmed to feed, and never
+   between a mapped *arr file and an unmapped part (tracking unknown → review). A server that could
+   not be read makes dependent groups go to review ("Incomplete data").
 3. **Group** with `engine.BuildGroups`: dedupe identical paths, split editions, compute flags
    (duration mismatch, multi-episode sharing, hardlinks when local path accessible, min-age).
+   With two or more servers, every group then gets its `OtherServers` listings and its cross-server
+   record (§4.2); after the resolution a pass marks the listings another server's live group keeps
+   (`other_server_keeps`) and re-evaluates those groups (never approved automatically in that scan).
 4. **Evaluate** each group with its library's profile (or default) → per-version decision, rank,
    reasons, deciding criterion; apply protections and safety invariants; set status.
 5. **Persist**: upsert by key (keep `ignored` + overrides), mark unseen groups resolved (full scan
@@ -319,6 +348,16 @@ For each queued group (its pending actions = versions V to remove):
    - **Age**: V is older than `minAgeHours` (per-version date: the later of Plex `addedAt` and the
      *arr `dateAdded`; for a copy no *arr dates, the later of Plex `addedAt` and the file's change
      time when it can be stat'ed).
+   - **Other servers** (DECISIONS D11; two or more enabled servers only): the group's cross-server
+     record must be complete and name every enabled server with its current identity and storage
+     (else review and re-scan: M25); every other server's libraries are re-read and must be as the
+     record saw them (new library, changed folders, refreshing, newer or missing `scannedAt` /
+     `contentChangedAt` → review and a targeted scan: M14; unreadable → defer); for every other
+     server that lists V: reachable, identity confirmed (none stored → defer: M26), not playing the
+     item, the item still lists V and keeps another non-optimized version that Dupearr finds on
+     disk through its mapping with Plex's size and proves a different file from every V
+     (`fileid.Compare`: both files open at the same time, same device, different inode, ext4 / XFS
+     / btrfs / ZFS); and no live group of that server keeps V's listing.
    Otherwise → actions `skipped`, group → `review`, targeted re-scan queued (or deferred when a
    system could not be asked, or a version is playing).
 2. **Choose method** from `settings.deletionMethods` in order, for every removal before the first
@@ -384,6 +423,15 @@ two ProcessQueue commands at once.
 9. Play history only reorders the ranking: it never protects, never unprotects and is never read by
    the executor. An unknown or unreadable history is never "not played"; a group ranked on a
    history that could not be read goes to review and is never auto-approved (DECISIONS D10).
+10. With several Plex servers (DECISIONS D11): a file another server's item lists is never removed
+    unless that item keeps another version proven a different file on disk right before the removal
+    (Plex's `exists=true` alone never counts across servers), and never while another server's live
+    group keeps it; two paths are different files only on an allowlisted filesystem type with the
+    same device and different inodes read from files open at the same time (`fuse.shfs` user shares
+    are not on the list yet); a server that could not be read, a missing or outdated cross-server
+    record and changed libraries on another server are unknown and never mean "not listed
+    elsewhere"; a mapped *arr file is never matched to, or confirmed against, an unmapped server's
+    part. With one server none of this applies and nothing changes.
 
 ---
 

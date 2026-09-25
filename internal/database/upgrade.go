@@ -23,9 +23,79 @@ import (
 // discProfilesMarker records the full-disc profile upgrade (docs/DECISIONS.md D9).
 const discProfilesMarker = "upgrade.discProfiles"
 
+// arrLinksMarker records the *arr ↔ media server link upgrade (docs/DECISIONS.md D11).
+const arrLinksMarker = "upgrade.arrServerLinks"
+
 // upgradeData applies the pending data upgrades (Open calls it after the schema migrations).
 func (d *DB) upgradeData(ctx context.Context) error {
-	return d.upgradeDiscProfiles(ctx)
+	if err := d.upgradeDiscProfiles(ctx); err != nil {
+		return err
+	}
+	return d.upgradeArrLinks(ctx)
+}
+
+// upgradeArrLinks links the *arr instances of a one-server installation to that server, once:
+// with exactly one enabled Plex server every instance without links gets a link to it and
+// links_confirmed = 1 (today's behaviour: an instance feeds the only server). With two or more
+// enabled servers nothing is stored: linking every pair would enable raw-path and name matching
+// against a server on another host as soon as a person confirmed without editing, so the links
+// stay unconfirmed (the fail-closed state) until a person saves them.
+//
+// Like the profile upgrade, the marker is only recorded when there are instances and an enabled
+// server to decide on (see the package comment above): a restored older backup, whose instances
+// come without links, is upgraded when it is opened.
+func (d *DB) upgradeArrLinks(ctx context.Context) error {
+	return d.write(ctx, func(tx *sql.Tx) error {
+		var done string
+		switch err := tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, arrLinksMarker).Scan(&done); {
+		case err == nil:
+			return nil
+		case !errors.Is(err, sql.ErrNoRows):
+			return wrap(err, "upgrade *arr links: read marker")
+		}
+		var instances int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM arr_instances`).Scan(&instances); err != nil {
+			return wrap(err, "upgrade *arr links: count instances")
+		}
+		servers, err := queryAll(ctx, tx, func(s scanner) (int64, error) {
+			var id int64
+			err := s.Scan(&id)
+			return id, err
+		}, `SELECT id FROM media_servers WHERE enabled = 1 AND kind IN (?, '') ORDER BY id`, models.MediaServerPlex)
+		if err != nil {
+			return wrap(err, "upgrade *arr links: list media servers")
+		}
+		if instances == 0 || len(servers) == 0 {
+			return nil // nothing to decide yet (see the package comment above)
+		}
+		linked := int64(0)
+		if len(servers) == 1 {
+			res, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO arr_server_links (arr_id, server_id)
+				SELECT a.id, ? FROM arr_instances a
+				WHERE a.links_confirmed = 0 AND NOT EXISTS (SELECT 1 FROM arr_server_links l WHERE l.arr_id = a.id)`, servers[0])
+			if err != nil {
+				return wrap(err, "upgrade *arr links: link instances")
+			}
+			if linked, err = res.RowsAffected(); err != nil {
+				return wrap(err, "upgrade *arr links: link instances")
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE arr_instances SET links_confirmed = 1
+				WHERE links_confirmed = 0 AND id IN (SELECT arr_id FROM arr_server_links WHERE server_id = ?)`, servers[0]); err != nil {
+				return wrap(err, "upgrade *arr links: confirm links")
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO settings (key, value) VALUES (?, ?)`,
+			arrLinksMarker, fmtTime(nowUTC())); err != nil {
+			return wrap(err, "upgrade *arr links: record marker")
+		}
+		switch {
+		case linked > 0:
+			d.log.Info("Linked the *arr instances to the only media server", "instances", linked)
+		case len(servers) > 1:
+			d.log.Info("Several media servers are enabled: confirm which Plex servers each *arr instance feeds (Settings → Applications)")
+		}
+		return nil
+	})
 }
 
 // upgradeDiscProfiles adds the values full-disc support introduced to the stored profiles, once:

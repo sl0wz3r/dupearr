@@ -207,7 +207,16 @@ func (p *pipeline) runTargeted(body models.TargetedScanBody) error {
 	}
 	cfg.withScopePartners(libs)
 
-	p.listLibraries(sortedLibraries(libs), cfg.overlapPartners(libs))
+	partners := cfg.overlapPartners(libs)
+	if cfg.multi {
+		// Every movie and TV library of the other servers, whatever the targeted media type
+		// (docs/DECISIONS.md D11): another server may list a movie file in a TV library.
+		p.readSections()
+		for id, l := range cfg.crossServerPartners(libs, p.sections) {
+			partners[id] = l
+		}
+	}
+	p.listLibraries(sortedLibraries(libs), partners)
 	if err := p.ctx.Err(); err != nil {
 		return canceled(err)
 	}
@@ -296,6 +305,7 @@ func (p *pipeline) runTargeted(body models.TargetedScanBody) error {
 	p.applyFileAges(items)
 	p.noteUnavailable(items)
 	groups := engine.BuildGroups(items, engine.GroupOptionsFromSettings(cfg.settings, cfg.exclusions, cfg.libraries))
+	p.annotateCrossServer(groups, false)
 	p.persistGroups(groups, busy)
 	if err := p.ctx.Err(); err != nil {
 		return canceled(err)
@@ -309,6 +319,7 @@ func (p *pipeline) runTargeted(body models.TargetedScanBody) error {
 	if err := p.ctx.Err(); err != nil {
 		return canceled(err)
 	}
+	p.markOtherServerKeeps()
 	p.autoApprove()
 	return nil
 }

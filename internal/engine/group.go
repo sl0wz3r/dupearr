@@ -217,7 +217,31 @@ func cloneVersion(src *models.MediaVersion) *models.MediaVersion {
 		}
 		v.Arr = &a
 	}
+	v.OtherServers = CloneOtherListings(src.OtherServers)
 	return &v
+}
+
+// CloneOtherListings deep-copies a version's OtherServers (nil stays nil).
+func CloneOtherListings(in []models.OtherListing) []models.OtherListing {
+	if in == nil {
+		return nil
+	}
+	out := make([]models.OtherListing, len(in))
+	for i, o := range in {
+		o.ItemKeepsAnother = cloneBoolPtr(o.ItemKeepsAnother)
+		o.KeptByGroup = cloneBoolPtr(o.KeptByGroup)
+		if o.Others != nil {
+			others := make([]models.OtherMedia, len(o.Others))
+			for j, m := range o.Others {
+				m.Same = append([]string(nil), m.Same...)
+				m.Distinct = append([]string(nil), m.Distinct...)
+				others[j] = m
+			}
+			o.Others = others
+		}
+		out[i] = o
+	}
+	return out
 }
 
 // fillVersionIdentity completes version identity fields the mapper leaves to the caller.

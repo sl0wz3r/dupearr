@@ -105,9 +105,15 @@ type UserRepo interface {
 	DeleteAll(ctx context.Context) error
 }
 
+// MediaServerRepo stores media server connections, Storage included (docs/DECISIONS.md D11).
 type MediaServerRepo interface {
 	List(ctx context.Context) ([]models.MediaServer, error)
 	Get(ctx context.Context, id int64) (*models.MediaServer, error)
+	// Create and Update of an enabled Plex server that is not declared separate storage and was
+	// not one before (new, enabled, or declared shared storage) make the *arr links of every
+	// instance not linked to it unconfirmed, in the same transaction, when two or more Plex servers
+	// are then enabled (docs/DECISIONS.md D11: a confirmation only covers the servers a person
+	// could choose from).
 	Create(ctx context.Context, s *models.MediaServer) error
 	Update(ctx context.Context, s *models.MediaServer) error
 	Delete(ctx context.Context, id int64) error // cascades libraries + path mappings of the server
@@ -124,6 +130,10 @@ type LibraryRepo interface {
 	Update(ctx context.Context, l *models.Library) error
 }
 
+// ArrInstanceRepo stores *arr instances with their media server links (ServerIDs, never nil,
+// sorted; LinksConfirmed; docs/DECISIONS.md D11). Create stores the links in the same
+// transaction; Update replaces them unless ServerIDs is nil (then the stored links are kept).
+// Deleting an instance or a media server deletes its links.
 type ArrInstanceRepo interface {
 	List(ctx context.Context) ([]models.ArrInstance, error)
 	Get(ctx context.Context, id int64) (*models.ArrInstance, error)
@@ -170,7 +180,8 @@ type GroupRepo interface {
 	// groups that no longer have duplicates).
 	ListByRatingKeys(ctx context.Context, serverID int64, ratingKeys []string) ([]models.DuplicateGroup, error)
 	// Upsert inserts or updates a group by Key (and replaces its files, matched by Version.Key),
-	// preserving: FirstSeenAt, Status=ignored, and each file's Override (by Version.Key).
+	// preserving: FirstSeenAt, Status=ignored, and each file's Override (by Version.Key). The
+	// group's CrossServer record is stored as given (nil = none).
 	// Sets g.ID and file IDs. Returns created=true when the group did not exist before.
 	//
 	// Safety (internal/database): overrides of versions that left the group are retained and

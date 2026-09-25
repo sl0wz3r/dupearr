@@ -39,6 +39,13 @@
 //     local-address checks cannot see them). It clears once the proxy is trusted.
 //   - LastScanCheck (warning): the most recent scan failed.
 //   - DatabaseCheck (error): the database does not answer.
+//   - With two or more enabled Plex servers only (docs/DECISIONS.md D11): MultiServerFoldersCheck
+//     (notice: two servers index the same folders, or a disabled server overlaps an enabled one and
+//     its files are not protected), ArrServerLinksCheck (warning: an *arr instance's media server
+//     links are not confirmed), MultiServerMappingCheck (warning: a server not declared separate
+//     has an unmapped enabled library folder), SeparateServerCheck (warning: a separate server
+//     listed files with the same name and size as another server's in the last full scan) and
+//     MediaServerIdentityCheck (warning: an enabled server is stored without its identity).
 //
 // Like the *arr apps only failing checks are reported. Checks run concurrently, each bounded by
 // a 10 second timeout. Every Run caches its results, publishes them on the event bus (name
@@ -339,6 +346,12 @@ func (c *Checker) checks() []check {
 		{SourceReverseProxy, c.checkReverseProxy},
 		{SourceLastScan, c.checkLastScan},
 		{SourceDatabase, c.checkDatabase},
+		// Several media servers (multiserver.go; only with two or more enabled servers).
+		{SourceMultiServerFolders, c.checkMultiServerFolders},
+		{SourceArrServerLinks, c.checkArrServerLinks},
+		{SourceMultiServerMapping, c.checkMultiServerMapping},
+		{SourceSeparateServer, c.checkSeparateServer},
+		{SourceMediaServerIdentity, c.checkMediaServerIdentity},
 	}
 }
 

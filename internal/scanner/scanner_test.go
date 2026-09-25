@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -40,7 +41,7 @@ func TestFullScanVersionsDuplicate(t *testing.T) {
 		t.Fatalf("unexpected run: %+v", run)
 	}
 	want := models.ScanStats{Libraries: 1, ItemsExamined: 2, GroupsFound: 1, NewGroups: 1, PendingGroups: 1, ReclaimableBytes: 10 * gb}
-	if run.Stats != want {
+	if !reflect.DeepEqual(run.Stats, want) { // ScanStats holds a map (SeparateNameMatches)
 		t.Fatalf("stats = %+v, want %+v", run.Stats, want)
 	}
 	if px.calls("11") != 0 {
@@ -71,7 +72,7 @@ func TestFullScanVersionsDuplicate(t *testing.T) {
 		t.Fatalf("scanCompleted history = %+v", ev)
 	}
 	runs, err := h.db.ScanRuns().List(h.ctx, 10)
-	if err != nil || len(runs) != 1 || runs[0].Status != runCompleted || runs[0].Stats != want {
+	if err != nil || len(runs) != 1 || runs[0].Status != runCompleted || !reflect.DeepEqual(runs[0].Stats, want) {
 		t.Fatalf("stored runs = %+v (%v)", runs, err)
 	}
 	if len(h.progs) == 0 {
@@ -1075,7 +1076,7 @@ func TestCancelledScan(t *testing.T) {
 func TestNoLibraries(t *testing.T) {
 	h := newHarness(t)
 	run := h.fullScan()
-	if run.Stats != (models.ScanStats{}) {
+	if !reflect.DeepEqual(run.Stats, models.ScanStats{}) {
 		t.Fatalf("stats %+v", run.Stats)
 	}
 	if _, err := h.svc.FullScan(h.ctx, models.DuplicateScanBody{LibraryIDs: []int64{42}}, models.TriggerManual, nil); err == nil {

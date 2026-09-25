@@ -214,3 +214,25 @@ func supportsLinkCount() bool {
 	}
 	return true
 }
+
+// Fingerprint changes with the mappings of its source only, and not with their order.
+func TestFingerprint(t *testing.T) {
+	a := models.PathMapping{SourceType: models.PathSourceServer, SourceID: 1, RemotePath: "/data", LocalPath: "/mnt/data"}
+	b := models.PathMapping{SourceType: models.PathSourceServer, SourceID: 1, RemotePath: "/tv", LocalPath: "/mnt/tv"}
+	other := models.PathMapping{SourceType: models.PathSourceServer, SourceID: 2, RemotePath: "/x", LocalPath: "/mnt/x"}
+	fp := New([]models.PathMapping{a, b, other}).Fingerprint(models.PathSourceServer, 1)
+	if fp == "" || fp != New([]models.PathMapping{other, b, a}).Fingerprint(models.PathSourceServer, 1) {
+		t.Fatalf("fingerprint %q depends on order or is empty", fp)
+	}
+	if fp == New([]models.PathMapping{a, other}).Fingerprint(models.PathSourceServer, 1) {
+		t.Fatal("removing a mapping kept the fingerprint")
+	}
+	changed := b
+	changed.LocalPath = "/mnt/tv2"
+	if fp == New([]models.PathMapping{a, changed}).Fingerprint(models.PathSourceServer, 1) {
+		t.Fatal("changing a mapping kept the fingerprint")
+	}
+	if New([]models.PathMapping{a}).Fingerprint(models.PathSourceServer, 3) != "" || (*Mapper)(nil).Fingerprint(models.PathSourceServer, 1) != "" {
+		t.Fatal("a source without mappings has a fingerprint")
+	}
+}

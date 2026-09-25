@@ -667,3 +667,116 @@ func Discs() *Scenario {
 	})
 	return s
 }
+
+// ---------------------------------------------------------------------------
+// Several Plex servers
+// ---------------------------------------------------------------------------
+
+// SharedServer returns the scenario of a second Plex server that lists base's movies and episodes
+// whose files lie under dirs (media-root relative; none = every library directory of base): the
+// same libraries restricted to those directories, the versions whose parts all lie there, no *arr
+// instance, no Tautulli plays, no disc or clip set. Run it with Options.ShareMedia (the first
+// server's Env) for two servers on one share (research topology T1), or on its own tree for a
+// mirror (MirrorServer). The name is its friendly name; machineID and token must differ from
+// base's.
+func SharedServer(base *Scenario, name, machineID, token string, dirs ...string) *Scenario {
+	within := func(rel string) bool {
+		if len(dirs) == 0 {
+			return true
+		}
+		for _, d := range dirs {
+			if under(rel, d) {
+				return true
+			}
+		}
+		return false
+	}
+	s := &Scenario{
+		Name:        base.Name + "-" + strings.ToLower(strings.ReplaceAll(name, " ", "-")),
+		Description: "A second Plex server listing " + base.Name + "'s files",
+		Server: PlexServer{
+			FriendlyName: name, MachineIdentifier: machineID, Version: DefaultPlexVersion, Token: token,
+			Owner: "fakeowner", AllowMediaDeletion: base.Server.AllowMediaDeletion,
+		},
+	}
+	keep := map[string]bool{}
+	for _, l := range base.Libraries {
+		var kept []string
+		for _, d := range l.Dirs {
+			if within(d) {
+				kept = append(kept, d)
+			}
+		}
+		if len(kept) == 0 {
+			continue
+		}
+		nl := l
+		nl.Dirs, nl.NoHistory = kept, false
+		s.Libraries = append(s.Libraries, nl)
+		keep[l.Key] = true
+	}
+	inLib := func(section string, v Version) bool {
+		if !keep[section] || len(v.Parts) == 0 {
+			return false
+		}
+		for _, p := range v.Parts {
+			if !within(p.File) || p.LinkTo != "" {
+				return false
+			}
+		}
+		return true
+	}
+	strip := func(v Version) Version {
+		v.Tracked, v.TrackedTmdbID = "", 0
+		v.Parts = append([]Part(nil), v.Parts...)
+		return v
+	}
+	for _, m := range base.Movies {
+		var vs []Version
+		for _, v := range m.Versions {
+			if inLib(m.Section, v) {
+				vs = append(vs, strip(v))
+			}
+		}
+		if len(vs) == 0 {
+			continue
+		}
+		s.Movies = append(s.Movies, Movie{
+			RatingKey: m.RatingKey, Section: m.Section, Title: m.Title, Year: m.Year, Edition: m.Edition, GUID: m.GUID,
+			TmdbID: m.TmdbID, ImdbID: m.ImdbID, Versions: vs,
+		})
+	}
+	for _, sh := range base.Shows {
+		var eps []Episode
+		for _, e := range sh.Episodes {
+			var vs []Version
+			for _, v := range e.Versions {
+				if inLib(sh.Section, v) {
+					vs = append(vs, strip(v))
+				}
+			}
+			if len(vs) == 0 {
+				continue
+			}
+			e.Versions = vs
+			eps = append(eps, e)
+		}
+		if len(eps) == 0 {
+			continue
+		}
+		s.Shows = append(s.Shows, Show{
+			RatingKey: sh.RatingKey, Section: sh.Section, Title: sh.Title, Year: sh.Year, GUID: sh.GUID, TvdbID: sh.TvdbID,
+			TmdbID: sh.TmdbID, ImdbID: sh.ImdbID, Folder: sh.Folder, Episodes: eps,
+		})
+	}
+	return s
+}
+
+// MirrorServer returns the scenario of a Plex server on another host with its own disks and the
+// same folder layout as base (research topology T5): every library and version of base, run on its
+// own data directory, so its files have base's relative paths and sizes but are different files.
+func MirrorServer(base *Scenario, name, machineID, token string) *Scenario {
+	s := SharedServer(base, name, machineID, token)
+	s.Description = "A Plex server on other storage mirroring " + base.Name + "'s folder layout"
+	return s
+}

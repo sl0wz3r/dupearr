@@ -17,10 +17,14 @@ import {
   Library,
   Link2,
   Merge,
+  Network,
   Play,
   ScanSearch,
   Scissors,
   Server,
+  ServerCog,
+  ServerCrash,
+  ServerOff,
   Split,
   Timer,
   Unlink,
@@ -56,6 +60,10 @@ export const GROUP_FLAG_ICONS: Record<GroupFlag, LucideIcon> = {
   disc_unreadable: FileQuestionMark,
   disc_tracked_clip: Clapperboard,
   watch_unreadable: History,
+  other_server_listing: Network,
+  other_server_keeps: ServerCog,
+  other_server_possible: ServerCrash,
+  other_server_unread: ServerOff,
 };
 
 const KIND_TEXT: Record<StatusKind, string> = {

@@ -178,7 +178,16 @@ cannot look for full-disc backups), `TautulliConnectivityCheck` (error: a Tautul
 cannot be read, rejects its key, is older than 2.18.0 or monitors another Plex server — groups
 ranked by play history go to review meanwhile), `WatchHistoryCheck` (warning: a profile ranks by
 play history for a media server without an enabled Tautulli connection; notice: Tautulli keeps no
-history for some of the libraries concerned or for some users), `LastScanCheck`, `DatabaseCheck`. A
+history for some of the libraries concerned or for some users), `LastScanCheck`, `DatabaseCheck`.
+With two or more enabled Plex servers (DECISIONS D11; never with one): `MultiServerFoldersCheck`
+(notice: enabled servers index the same folders — some duplicates stay protected or go to review;
+or a disabled server does, which is not read, so removals can take its last copy),
+`ArrServerLinksCheck` (warning: an enabled application's Plex servers are not confirmed),
+`MultiServerMappingCheck` (warning: a server not declared separate storage has an enabled library
+folder without a path mapping), `SeparateServerCheck` (warning: the last full scan found files of a
+server declared separate storage with the same name and size as another server's),
+`MediaServerIdentityCheck` (warning: a server is stored without its machine identifier; removals
+that depend on it wait). A
 `CheckHealth` command is queued automatically after every change of settings, media servers,
 applications, Tautulli connections, path mappings, profiles and a library's enable/disable or
 profile, so the list is never stale.
@@ -351,6 +360,12 @@ token's resources — Plex only accepts deletions made with the **owner's** toke
 unknown (plex.tv unreachable — LAN-only setups — or the token is not listed there). The plex.tv
 lookup runs in parallel with the server test and is bounded to 5 s; it never fails the test.
 
+`storage` (DECISIONS D11): `""` (the default — the server may share storage with the other
+servers: their paths and files are compared) or `"separate"` (another host or a friend's server:
+its raw paths and file names are never compared with another server's, only its mapped folders
+are). Trimmed and lower-cased; any other value → 400 on `storage`; absent from a PUT keeps it. It
+only matters with two or more enabled Plex servers.
+
 Plex sign-in (plex.tv PIN flow):
 | Method | Path | Notes |
 |---|---|---|
@@ -370,6 +385,18 @@ PlexServer = { name, clientIdentifier, productVersion, owned, accessToken,
 | POST | `/api/v1/arr` | create → 201 (tests first unless `?forceSave=true`); 409 when another application already uses the same URL (scheme, host, port, URL base) |
 | GET/PUT/DELETE | `/api/v1/arr/{id}` | PUT → 202 (tests first unless `?forceSave=true`): absent fields (incl. `tags`) keep their values; `kind` cannot change (400); 409 on a duplicate URL; a URL change re-points the instance (see Duplicates: approve 409) |
 | POST | `/api/v1/arr/test` | body `ArrInstance` → `{"appName","version","instanceName","recycleBin":"", "recycleBinCleanupDays":7}`; 400 (credentials, wrong application, redirect = missing URL base) / 502 (unreachable); error messages never carry the server's response body |
+
+`serverIds` / `linksConfirmed` (DECISIONS D11): the media servers the instance feeds (sorted,
+de-duplicated, never `null`) and whether a person confirmed them. An id that names no media server
+→ 400 on `serverIds`. With exactly one enabled Plex server and no ids sent, the instance is linked
+to it and `linksConfirmed` is `true` (it can only feed that server); otherwise the links are
+stored as sent, except that an instance without links is never stored as confirmed — the UI sends
+`linksConfirmed: true` only when the person ticked the confirmation. Absent from a PUT, both keep
+their stored values. Creating or enabling a Plex server (`/api/v1/mediaserver`) that makes two or
+more enabled, or setting one's `storage` back to shared, sets `linksConfirmed` to `false` on every
+instance not linked to it. With two or more enabled servers, an instance's files are only matched
+by raw path or by name and size to versions of a linked server once the links are confirmed (and
+links to no enabled server count as not confirmed).
 
 ## Watch history (Tautulli)
 Tautulli connections provide the play history of the Played / Last played profile criteria
@@ -466,7 +493,7 @@ field keeps its meaning. `internal/api/stats_contract_test.go` pins every field 
 | `lastScan.startedAt` | string | RFC 3339 time |
 | `lastScan.finishedAt` | string | RFC 3339 time; **absent** while the scan is running |
 | `lastScan.error` | string | Only present when the scan failed |
-| `lastScan.stats` | object | Counters of that run: `libraries`, `itemsExamined`, `groupsFound`, `newGroups`, `resolvedGroups`, `pendingGroups`, `reviewGroups`, `reclaimableBytes`, `autoApproved`, `errors` (all numbers) |
+| `lastScan.stats` | object | Counters of that run: `libraries`, `itemsExamined`, `groupsFound`, `newGroups`, `resolvedGroups`, `pendingGroups`, `reviewGroups`, `reclaimableBytes`, `autoApproved`, `errors` (all numbers); with a media server declared separate storage, `separateNameMatches` (object: media server id → count of its files with the same name and size as another server's) |
 
 Byte counts are plain integers (not strings), so JavaScript clients read them exactly up to 8 PiB.
 Authentication: the `X-Api-Key` header (an admin credential: keep a dashboard that holds it
@@ -494,6 +521,12 @@ way with the signature its scan stored.
 - **409** when a Radarr/Sonarr instance **could not be read** during the group's last scan: files
   it tracks look untracked in that data (keep tags, tracked state, downloads missing). Re-scan the
   group once the instance is reachable, or disable the instance.
+- **Several Plex servers** (DECISIONS D11; only with two or more enabled servers): **409** when
+  the scan could not tell whether Radarr/Sonarr tracks a file of the group (a version of an
+  unmapped server, or of an application whose Plex servers are not confirmed: add the mapping or
+  confirm the links, then re-scan); **409** when a media server that may list the group's files
+  could not be read in its last scan (`other_server_unread`: make it reachable, disable it, or
+  declare it separate storage, then re-scan the group).
 - Bulk approve never approves `review` groups (suspect merges, unanalyzed, same file, …): they are
   listed in `failed` ("needs a review … approve it on its own"), nor groups that remove a full-disc
   backup ("removes a full-disc backup: open it and approve it on its own").
@@ -561,6 +594,39 @@ included; manual approval only),
 `watch_unreadable` (the profile ranks by play history, a version would be removed, a version's
 play history could not be read and the group holds copies of different Plex items: review, never
 auto-approved).
+With two or more enabled Plex servers (DECISIONS D11): `other_server_listing` (another server's
+item lists a file the group removes, and keeps another version that can be proven a different
+file — information; the executor proves it again right before the removal), `other_server_keeps`
+(another server's live group keeps a file this group removes: review), `other_server_possible`
+(another server lists a file with the same name and size that could not be told apart: review),
+`other_server_unread` (a server that may list the group's files could not be read: review,
+"Incomplete data"). The last three are never auto-approved.
+
+**Other Plex servers** (`MediaVersion.otherServers`, `DuplicateGroup.crossServer`, DECISIONS D11;
+both absent with one enabled server). `otherServers` lists the media of other servers' items that
+list the version's file (`same_file`: the same mapped local path, device and inode — also under
+another name —, or the same raw path while a side is unmapped and neither server is separate
+storage) or a file with the same name and size, or the same folder and name with another size
+(`possibly_same`). A version is never removed while such an item would be left without a
+file — its decision becomes *keep* with the reason "the only copy of … on …". `crossServer` is what
+the scan compared the files with: the executor re-reads the other servers' libraries right before
+a removal and refuses (review + re-scan) when a library is new or was not compared by the scan,
+changed its folders, was scanned or is being scanned since, a server was enabled since the scan or
+its identity, storage setting or path mappings changed, or the record is missing or incomplete — a
+group stored before multi-server support is never acted on until it is re-scanned. A server
+disabled since the scan is not required: disabled servers are not protected (DECISIONS D11, M23).
+```ts
+OtherListing = { serverId, serverName, libraryId, libraryTitle, ratingKey, mediaId,
+  versionKey /* "plex:<serverId>:<mediaId>" */, itemTitle, path /* as that server reports it */,
+  match: "same_file"|"possibly_same",
+  itemKeepsAnother: boolean|null /* a removed version: the item keeps a provably different file */,
+  keptByGroup: boolean|null /* a live group of that server keeps this media */,
+  others?: { mediaId, versionKey, path, same?: string[], distinct?: string[] }[], hint? }
+CrossServerRecord = { complete, servers: { serverId, machineIdentifier, separate, mapped,
+    mappings? /* fingerprint of its path mappings */, unread? }[],
+  libraries: { serverId, libraryId, sectionKey, type, locations, scannedAt, contentChangedAt,
+    refreshing }[] /* scannedAt/contentChangedAt: Unix seconds, 0 = not reported */ }
+```
 
 **Play history** (`MediaVersion.watch`, DECISIONS D10; absent without a Tautulli connection for
 the media server). Plays are counted per Plex item, for every user, so the versions of one item

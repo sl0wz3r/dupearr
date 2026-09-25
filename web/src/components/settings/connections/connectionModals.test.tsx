@@ -41,7 +41,9 @@ const mocks = vi.hoisted(() => {
       },
     };
   };
-  return { calls, results, mutation };
+  /** The configured media servers useMediaServers answers with (one by default). */
+  const servers: { list: unknown[] } = { list: [] };
+  return { calls, results, mutation, servers };
 });
 
 vi.mock('@/api/hooks/useArr', async () => {
@@ -61,6 +63,7 @@ vi.mock('@/api/hooks/useMediaServers', async () => {
     useUpdateMediaServer: mocks.mutation('updateServer', useState),
     useDeleteMediaServer: mocks.mutation('deleteServer', useState),
     useTestMediaServer: mocks.mutation('testServer', useState),
+    useMediaServers: () => ({ data: mocks.servers.list, isPending: false, isError: false, error: null }),
     useCreatePlexPin: mocks.mutation('createPin', useState),
     usePlexPin: () => ({ data: undefined, error: null }),
     usePlexServers: () => ({ data: undefined, isPending: true, isError: false, error: null, refetch: () => Promise.resolve() }),
@@ -121,6 +124,7 @@ vi.mock('@/api/hooks/useNotifications', async () => {
 beforeEach(() => {
   for (const k of Object.keys(mocks.calls)) delete mocks.calls[k];
   for (const k of Object.keys(mocks.results)) delete mocks.results[k];
+  mocks.servers.list = [];
 });
 
 const ARR_KEY = '0123456789abcdef0123456789abcdef';
@@ -595,5 +599,123 @@ describe('NotificationModal', () => {
     await user.click(screen.getByRole('button', { name: 'Save' }));
     expect(screen.getByLabelText(/topic/i)).toHaveAttribute('aria-invalid', 'true');
     expect(screen.getByText('Please correct the highlighted fields.')).toBeInTheDocument();
+  });
+});
+
+describe('several Plex servers (docs/DECISIONS.md D11)', () => {
+  const server = (id: number, name: string, storage: '' | 'separate' = ''): MediaServer => ({
+    id,
+    name,
+    kind: 'plex',
+    url: `http://plex${id}.lan:32400`,
+    token: MASKED_SECRET,
+    machineIdentifier: `m${id}`,
+    verifyTls: true,
+    enabled: true,
+    storage,
+    createdAt: '',
+    updatedAt: '',
+  });
+  const radarr: ArrInstance = {
+    id: 7,
+    name: 'Radarr',
+    kind: 'radarr',
+    url: 'http://radarr:7878',
+    apiKey: MASKED_SECRET,
+    verifyTls: true,
+    enabled: true,
+    tags: [],
+    serverIds: [],
+    linksConfirmed: false,
+    createdAt: '',
+    updatedAt: '',
+  };
+
+  it('shows no Storage field with one server', () => {
+    mocks.servers.list = [server(1, 'Plex')];
+    render(<MediaServerModal server={server(1, 'Plex')} onClose={vi.fn()} />);
+    expect(screen.queryByLabelText('Storage')).not.toBeInTheDocument();
+  });
+
+  it('shows and saves the Storage field with two servers', async () => {
+    const user = userEvent.setup();
+    mocks.servers.list = [server(1, 'Plex A'), server(2, 'Plex B')];
+    render(<MediaServerModal server={server(2, 'Plex B')} onClose={vi.fn()} />);
+    await settle();
+    const select = screen.getByLabelText('Storage');
+    await user.selectOptions(select, 'separate');
+    mocks.results.updateServer = server(2, 'Plex B', 'separate');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(mocks.calls.updateServer).toEqual([
+      { server: expect.objectContaining({ id: 2, storage: 'separate' }), forceSave: false },
+    ]);
+  });
+
+  it('keeps the Storage field for a separate server even when it is the only one', () => {
+    mocks.servers.list = [server(2, 'Plex B', 'separate')];
+    render(<MediaServerModal server={server(2, 'Plex B', 'separate')} onClose={vi.fn()} />);
+    expect(screen.getByLabelText('Storage')).toHaveValue('separate');
+  });
+
+  it('shows no links field with one server and sends no links', async () => {
+    const user = userEvent.setup();
+    mocks.servers.list = [server(1, 'Plex')];
+    render(<ArrInstanceModal instance={radarr} onClose={vi.fn()} />);
+    expect(screen.queryByRole('group', { name: 'Plex servers it feeds' })).not.toBeInTheDocument();
+    mocks.results.updateArr = { ...radarr };
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    const sent = (mocks.calls.updateArr?.[0] as { instance: Record<string, unknown> }).instance;
+    expect(sent).not.toHaveProperty('serverIds');
+    expect(sent).not.toHaveProperty('linksConfirmed');
+  });
+
+  it('saves the chosen servers as confirmed links with two servers only once confirmed', async () => {
+    const user = userEvent.setup();
+    mocks.servers.list = [server(1, 'Plex A'), server(2, 'Plex B', 'separate')];
+    render(<ArrInstanceModal instance={radarr} onClose={vi.fn()} />);
+    await settle();
+    const group = screen.getByRole('group', { name: 'Plex servers it feeds' });
+    expect(within(group).getByText('Separate storage: never matched by path or name')).toBeInTheDocument();
+    expect(screen.getByText(/Not confirmed yet/)).toBeInTheDocument();
+    const confirm = screen.getByLabelText(/Radarr feeds exactly the servers ticked above/);
+    expect(confirm).toBeDisabled();
+    await user.click(within(group).getByLabelText('Plex A'));
+    await user.click(confirm);
+    mocks.results.updateArr = { ...radarr, serverIds: [1], linksConfirmed: true };
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(mocks.calls.updateArr).toEqual([
+      { instance: expect.objectContaining({ id: 7, serverIds: [1], linksConfirmed: true }), forceSave: false },
+    ]);
+  });
+
+  // Saving the modal for another change (a new API key) never confirms the list as a side effect.
+  it('keeps unconfirmed links unconfirmed when saving without the confirmation', async () => {
+    const user = userEvent.setup();
+    mocks.servers.list = [server(1, 'Plex A'), server(2, 'Plex B')];
+    render(<ArrInstanceModal instance={{ ...radarr, serverIds: [1] }} onClose={vi.fn()} />);
+    await settle();
+    expect(screen.getByLabelText(/Radarr feeds exactly the servers ticked above/)).not.toBeChecked();
+    mocks.results.updateArr = { ...radarr, serverIds: [1] };
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(mocks.calls.updateArr).toEqual([
+      { instance: expect.objectContaining({ id: 7, serverIds: [1], linksConfirmed: false }), forceSave: false },
+    ]);
+  });
+
+  // "Feeds none of the servers" is never a confirmation (docs/DECISIONS.md D11).
+  it('never confirms an empty selection', async () => {
+    const user = userEvent.setup();
+    mocks.servers.list = [server(1, 'Plex A'), server(2, 'Plex B')];
+    render(<ArrInstanceModal instance={{ ...radarr, serverIds: [1], linksConfirmed: true }} onClose={vi.fn()} />);
+    await settle();
+    const confirm = screen.getByLabelText(/Radarr feeds exactly the servers ticked above/);
+    expect(confirm).toBeChecked();
+    await user.click(within(screen.getByRole('group', { name: 'Plex servers it feeds' })).getByLabelText('Plex A'));
+    expect(confirm).not.toBeChecked();
+    mocks.results.updateArr = { ...radarr };
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(mocks.calls.updateArr).toEqual([
+      { instance: expect.objectContaining({ id: 7, serverIds: [], linksConfirmed: false }), forceSave: false },
+    ]);
   });
 });

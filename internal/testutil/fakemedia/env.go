@@ -59,6 +59,13 @@ type Options struct {
 	// Support" (ScannerMovieDiscImage): full-disc backups become Plex versions with one Part per
 	// BDMV/STREAM clip (see Disc). The default is Plex's own scanner, which skips discs.
 	DiscImageScanner bool
+	// ShareMedia runs this scenario as a second Plex server over another Env's tree (two servers
+	// on one share, research topology T1; see SharedServer): Dir is ignored, the tree is never
+	// reset or removed, files the scenario declares that are missing are created (an existing file
+	// must have the declared size), and the Env serves only a Plex server (no *arr, no Tautulli).
+	// A file deleted through one server stays listed by the other until that server's refresh,
+	// while its checkFiles reports the truth.
+	ShareMedia *Env
 }
 
 // Server is one running fake server.
@@ -143,6 +150,9 @@ func New(opts Options) (*Env, error) {
 	if now == nil {
 		now = time.Now
 	}
+	if opts.ShareMedia != nil {
+		return newShared(opts, sc, now)
+	}
 	dir, removeDir := opts.Dir, false
 	if dir == "" {
 		d, err := os.MkdirTemp("", "fakemedia-*")
@@ -177,6 +187,7 @@ func New(opts Options) (*Env, error) {
 		cleanupDir()
 		return nil, fmt.Errorf("fakemedia: %w", err)
 	}
+	w.snapshotAvailability()
 	e := &Env{
 		Scenario:          sc.Name,
 		Dir:               abs,
@@ -219,6 +230,49 @@ func New(opts Options) (*Env, error) {
 			e.Sonarr, e.SonarrAPIKey = s, a.apiKey
 		}
 	}
+	return e, nil
+}
+
+// newShared builds a second Plex server over opts.ShareMedia's tree (Options.ShareMedia).
+func newShared(opts Options, sc *Scenario, now func() time.Time) (*Env, error) {
+	base := opts.ShareMedia
+	if len(sc.Instances) > 0 {
+		return nil, errors.New("fakemedia: a server sharing another Env's media has no *arr instances")
+	}
+	if sc.Server.MachineIdentifier == base.MachineIdentifier || sc.Server.Token == base.PlexToken {
+		return nil, errors.New("fakemedia: a second server needs its own machine identifier and token")
+	}
+	w, err := buildWorld(sc, base.Dir, now, opts.DiscImageScanner)
+	if err != nil {
+		return nil, err
+	}
+	if len(w.discs) > 0 || len(w.clipSets) > 0 {
+		return nil, errors.New("fakemedia: a server sharing another Env's media cannot declare discs or clip sets")
+	}
+	base.w.mu.Lock()
+	err = w.materializeShared()
+	base.w.mu.Unlock()
+	if err != nil {
+		return nil, fmt.Errorf("fakemedia: %w", err)
+	}
+	w.snapshotAvailability()
+	e := &Env{
+		Scenario:          sc.Name,
+		Dir:               base.Dir,
+		MediaRoot:         base.MediaRoot,
+		PlexToken:         w.plex.token,
+		MachineIdentifier: w.plex.machineID,
+		Instances:         map[string]*Server{},
+		w:                 w,
+		logf:              opts.Logf,
+		lenient:           opts.LenientAccept,
+	}
+	ps, err := e.listen(opts.Addrs[ServerPlex], ServerPlex, "plex", w.plex.friendlyName, w.plex.token, "", e.plexHandler())
+	if err != nil {
+		_ = e.Close()
+		return nil, err
+	}
+	e.Plex = ps
 	return e, nil
 }
 
@@ -635,6 +689,105 @@ func (e *Env) SetPlexPageLimit(n int) {
 	e.w.plex.pageLimit = max(n, 0)
 }
 
+// SectionState is what /library/sections reports about a library's scans (Env.SetSectionState).
+type SectionState struct {
+	ScannedAt        int64 // Unix seconds; 0 = not reported
+	ContentChangedAt int64 // Unix seconds; 0 = not reported
+	Refreshing       bool
+}
+
+// SetSectionState sets the scan times and refreshing flag a library reports (a scan on this
+// server after Dupearr's, or one in progress).
+func (e *Env) SetSectionState(key string, st SectionState) error {
+	e.w.mu.Lock()
+	defer e.w.mu.Unlock()
+	s := e.w.plex.sectionOf(key)
+	if s == nil {
+		return fmt.Errorf("fakemedia: unknown section %q", key)
+	}
+	s.scannedAt, s.contentChangedAt, s.refreshing = st.ScannedAt, st.ContentChangedAt, st.Refreshing
+	return nil
+}
+
+// SectionStateOf returns what /library/sections reports about a library's scans.
+func (e *Env) SectionStateOf(key string) (SectionState, bool) {
+	e.w.mu.Lock()
+	defer e.w.mu.Unlock()
+	s := e.w.plex.sectionOf(key)
+	if s == nil {
+		return SectionState{}, false
+	}
+	return SectionState{ScannedAt: s.scannedAt, ContentChangedAt: s.contentChangedAt, Refreshing: s.refreshing}, true
+}
+
+// SetMachineIdentifier changes the identity the Plex server answers with (another server at the
+// configured URL).
+func (e *Env) SetMachineIdentifier(id string) {
+	e.w.mu.Lock()
+	defer e.w.mu.Unlock()
+	e.w.plex.machineID = id
+}
+
+// ItemsWithoutFile lists the movies and episodes that had an available copy when the Env started
+// and have none now (a removal through another server took their last file): the rule
+// RuleDeleteOtherServerLastCopy, checked as a final assertion (AssertEveryItemHasAFile).
+func (e *Env) ItemsWithoutFile() []string {
+	e.w.mu.Lock()
+	defer e.w.mu.Unlock()
+	var out []string
+	for _, it := range e.w.plex.all {
+		if e.w.plex.initiallyAvailable[it] && !e.w.hasAvailableCopy(it) {
+			out = append(out, fmt.Sprintf("%s (rating key %s)", describeItem(it), it.rk))
+		}
+	}
+	return out
+}
+
+// RuleDeleteOtherServerLastCopy names ItemsWithoutFile in assertions: a removal left a Plex
+// server's item without a file.
+const RuleDeleteOtherServerLastCopy = "delete_other_server_last_copy"
+
+// RuleDeleteLastCopyAnywhere names TitlesWithoutFile in assertions: a title has no file on any
+// server any more.
+const RuleDeleteLastCopyAnywhere = "delete_last_copy_anywhere"
+
+// AssertEveryItemHasAFile fails the test for every item ItemsWithoutFile reports.
+func (e *Env) AssertEveryItemHasAFile(t TB) {
+	t.Helper()
+	for _, it := range e.ItemsWithoutFile() {
+		t.Errorf("fakemedia: %s: %s has no available file any more", RuleDeleteOtherServerLastCopy, it)
+	}
+}
+
+// TitlesWithoutFile lists the titles (by Plex GUID) that had an available copy on at least one of
+// envs when it started and have none on any of them now (RuleDeleteLastCopyAnywhere).
+func TitlesWithoutFile(envs ...*Env) []string {
+	had, has := map[string]string{}, map[string]bool{}
+	for _, e := range envs {
+		e.w.mu.Lock()
+		for _, it := range e.w.plex.all {
+			if it.typ != "movie" && it.typ != "episode" {
+				continue
+			}
+			if e.w.plex.initiallyAvailable[it] {
+				had[it.guid] = describeItem(it)
+			}
+			if e.w.hasAvailableCopy(it) {
+				has[it.guid] = true
+			}
+		}
+		e.w.mu.Unlock()
+	}
+	var out []string
+	for guid, name := range had {
+		if !has[guid] {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 func (e *Env) arr(name string) (*arrState, error) {
 	a := e.w.arrs[name]
 	if a == nil {
@@ -809,10 +962,11 @@ type Mapping struct {
 	Local  string
 }
 
-// PathMappings returns the path mappings Dupearr needs for every fake server (all of them see
-// RemoteMediaRoot, which lives at MediaRoot locally).
+// PathMappings returns the path mappings Dupearr needs for every fake server (the *arrs see
+// RemoteMediaRoot, the Plex server its own media root — PlexServer.MediaRoot — which both live at
+// MediaRoot locally).
 func (e *Env) PathMappings() []Mapping {
-	out := []Mapping{{Server: ServerPlex, Remote: RemoteMediaRoot, Local: e.MediaRoot}}
+	out := []Mapping{{Server: ServerPlex, Remote: e.w.plex.mediaRoot, Local: e.MediaRoot}}
 	for _, name := range e.w.arrOrder {
 		out = append(out, Mapping{Server: name, Remote: RemoteMediaRoot, Local: e.MediaRoot})
 	}
@@ -825,8 +979,12 @@ func (e *Env) LocalPath(remotePath string) (string, bool) { return e.w.remoteToL
 // RemotePath maps a local path inside Dir to the servers' view.
 func (e *Env) RemotePath(localPath string) (string, bool) { return e.w.localToRemote(localPath) }
 
-// RemoteMediaPath returns the remote path of a media-root relative path.
+// RemoteMediaPath returns the remote path of a media-root relative path (as the *arrs see it).
 func (e *Env) RemoteMediaPath(rel string) string { return remote(rel) }
+
+// PlexMediaPath returns the path the Plex server sees for a media-root relative path (its media
+// root, PlexServer.MediaRoot).
+func (e *Env) PlexMediaPath(rel string) string { return e.w.plex.remote(rel) }
 
 // FileExists reports whether the file behind a remote path exists locally.
 func (e *Env) FileExists(remotePath string) bool {
@@ -997,7 +1155,7 @@ func (e *Env) Describe(out io.Writer) {
 	for _, s := range p.sections {
 		locs := make([]string, 0, len(s.dirs))
 		for _, d := range s.dirs {
-			locs = append(locs, remote(d))
+			locs = append(locs, p.remote(d))
 		}
 		scanner := ""
 		if s.scanner == ScannerMovieDiscImage || s.scanner == ScannerSeriesDiscImage {
@@ -1005,8 +1163,9 @@ func (e *Env) Describe(out io.Writer) {
 		}
 		fmt.Fprintf(out, "          library %s %-10q (%s) %s%s\n", s.key, s.title, s.typ, strings.Join(locs, ", "), scanner)
 	}
-	t := e.w.tautulli
-	fmt.Fprintf(out, "Tautulli  %-28s apiKey=%s version=%s plays=%d\n", e.Tautulli.URL, t.apiKey, t.version, len(t.rows))
+	if t := e.w.tautulli; e.Tautulli != nil {
+		fmt.Fprintf(out, "Tautulli  %-28s apiKey=%s version=%s plays=%d\n", e.Tautulli.URL, t.apiKey, t.version, len(t.rows))
+	}
 	names := append([]string(nil), e.w.arrOrder...)
 	sort.Strings(names)
 	for _, name := range names {

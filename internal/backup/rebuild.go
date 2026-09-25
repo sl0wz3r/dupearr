@@ -58,6 +58,11 @@ const (
 var upgradableMigrations = map[int64]bool{
 	2: true, // 0002_retained_overrides: ADD COLUMN duplicate_groups.retained_overrides DEFAULT '{}'
 	3: true, // 0003_tautulli: CREATE TABLE tautulli_instances (an older backup has no rows for it)
+	// 0004_multi_server: ADD COLUMN media_servers.storage DEFAULT '', arr_instances.links_confirmed
+	// DEFAULT 0, duplicate_groups.cross_server DEFAULT '', CREATE TABLE arr_server_links. A restored
+	// older backup starts with unconfirmed *arr links and groups without a cross-server record: the
+	// fail-closed state (the link data upgrade runs when the restored database is opened).
+	4: true,
 }
 
 // createReference creates path as an empty database with this build's schema.

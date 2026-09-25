@@ -294,6 +294,24 @@ func (s *Server) handleDuplicate(w http.ResponseWriter, r *http.Request) {
 // Approve / ignore / unignore
 // ---------------------------------------------------------------------------
 
+// unreadServers names the media servers a group's last scan could not read ("A media server" when
+// the record does not say).
+func unreadServers(g *models.DuplicateGroup) string {
+	var names []string
+	if g.CrossServer != nil {
+		for _, sv := range g.CrossServer.Servers {
+			if sv.Unread != "" {
+				name, _, _ := strings.Cut(sv.Unread, ":")
+				names = append(names, "The media server "+strings.TrimSpace(name))
+			}
+		}
+	}
+	if len(names) == 0 {
+		return "A media server"
+	}
+	return strings.Join(names, " and ")
+}
+
 // invariantProblem is a client-facing description of a safety-invariant violation.
 func invariantProblem(err error) string {
 	return truncate(err.Error(), maxMessageLen)
@@ -346,6 +364,18 @@ func (s *Server) approveGroup(ctx context.Context, id int64, expectedSignature s
 		return nil, errConflict("A Radarr/Sonarr instance could not be read when this duplicate was last scanned, so " +
 			"files it tracks look untracked here. Re-scan it once the application is reachable (or disable that " +
 			"application in Settings) before approving")
+	}
+	if scanner.ArrTrackingUnknown(g) {
+		// docs/DECISIONS.md D11: a version may be a file an *arr tracks on this host, or not.
+		return nil, errConflict("Dupearr could not tell whether Radarr/Sonarr tracks a file of this duplicate (%s). "+
+			"Add a path mapping for that media server, or confirm which Plex servers the application feeds "+
+			"(Settings → Applications), then re-scan it before approving", strings.TrimPrefix(g.StatusReason, "Incomplete data: "))
+	}
+	if scanner.CrossServerDataMissing(g) {
+		// docs/DECISIONS.md D11: a server that could not be read may list these files.
+		return nil, errConflict("%s could not be read when this duplicate was last scanned, and it may list these files. "+
+			"Make it reachable, disable it, or declare it separate storage (Settings → Media Servers), then re-scan this duplicate before approving",
+			unreadServers(g))
 	}
 	if err := engine.ValidateDecisions(g); err != nil {
 		return nil, errBadRequest("Cannot approve: %s", invariantProblem(err))

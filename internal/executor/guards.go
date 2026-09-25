@@ -85,9 +85,18 @@ func (r *run) arrFileProblem(ctx context.Context, at *arrTarget, v *models.Media
 		serverPath, size, local = lv.parts[0].path, lv.parts[0].size, lv.parts[0].local
 	}
 	arrLocal, arrMapped := r.mapper.ToLocal(models.PathSourceArr, info.InstanceID, ref.Path)
+	sid := v.ServerID
 	switch {
 	case strings.TrimSpace(ref.Path) == "":
 		return fmt.Sprintf("%s did not report the path of file %d", name, info.FileID), nil
+	case r.multiServer() && arrMapped && local == "":
+		// docs/DECISIONS.md D11: the *arr's file maps, the version's part does not; with several
+		// servers equal raw paths may be another host's copy (research scenario D).
+		return fmt.Sprintf("%s file %d maps to %s, but %s has no path mapping for %s, so Dupearr cannot confirm it is the same file; add a path mapping for %s",
+			name, info.FileID, arrLocal, r.serverName(sid), serverPath, r.serverName(sid)), nil
+	case r.multiServer() && !(arrMapped && local != "") && !r.rawConfirmAllowed(info.InstanceID, sid):
+		return fmt.Sprintf("%s file %d can only be confirmed by its raw path, and %s is not confirmed to feed %s (Settings → Applications) or that server is declared separate storage",
+			name, info.FileID, name, r.serverName(sid)), nil
 	case arrMapped && local != "":
 		if pathKey(arrLocal) != pathKey(local) && !sameResolved(arrLocal, local) {
 			return fmt.Sprintf("%s file %d is now %s, not the version to remove (%s) (was the instance's URL changed, or the file replaced?)",

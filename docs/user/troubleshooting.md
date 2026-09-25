@@ -14,6 +14,7 @@ reproduce, and attach the log to your issue: API keys, tokens and passwords are 
   - [I forgot my password](#i-forgot-my-password)
 - [Plex](#plex)
 - [Radarr and Sonarr](#radarr-and-sonarr)
+- [Several Plex servers](#several-plex-servers)
 - [Tautulli (play history)](#tautulli-play-history)
 - [Permissions (PUID/PGID)](#permissions-puidpgid)
 - [Path mapping mistakes](#path-mapping-mistakes)
@@ -194,6 +195,25 @@ Plex finish (or *Analyze* the item in Plex); the group stays in review until the
 | Queue run aborted with a "folder missing" (`409`) error | Radarr/Sonarr says the movie's root folder or the series folder does not exist, usually an unmounted disk or share. Dupearr stops the whole run on purpose. Fix the mount, then run *Process Queue* again. |
 | Copies show as "not tracked" although the \*arr has them | The \*arr reports a different path than Plex: add [path mappings](#path-mapping-mistakes) for the \*arr. |
 | The \*arr downloads the removed copy again | Keep *Unmonitor when the keeper is elsewhere* on, make sure the removal went through the \*arr (method `arr`), and check the \*arr's quality cutoff (flag *cutoff not met*: it may keep upgrading). |
+
+## Several Plex servers
+
+These only appear with two or more enabled Plex servers
+([Safety](safety.md#several-plex-servers), [Configuration](configuration.md#several-plex-servers)).
+
+| Symptom | Cause and fix |
+|---|---|
+| A copy is kept with "the only copy of "…" on Plex B (…)" | Another server's item lists that file and keeps no other version Dupearr can prove to be a different file. The hint says what would help, usually a path mapping for the other server (*Settings → Media Management*). Files on an Unraid user share (`/mnt/user`) stay protected this way for now: Dupearr cannot yet prove there that two paths are different files. A manual *remove* override is ignored for such a copy ("Override ignored — removing it would leave … without a copy"). |
+| Review reason "could not read the media server "…" (…); it may list these files" / flag *Media server not read* | That server was unreachable (or one of its libraries could not be listed) during the scan. Approving is refused until a new scan has read it. Fix the connection (or disable the server, or declare it *separate storage* if it really has storage of its own), then re-scan the group: the setting alone does not change what the last scan recorded. |
+| Approving says "Dupearr could not tell whether Radarr/Sonarr tracks a file" | A copy belongs to a server without a path mapping, or to an \*arr instance whose Plex servers are not confirmed (after adding or enabling a Plex server, every instance not linked to it needs confirming again). Add the mapping, or choose the servers in *Settings → Applications → (instance) → Plex servers it feeds* and tick the confirmation, then re-scan. |
+| Flag *Kept by another server* | Another server's duplicate group keeps a file this group removes (their profiles disagree). Change one of the two decisions, then approve. |
+| Flag *Maybe on another server* | Another server lists a file with the same name and size, and Dupearr could not tell whether it is the same file. Path mappings for both servers let it compare the files on disk. |
+| A removal is skipped: "… scanned the library "…" since the scan; it may list these files now" | The other server scanned (or is scanning) a library after this group's scan, so it may list the file now. The group goes to review and is re-scanned automatically; approve it again after that scan. Frequent Plex library scans make this happen more often. |
+| A removal is skipped: "…; nothing is removed until a scan has compared it with every media server" | The group was scanned before a second server was enabled (or by an earlier version of Dupearr), or a server was added, changed identity, storage setting or path mappings since. Re-scan it (Dupearr queues one re-scan per server at the end of the queue run). |
+| A removal waits: "… is stored without its identity" | That server was saved while unreachable. Open it in *Settings → Media Servers*, **Test** and save. Health *MediaServerIdentityCheck* reports it too. |
+| Health *ArrServerLinksCheck* | Choose the Plex servers each Radarr/Sonarr instance feeds (*Settings → Applications*) and save. |
+| Health *MultiServerMappingCheck* | A server that shares storage with the others has library folders without a path mapping: add the mappings, or declare the server *separate storage* if it is on another host. |
+| Health *SeparateServerCheck* | A server declared *separate storage* lists files with the same name and size as another server's. If it reads the same share, set its storage back to the same storage as the other servers: declared separate, its files are not protected. |
 
 ## Tautulli (play history)
 

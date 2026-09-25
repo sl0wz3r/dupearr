@@ -25,9 +25,9 @@ your setup and use case to its issue (label `roadmap`), or to open a thread in D
 | [Dashboard widgets (Homepage, Homarr)](#dashboard-widgets-homepage-homarr) | Up next | `help wanted`: native widgets upstream (the `customapi` example and the stable stats contract are done) |
 | [Jellyfin and Emby](#jellyfin-and-emby) | Planned | `help wanted`: research and design first |
 | [Watch-history criteria (Tautulli, Plex)](#watch-history-criteria-tautulli-plex) | Partly done | `help wanted`: Plex as a source (live verification first), progress, per-user filters |
+| [Several Plex servers](#several-plex-servers) | Partly done | `safety`: live checks of device and inode numbers (Phase 0), then cross-server groups |
 | [Lidarr and music libraries](#lidarr-and-music-libraries) | Exploring | Design discussion |
 | [Hash-based detection outside Plex](#hash-based-detection-outside-plex) | Exploring | `safety`, design discussion |
-| [Several Plex servers](#several-plex-servers) | Exploring | `safety`, design discussion |
 | [Full-disc backups: disc images and TV season discs](#full-disc-backups-disc-images-and-tv-season-discs) | Exploring | `safety` |
 | [Translations (i18n)](#translations-i18n) | Exploring | `help wanted`: the approach first, then languages |
 
@@ -94,6 +94,31 @@ still needs a design.
 - **Care:** if the history is missing, or the lookup fails, that must never count as "never
   watched". It must behave like any other unknown value.
 
+## Several Plex servers
+
+- **Today:** each server is scanned and grouped on its own. The same title on two servers is not a
+  duplicate. Cross-server protection is done (issue #8, Phase 1): with two or more enabled servers,
+  a file another server's item lists is only removed while that item keeps a file proven to be a
+  different one (re-checked on disk right before the removal), a file another server's group keeps
+  goes to review, a server that could not be read sends the groups whose files it may list to
+  review, and Radarr/Sonarr are only matched by raw path or name to the servers they are confirmed
+  to feed. Servers get a storage setting (*same storage* or *separate*), \*arr instances a list of
+  the Plex servers they feed, and Health reports what keeps the protection blunt. It fails closed:
+  an unmapped second server and Unraid user shares keep the files they also list protected.
+- **Goal:** cross-server groups ("keep one copy across all my servers").
+- **Care:** keeper verification then has to span servers. This is a `safety` item.
+- **Research and design:** [docs/research/multi-server.md](docs/research/multi-server.md), with
+  the four cases that happened before it (§2.7). Recommendation: a first slice that adds no new
+  way to remove anything. A cross-server index of the files every server lists protects a file whose
+  removal would leave another server's item without a copy that can be proven distinct, never
+  removes a file another server's group keeps, refuses raw-path \*arr matching between a mapped
+  \*arr and an unmapped server, and shows "also on server B" in review (this slice is done, except
+  the link suggestions from each \*arr's Plex connections and the report-only "also on server B:
+  2160p, 58 GB" line for a server's own copies; see `docs/DECISIONS.md` D11).
+  Cross-server groups come later, after live checks of device and inode numbers across the mounts
+  people use (Phase 0; they would also let Unraid user shares prove distinct files); copies on a
+  server whose storage Dupearr cannot see stay out of scope.
+
 ## Lidarr and music libraries
 
 - **Today:** only Plex *movie* and *show* libraries are scanned, with Radarr and Sonarr. Music and
@@ -126,26 +151,6 @@ still needs a design.
   later, under narrow conditions (byte-for-byte identical to a Plex-listed copy that stays, a
   person's approval, the recycle bin), and only after contributors have checked how Unraid's user
   shares report inodes, links and change times on live arrays.
-
-## Several Plex servers
-
-- **Today:** each server is scanned and grouped on its own. The same title on two servers is not a
-  duplicate. Removals do **not** check the other servers yet: server A can remove a file that is
-  the only copy server B lists (when B indexes fewer folders), and a remote server without path
-  mappings whose paths equal local ones can have its copy matched to the local Radarr/Sonarr file.
-  Until this is fixed, map every server's folders, keep the recycle bins on and review other
-  servers' groups carefully.
-- **Goal:** cross-server protection first, then cross-server groups ("keep one copy across all my
-  servers").
-- **Care:** keeper verification then has to span servers. This is a `safety` item.
-- **Research and design:** [docs/research/multi-server.md](docs/research/multi-server.md), with
-  the four cases that happen today (§2.7). Recommendation: a first slice that adds no new way to
-  remove anything. A cross-server index of the files every server lists protects a file whose
-  removal would leave another server's item without a copy that can be proven distinct, never
-  removes a file another server's group keeps, refuses raw-path \*arr matching between a mapped
-  \*arr and an unmapped server, and shows "also on server B" in review. Cross-server groups come
-  later, after live checks of device and inode numbers across the mounts people use; copies on a
-  server whose storage Dupearr cannot see stay out of scope.
 
 ## Full-disc backups: disc images and TV season discs
 

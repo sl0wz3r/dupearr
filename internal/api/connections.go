@@ -204,6 +204,12 @@ func validateServer(ms *models.MediaServer) []config.ValidationError {
 	case strings.ContainsAny(ms.Token, " \t\r\n"):
 		errs = append(errs, invalid("token", "Token must not contain whitespace"))
 	}
+	// docs/DECISIONS.md D11: "" = may share storage with the other servers (paths are compared),
+	// "separate" = another host or a friend's server (only its mapped folders are compared).
+	ms.Storage = strings.ToLower(strings.TrimSpace(ms.Storage))
+	if ms.Storage != "" && ms.Storage != models.StorageSeparate {
+		errs = append(errs, invalid("storage", "Must be empty (same storage as the other servers) or %q", models.StorageSeparate))
+	}
 	return errs
 }
 
@@ -996,6 +1002,46 @@ func (s *Server) ensureUniqueArr(ctx context.Context, a models.ArrInstance) erro
 	return nil
 }
 
+// arrLinks validates and completes the media server links of an instance (docs/DECISIONS.md D11):
+// every id must name a media server; with exactly one enabled Plex server and no links, the
+// instance is linked to it and the links count as confirmed (it can only feed that server; adding
+// or enabling a second server makes them unconfirmed again, see the media server repository).
+// Otherwise an instance without links is never stored as confirmed: "feeds none of the servers"
+// would make the versions it tracks count as untracked wherever mapped paths cannot decide.
+func (s *Server) arrLinks(ctx context.Context, a *models.ArrInstance) ([]config.ValidationError, error) {
+	servers, err := s.d.Store.MediaServers().List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	known := map[int64]bool{}
+	var enabled []int64
+	for _, ms := range servers {
+		known[ms.ID] = true
+		if ms.Enabled && (ms.Kind == models.MediaServerPlex || ms.Kind == "") {
+			enabled = append(enabled, ms.ID)
+		}
+	}
+	var errs []config.ValidationError
+	ids := make([]int64, 0, len(a.ServerIDs))
+	for _, id := range a.ServerIDs {
+		switch {
+		case !known[id]:
+			errs = append(errs, invalid("serverIds", "Media server %d does not exist", id))
+		case !slices.Contains(ids, id):
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	switch {
+	case len(ids) == 0 && len(enabled) == 1:
+		ids, a.LinksConfirmed = []int64{enabled[0]}, true
+	case len(ids) == 0:
+		a.LinksConfirmed = false
+	}
+	a.ServerIDs = ids
+	return errs, nil
+}
+
 func (s *Server) handleArrCreate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	a := models.ArrInstance{Enabled: true, VerifyTLS: true}
@@ -1004,7 +1050,13 @@ func (s *Server) handleArrCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.ID = 0
-	if errs := validateArr(&a); len(errs) > 0 {
+	errs := validateArr(&a)
+	linkErrs, err := s.arrLinks(ctx, &a)
+	if err != nil {
+		s.writeErr(w, r, err)
+		return
+	}
+	if errs = append(errs, linkErrs...); len(errs) > 0 {
 		s.writeErr(w, r, errValidation(errs...))
 		return
 	}
@@ -1036,9 +1088,10 @@ func (s *Server) handleArrUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	in := *stored
 	in.APIKey = maskedSecret
-	// Fields absent from the body keep their stored values; the slice is cloned so decoding
-	// never writes into the stored instance's backing array.
+	// Fields absent from the body keep their stored values; the slices are cloned so decoding
+	// never writes into the stored instance's backing arrays.
 	in.Tags = slices.Clone(stored.Tags)
+	in.ServerIDs = slices.Clone(stored.ServerIDs)
 	if err := decodeJSON(r, &in); err != nil {
 		s.writeErr(w, r, err)
 		return
@@ -1055,7 +1108,12 @@ func (s *Server) handleArrUpdate(w http.ResponseWriter, r *http.Request) {
 	if in.Kind != stored.Kind {
 		errs = append(errs, invalid("kind", "The application type cannot be changed; add a new application instead"))
 	}
-	if len(errs) > 0 {
+	linkErrs, err := s.arrLinks(ctx, &in)
+	if err != nil {
+		s.writeErr(w, r, err)
+		return
+	}
+	if errs = append(errs, linkErrs...); len(errs) > 0 {
 		s.writeErr(w, r, errValidation(errs...))
 		return
 	}

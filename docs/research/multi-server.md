@@ -3,9 +3,12 @@
 Status: research and design, written 2026-09-24 for issue #8 ("Each Plex server is scanned and
 grouped on its own today, so the same title on two servers is not a duplicate. The goal is
 cross-server groups ('keep one copy across all my servers'). Keeper verification then has to span
-servers."). Nothing in §5 is implemented. Scope: how Dupearr models servers, libraries, scope
-groups and path mappings today; what happens when two servers index one share; how a title and a
-file can be recognised across servers; and a phased design in which the same physical file listed
+servers."). Phase 1 (§5.4, cross-server protection) is implemented (`docs/DECISIONS.md` D11),
+except the link suggestion from each \*arr's Plex connections (§5.4.1) and the report-only
+`Elsewhere` title index with its "Also on server B: 2160p, 58 GB" line (§5.4.2, §5.4.4); Phase 0
+(§5.3, live checks) and Phase 2 (§5.5, cross-server groups) are not. Scope: how Dupearr
+models servers, libraries, scope groups and path mappings today; what happens when two servers
+index one share; how a title and a file can be recognised across servers; and a phased design in which the same physical file listed
 by two servers never counts as two copies, a copy Dupearr cannot see on disk never justifies
 removing a copy on another server, and an unreachable server never counts as "does not list it".
 
@@ -936,9 +939,10 @@ complete cross-server record is never acted on while two or more servers are ena
 * A full scan already lists every enabled library of every enabled server; Phase 1 adds the
   disabled movie and show libraries of the other servers (page size 100, DECISIONS D2: about 500
   requests per 50 000 items), usually few. Targeted scans must list the other servers' libraries
-  that could list the group's files (for an unmapped non-`separate` server: all of its movie or
-  show libraries of the group's media type), which is the heavier case: up to the same 500
-  requests per 50 000 items per targeted scan. The index holds one normalised path and one
+  that could list the group's files (for a non-`separate` server: all of its movie and show
+  libraries, whatever the group's media type, since a library of one type may list files of the
+  other), which is the heavier case: up to the same 500 requests per 50 000 items per targeted
+  scan; the executor queues one such scan per server per queue run. The index holds one normalised path and one
   name-and-size key per part (a few MB for 100 000 parts).
 * No extra `stat` for non-candidates: listing paths map to local paths without I/O. Candidate
   versions are already stat'ed by `decorate`; only other-server listings that match a candidate

@@ -75,11 +75,14 @@ func (c *Client) Sections(ctx context.Context) ([]Section, error) {
 			continue
 		}
 		s := Section{
-			Key:       key,
-			Type:      d.Type.String(),
-			Title:     d.Title.String(),
-			UUID:      d.UUID.String(),
-			Locations: make([]string, 0, len(d.Location)),
+			Key:              key,
+			Type:             d.Type.String(),
+			Title:            d.Title.String(),
+			UUID:             d.UUID.String(),
+			Locations:        make([]string, 0, len(d.Location)),
+			Refreshing:       bool(d.Refreshing),
+			ScannedAt:        max(int64(d.ScannedAt), 0),
+			ContentChangedAt: max(int64(d.ContentChangedAt), 0),
 		}
 		for _, l := range d.Location {
 			if p := string(l.Path); strings.TrimSpace(p) != "" {

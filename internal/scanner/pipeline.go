@@ -15,6 +15,8 @@ import (
 
 	"github.com/sl0wz3r/dupearr/internal/engine"
 	"github.com/sl0wz3r/dupearr/internal/events"
+	"github.com/sl0wz3r/dupearr/internal/fileid"
+	"github.com/sl0wz3r/dupearr/internal/integrations/plex"
 	"github.com/sl0wz3r/dupearr/internal/integrations/upstreamerr"
 	"github.com/sl0wz3r/dupearr/internal/logging"
 	"github.com/sl0wz3r/dupearr/internal/models"
@@ -162,6 +164,19 @@ type scanConfig struct {
 	arrs    []models.ArrInstance // enabled instances, by id
 	// tautulli holds the enabled Tautulli connection of each media server (docs/DECISIONS.md D10).
 	tautulli map[int64]models.TautulliInstance
+
+	// Several Plex servers (docs/DECISIONS.md D11; crossserver.go). multi is set with two or more
+	// enabled Plex servers; nothing of the cross-server index, record or matching rules runs
+	// without it.
+	multi     bool
+	separate  map[int64]bool           // enabled servers declared separate storage
+	links     map[int64]map[int64]bool // *arr instance → the media servers it feeds
+	confirmed map[int64]bool           // *arr instances whose links a person confirmed
+}
+
+// matchPolicy is the *arr matching policy of the configuration (see MatchPolicy).
+func (c *scanConfig) matchPolicy() MatchPolicy {
+	return MatchPolicy{Multi: c.multi, Links: c.links, Confirmed: c.confirmed, Separate: c.separate}
 }
 
 // loadScanConfig reads everything a scan needs from the store.
@@ -192,6 +207,9 @@ func (s *Service) loadScanConfig(ctx context.Context) (*scanConfig, error) {
 		servers:    map[int64]models.MediaServer{},
 		mapper:     pathmap.New(mappings),
 		tautulli:   map[int64]models.TautulliInstance{},
+		separate:   map[int64]bool{},
+		links:      map[int64]map[int64]bool{},
+		confirmed:  map[int64]bool{},
 	}
 	for _, t := range tautullis {
 		if t.Enabled {
@@ -201,15 +219,34 @@ func (s *Service) loadScanConfig(ctx context.Context) (*scanConfig, error) {
 	for _, srv := range servers {
 		if srv.Enabled && (srv.Kind == models.MediaServerPlex || srv.Kind == "") {
 			c.servers[srv.ID] = srv
+			if isSeparate(srv) {
+				c.separate[srv.ID] = true
+			}
 		}
 	}
+	c.multi = len(c.servers) >= 2
 	for _, a := range arrs {
 		if a.Enabled && (a.Kind == models.ArrRadarr || a.Kind == models.ArrSonarr) {
 			c.arrs = append(c.arrs, a)
+			c.links[a.ID] = map[int64]bool{}
+			linked := false
+			for _, sid := range a.ServerIDs {
+				c.links[a.ID][sid] = true
+				_, on := c.servers[sid]
+				linked = linked || on
+			}
+			// Links confirmed without any enabled server count as unconfirmed: "feeds none of
+			// them" must never make the versions it tracks untracked (docs/DECISIONS.md D11).
+			c.confirmed[a.ID] = a.LinksConfirmed && linked
 		}
 	}
 	sort.Slice(c.arrs, func(i, j int) bool { return c.arrs[i].ID < c.arrs[j].ID })
 	return c, nil
+}
+
+// isSeparate reports a media server declared separate storage (docs/DECISIONS.md D11).
+func isSeparate(srv models.MediaServer) bool {
+	return strings.EqualFold(strings.TrimSpace(srv.Storage), models.StorageSeparate)
 }
 
 // mediaTypeOf maps a Plex section type to the media type the scanner lists ("" = not scanned).
@@ -427,6 +464,25 @@ type pipeline struct {
 	unsafeLibs map[int64]bool // libraries whose unseen groups must not be resolved
 	autoCands  []*models.DuplicateGroup
 
+	// Several Plex servers (crossserver.go; only with scanConfig.multi).
+	fileIDs *fileid.Prober
+	// sections are the libraries each enabled server reported in this run (readSections).
+	sections map[int64][]plex.Section
+	// indexed: the libraries whose listing is in this run's index (scanned or index-only); only
+	// they are recorded as compared in a group's cross-server record.
+	indexed map[int64]bool
+	// unreadServers: servers that could not be read completely in this run → why. Such a server
+	// may list any file (unless separate), so dependent groups with removals go to review.
+	unreadServers map[int64]string
+	// identities: the machine identifier of each server read in this run (stored or adopted).
+	identities map[int64]string
+	cross      *crossIndex
+	// arrUnknown: version key → why its *arr tracking is unknown (a mapped *arr file and an unmapped
+	// server's version, or an instance whose links are not confirmed).
+	arrUnknown map[string]string
+	// crossGroups are the ids of groups this run stored whose versions other servers list.
+	crossGroups []int64
+
 	mu          sync.Mutex // guards run.Stats, failedRKs, the maps written by workers and clients
 	progMu      sync.Mutex // serializes progress callbacks
 	plexClients map[int64]PlexClient
@@ -461,6 +517,12 @@ func newPipeline(ctx context.Context, s *Service, run *models.ScanRun, progress 
 		unsafeLibs:          map[int64]bool{},
 		plexClients:         map[int64]PlexClient{},
 		plexErrs:            map[int64]error{},
+
+		sections:      map[int64][]plex.Section{},
+		indexed:       map[int64]bool{},
+		unreadServers: map[int64]string{},
+		identities:    map[int64]string{},
+		arrUnknown:    map[string]string{},
 	}
 }
 
@@ -584,7 +646,15 @@ func (p *pipeline) runFull(body models.DuplicateScanBody) error {
 	}
 	p.progress(fmt.Sprintf("Scanning %d libraries", len(libs)))
 
-	p.listLibraries(libs, cfg.overlapPartners(libraryMap(libs)))
+	partners := cfg.overlapPartners(libraryMap(libs))
+	if cfg.multi {
+		// Another server may list any file this scan could remove (docs/DECISIONS.md D11).
+		p.readSections()
+		for id, l := range cfg.crossServerPartners(libraryMap(libs), p.sections) {
+			partners[id] = l
+		}
+	}
+	p.listLibraries(libs, partners)
 	if err := p.ctx.Err(); err != nil {
 		return canceled(err)
 	}
@@ -622,6 +692,7 @@ func (p *pipeline) runFull(body models.DuplicateScanBody) error {
 	p.applyFileAges(items)
 	p.noteUnavailable(items)
 	groups := engine.BuildGroups(items, engine.GroupOptionsFromSettings(cfg.settings, cfg.exclusions, cfg.libraries))
+	p.annotateCrossServer(groups, true)
 	p.persistGroups(groups, busy)
 	if err := p.ctx.Err(); err != nil {
 		return canceled(err)
@@ -631,6 +702,7 @@ func (p *pipeline) runFull(body models.DuplicateScanBody) error {
 	if err := p.ctx.Err(); err != nil {
 		return canceled(err)
 	}
+	p.markOtherServerKeeps()
 	p.autoApprove()
 	return nil
 }

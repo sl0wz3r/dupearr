@@ -63,6 +63,7 @@ import (
 	"time"
 
 	"github.com/sl0wz3r/dupearr/internal/events"
+	"github.com/sl0wz3r/dupearr/internal/fileid"
 	"github.com/sl0wz3r/dupearr/internal/integrations/arr"
 	"github.com/sl0wz3r/dupearr/internal/integrations/plex"
 	"github.com/sl0wz3r/dupearr/internal/integrations/tautulli"
@@ -120,6 +121,19 @@ type Deps struct {
 	// like the executor), and counts successes in ScanStats.AutoApproved. The caller queues
 	// ProcessQueue afterwards when AutoApproved > 0. nil = auto approval disabled (tests).
 	AutoApprove func(ctx context.Context, groupID int64, trigger, signature string) error
+
+	// FileIdentity (additive to docs/CONTRACTS.md) reads the identity of local files for the
+	// cross-server index (docs/DECISIONS.md D11). nil = fileid.Default() per scan (tests inject a
+	// prober that declares the test tree's filesystem type).
+	FileIdentity *fileid.Prober
+}
+
+// fileIdentity returns the file identity prober of a scan.
+func (s *Service) fileIdentity() *fileid.Prober {
+	if s.d.FileIdentity != nil {
+		return s.d.FileIdentity
+	}
+	return fileid.Default()
 }
 
 // DefaultConcurrency is the number of parallel item-detail fetches when Deps.Concurrency ≤ 0.

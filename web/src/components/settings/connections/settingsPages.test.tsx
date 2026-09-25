@@ -240,6 +240,42 @@ describe('ApplicationsPage', () => {
     expect(screen.getAllByText(/On File Import, On File Upgrade, On Rename/)).toHaveLength(2);
   });
 
+  // docs/DECISIONS.md D11: with several media servers, unconfirmed *arr links are pointed out.
+  it('marks instances whose Plex servers are not confirmed, only with two servers', () => {
+    const radarr = (linksConfirmed: boolean, serverIds: number[] = []): ArrInstance => ({
+      id: 1,
+      name: 'Radarr',
+      kind: 'radarr',
+      url: 'http://radarr:7878',
+      apiKey: MASKED_SECRET,
+      verifyTls: true,
+      enabled: true,
+      tags: [],
+      serverIds,
+      linksConfirmed,
+      createdAt: '',
+      updatedAt: '',
+    });
+    mocks.tautulli = [];
+    mocks.servers = [SERVER];
+    mocks.arr = [radarr(false)];
+    const { unmount } = renderPage(<ApplicationsPage />);
+    expect(screen.queryByText('Plex servers not confirmed')).not.toBeInTheDocument();
+    unmount();
+    mocks.servers = [SERVER, { ...SERVER, id: 2, name: 'Plex B', machineIdentifier: 'machine-2' }];
+    const second = renderPage(<ApplicationsPage />);
+    expect(screen.getByText('Plex servers not confirmed')).toBeInTheDocument();
+    second.unmount();
+    // Confirmed without any (enabled) server is not a confirmation.
+    mocks.arr = [radarr(true)];
+    const third = renderPage(<ApplicationsPage />);
+    expect(screen.getByText('Plex servers not confirmed')).toBeInTheDocument();
+    third.unmount();
+    mocks.arr = [radarr(true, [1])];
+    renderPage(<ApplicationsPage />);
+    expect(screen.queryByText('Plex servers not confirmed')).not.toBeInTheDocument();
+  });
+
   // docs/DECISIONS.md D10: Tautulli connections (play history) under "Watch history".
   it('lists Tautulli connections with their Plex server, never showing the key', async () => {
     mocks.arr = [];

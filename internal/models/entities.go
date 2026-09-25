@@ -54,6 +54,19 @@ const (
 	// version would be removed, and the play history of a version could not be read (review;
 	// docs/DECISIONS.md D10).
 	FlagWatchUnreadable = "watch_unreadable"
+	// Several Plex servers (docs/DECISIONS.md D11; set only with two or more enabled servers).
+	// FlagOtherServerListing: another server's item lists a file this group removes, and that item
+	// keeps another version that can be proven a different file (information: the executor proves
+	// it again right before the removal).
+	FlagOtherServerListing = "other_server_listing"
+	// FlagOtherServerKeeps: another server's live group keeps a file this group removes (review).
+	FlagOtherServerKeeps = "other_server_keeps"
+	// FlagOtherServerPossible: another server lists a file with the same name and size as a file
+	// this group removes, which may be the same file (review).
+	FlagOtherServerPossible = "other_server_possible"
+	// FlagOtherServerUnread: a media server that may list this group's files could not be read
+	// completely in the scan (review, "Incomplete data").
+	FlagOtherServerUnread = "other_server_unread"
 )
 
 // Decision is what happens to a version.
@@ -93,6 +106,50 @@ type DuplicateGroup struct {
 	// settings.StableScansRequired). docs/DECISIONS.md D4.
 	Signature   string `json:"signature"`
 	StableCount int    `json:"stableCount"`
+	// CrossServer is the record of the other media servers the scan compared the group's files
+	// with (docs/DECISIONS.md D11). nil with one enabled server, and for groups stored before
+	// multi-server support: with two or more enabled servers such a group is never acted on.
+	CrossServer *CrossServerRecord `json:"crossServer,omitempty"`
+}
+
+// CrossServerRecord is what a scan knew about the other media servers when it evaluated a group
+// (duplicate_groups.cross_server): which servers and libraries it compared the files with, and
+// the libraries' scan times. The executor re-reads the servers' libraries right before a removal
+// and refuses when anything changed since (a server may have started listing a file).
+type CrossServerRecord struct {
+	// Complete is false when a server that may list the group's files could not be read.
+	Complete  bool                 `json:"complete"`
+	Servers   []CrossServerServer  `json:"servers"`
+	Libraries []CrossServerLibrary `json:"libraries"`
+}
+
+// CrossServerServer is one enabled media server as the scan saw it.
+type CrossServerServer struct {
+	ServerID          int64  `json:"serverId"`
+	MachineIdentifier string `json:"machineIdentifier"`
+	Separate          bool   `json:"separate"`
+	// Mapped reports whether every movie and TV folder of the server is covered by a path mapping.
+	Mapped bool `json:"mapped"`
+	// Mappings fingerprints the server's path mappings ("" = none; pathmap.Mapper.Fingerprint):
+	// the scan compared the servers' files through them, so a change since sends the group back.
+	Mappings string `json:"mappings,omitempty"`
+	// Unread explains why the server could not be read completely ("" when it was).
+	Unread string `json:"unread,omitempty"`
+}
+
+// CrossServerLibrary is one movie or TV library of another server as the scan saw it (Plex's
+// GET /library/sections) and listed. ScannedAt and ContentChangedAt are Unix seconds, 0 when not
+// reported. Only libraries whose items the scan listed are recorded: any other library the
+// executor finds right before a removal counts as new since the scan.
+type CrossServerLibrary struct {
+	ServerID         int64    `json:"serverId"`
+	LibraryID        int64    `json:"libraryId"`
+	SectionKey       string   `json:"sectionKey"`
+	Type             string   `json:"type"`
+	Locations        []string `json:"locations"`
+	ScannedAt        int64    `json:"scannedAt"`
+	ContentChangedAt int64    `json:"contentChangedAt"`
+	Refreshing       bool     `json:"refreshing"`
 }
 
 // HasFlag reports whether the group carries flag f.
@@ -230,6 +287,12 @@ const (
 	MediaServerPlex MediaServerKind = "plex"
 )
 
+// StorageSeparate is MediaServer.Storage for a server on storage of its own (another host, a
+// friend's server): its raw paths and file names are never compared with other servers', it is
+// never matched to an *arr by raw path or name, and its copies never count for another server;
+// only its mapped folders are compared, in Dupearr's own view (docs/DECISIONS.md D11).
+const StorageSeparate = "separate"
+
 // MediaServer is a configured media server connection.
 type MediaServer struct {
 	ID                int64           `json:"id"`
@@ -240,8 +303,11 @@ type MediaServer struct {
 	MachineIdentifier string          `json:"machineIdentifier"`
 	VerifyTLS         bool            `json:"verifyTls"`
 	Enabled           bool            `json:"enabled"`
-	CreatedAt         time.Time       `json:"createdAt"`
-	UpdatedAt         time.Time       `json:"updatedAt"`
+	// Storage is "" (the server may share storage with the other servers: compare paths) or
+	// StorageSeparate.
+	Storage   string    `json:"storage"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // Library is a media-server library section known to Dupearr.
@@ -268,16 +334,22 @@ const (
 
 // ArrInstance is a configured Radarr/Sonarr instance.
 type ArrInstance struct {
-	ID        int64     `json:"id"`
-	Name      string    `json:"name"`
-	Kind      ArrKind   `json:"kind"`
-	URL       string    `json:"url"`    // base url incl. url base, e.g. http://radarr:7878
-	APIKey    string    `json:"apiKey"` // masked in API responses
-	VerifyTLS bool      `json:"verifyTls"`
-	Enabled   bool      `json:"enabled"`
-	Tags      []string  `json:"tags"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID        int64    `json:"id"`
+	Name      string   `json:"name"`
+	Kind      ArrKind  `json:"kind"`
+	URL       string   `json:"url"`    // base url incl. url base, e.g. http://radarr:7878
+	APIKey    string   `json:"apiKey"` // masked in API responses
+	VerifyTLS bool     `json:"verifyTls"`
+	Enabled   bool     `json:"enabled"`
+	Tags      []string `json:"tags"`
+	// ServerIDs are the media servers the instance feeds (never nil). With two or more enabled
+	// servers the scanner matches its files by raw path or by name and size only to versions of a
+	// linked server, and only once LinksConfirmed (a person saved the links); with one enabled
+	// server every instance counts as linked to it (docs/DECISIONS.md D11).
+	ServerIDs      []int64   `json:"serverIds"`
+	LinksConfirmed bool      `json:"linksConfirmed"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 // TautulliInstance is a configured Tautulli connection: the play history of one Plex server
@@ -421,6 +493,10 @@ type ScanStats struct {
 	ReclaimableBytes int64 `json:"reclaimableBytes"`
 	AutoApproved     int   `json:"autoApproved"`
 	Errors           int   `json:"errors"`
+	// SeparateNameMatches counts, per media server declared separate storage, the files of that
+	// server with the same name and size as a candidate file of another server (full scans with
+	// two or more enabled servers; a health warning: the server may share their storage after all).
+	SeparateNameMatches map[int64]int `json:"separateNameMatches,omitempty"`
 }
 
 // ScanRun is one execution of the scan pipeline.

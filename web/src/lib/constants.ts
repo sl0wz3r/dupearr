@@ -356,6 +356,10 @@ export const GROUP_FLAG_LABELS: Record<GroupFlag, string> = {
   disc_unreadable: 'Disc unreadable',
   disc_tracked_clip: '*arr tracks a disc clip',
   watch_unreadable: 'Play history unreadable',
+  other_server_listing: 'Also on another server',
+  other_server_keeps: 'Kept by another server',
+  other_server_possible: 'Maybe on another server',
+  other_server_unread: 'Media server not read',
 };
 
 export const GROUP_FLAG_DESCRIPTIONS: Record<GroupFlag, string> = {
@@ -387,6 +391,14 @@ export const GROUP_FLAG_DESCRIPTIONS: Record<GroupFlag, string> = {
     'Radarr/Sonarr tracks a single file of a disc (e.g. BDMV/STREAM/00800.m2ts or a loose 00800.m2ts). Files of a disc are never removed one by one — that would break the disc',
   watch_unreadable:
     'The profile ranks by play history (Played / Last played), but Tautulli could not be read during the last scan: an unreadable history counts as unknown, never as "not played" — needs review',
+  other_server_listing:
+    "Another media server also lists a file this duplicate removes. Its item keeps another copy that Dupearr checks on disk right before the removal and must prove to be a different file; otherwise nothing is removed",
+  other_server_keeps:
+    "A duplicate group of another media server keeps a file this duplicate removes — change one of the two decisions (needs review)",
+  other_server_possible:
+    'Another media server lists a file with the same name and size; if it is the same file, removing it would take that server’s copy — needs review',
+  other_server_unread:
+    'A media server that may list these files could not be read during the last scan: nothing is removed until a new scan has read it (or runs after it was disabled or declared separate storage)',
 };
 
 export const GROUP_FLAG_KIND: Record<GroupFlag, StatusKind> = {
@@ -414,6 +426,10 @@ export const GROUP_FLAG_KIND: Record<GroupFlag, StatusKind> = {
   disc_unreadable: 'warning',
   disc_tracked_clip: 'warning',
   watch_unreadable: 'warning',
+  other_server_listing: 'info',
+  other_server_keeps: 'warning',
+  other_server_possible: 'warning',
+  other_server_unread: 'danger',
 };
 
 export const DECISION_LABELS: Record<Decision, string> = {

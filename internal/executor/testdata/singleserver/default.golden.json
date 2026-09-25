@@ -1,0 +1,89 @@
+[
+  {
+    "name": "dry run",
+    "summary": "2 removal(s) processed, 2 dry run",
+    "actions": [
+      {
+        "versionKey": "plex:1:1026",
+        "status": "dry_run",
+        "method": "plex",
+        "message": "Would delete via plex (Fake Plex): /data/media/tv/The Expanse (2015)/Season 01/The Expanse (2015) - S01E01 - Dulcinea [WEBDL-1080p][EAC3 5.1][h264]-NTb.mkv [permanent]",
+        "permanent": true
+      },
+      {
+        "versionKey": "plex:1:1030",
+        "status": "dry_run",
+        "method": "arr",
+        "message": "Would delete via arr (sonarr): /data/media/tv/Severance (2022)/Season 01/Severance (2022) - S01E01 - Good News About Hell [HDTV-720p][AAC 2.0][x264]-LOL.mkv",
+        "permanent": false
+      }
+    ],
+    "groups": [
+      "episode:tvdb:5186331: pending (Dry run: no files were deleted)",
+      "episode:tvdb:8474520: pending (Dry run: no files were deleted)"
+    ],
+    "requests": [
+      "plex GET /",
+      "plex GET /status/sessions",
+      "plex GET /library/metadata/117",
+      "plex GET /library/metadata/115",
+      "sonarr GET /api/v3/config/mediamanagement",
+      "plex GET /",
+      "sonarr GET /api/v3/episodefile/501",
+      "plex GET /",
+      "plex GET /status/sessions",
+      "plex GET /library/metadata/122",
+      "plex GET /library/metadata/120",
+      "sonarr GET /api/v3/episodefile/503"
+    ],
+    "enqueued": []
+  },
+  {
+    "name": "recycle bin",
+    "summary": "2 removal(s) processed, 2 deleted (4.3 GiB)",
+    "actions": [
+      {
+        "versionKey": "plex:1:1026",
+        "status": "succeeded",
+        "method": "filesystem",
+        "message": "Moved to the recycle bin via filesystem: /data/media/tv/The Expanse (2015)/Season 01/The Expanse (2015) - S01E01 - Dulcinea [WEBDL-1080p][EAC3 5.1][h264]-NTb.mkv → $BIN/2035-01-01/tv/The Expanse (2015)/Season 01/The Expanse (2015) - S01E01 - Dulcinea [WEBDL-1080p][EAC3 5.1][h264]-NTb.mkv | the stale Plex entry was left in place (media deletion is not allowed on the server)",
+        "recyclePath": "$BIN/2035-01-01/tv/The Expanse (2015)/Season 01/The Expanse (2015) - S01E01 - Dulcinea [WEBDL-1080p][EAC3 5.1][h264]-NTb.mkv",
+        "permanent": false
+      },
+      {
+        "versionKey": "plex:1:1030",
+        "status": "succeeded",
+        "method": "arr",
+        "message": "Deleted via arr (sonarr): /data/media/tv/Severance (2022)/Season 01/Severance (2022) - S01E01 - Good News About Hell [HDTV-720p][AAC 2.0][x264]-LOL.mkv (moved to the sonarr recycle bin /data/recycle/sonarr) | rescanned in sonarr so it adopts the kept file | the stale Plex entry was left in place (media deletion is not allowed on the server)",
+        "permanent": false
+      }
+    ],
+    "groups": [
+      "episode:tvdb:5186331: resolved (Removed 1 duplicate file(s))",
+      "episode:tvdb:8474520: resolved (Removed 1 duplicate file(s))"
+    ],
+    "requests": [
+      "plex GET /",
+      "plex GET /status/sessions",
+      "plex GET /library/metadata/117",
+      "plex GET /library/metadata/115",
+      "sonarr GET /api/v3/config/mediamanagement",
+      "plex GET /",
+      "sonarr GET /api/v3/episodefile/501",
+      "plex GET /library/metadata/117",
+      "plex PUT /library/metadata/117/refresh",
+      "plex GET /",
+      "plex GET /status/sessions",
+      "plex GET /library/metadata/122",
+      "plex GET /library/metadata/120",
+      "sonarr GET /api/v3/episodefile/503",
+      "sonarr GET /api/v3/episodefile/503",
+      "sonarr DELETE /api/v3/episodefile/503",
+      "sonarr GET /api/v3/command",
+      "sonarr POST /api/v3/command",
+      "plex GET /library/metadata/122",
+      "plex PUT /library/metadata/122/refresh"
+    ],
+    "enqueued": []
+  }
+]

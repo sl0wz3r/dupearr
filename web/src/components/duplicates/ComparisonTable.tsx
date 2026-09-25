@@ -1,7 +1,7 @@
 import { clsx } from 'clsx';
 import { Disc3, Lock, TriangleAlert } from 'lucide-react';
 import type { ReactNode } from 'react';
-import type { CriterionType, DiscInfo, GroupFile, Id, MediaPart, MediaVersion, Profile } from '@/api/types';
+import type { CriterionType, DiscInfo, GroupFile, Id, MediaPart, MediaVersion, OtherListing, Profile } from '@/api/types';
 import { usePreferences } from '@/app/preferences';
 import { Badge, ByteSize, CopyButton, DecisionBadge, RelativeTime } from '@/components/ui';
 import {
@@ -455,6 +455,15 @@ const ROWS: RowSpec[] = [
     render: (f, ctx) => <PlaysCell version={f.version} sameItem={!!ctx.sameItem} />,
   },
   {
+    id: 'other-servers',
+    label: 'Other servers',
+    criteria: [],
+    best: () => new Set<number>(),
+    // Several media servers only (docs/DECISIONS.md D11): absent with one server.
+    visible: (files) => files.some((f) => (f.version.otherServers?.length ?? 0) > 0),
+    render: (f) => <OtherServersCell listings={f.version.otherServers ?? []} />,
+  },
+  {
     id: 'paths',
     label: 'Path(s)',
     criteria: ['filename_score'],
@@ -504,6 +513,54 @@ const ROWS: RowSpec[] = [
 ];
 
 const COVERED = new Set<CriterionType>(ROWS.flatMap((r) => r.criteria));
+
+const MATCH_LABELS: Record<OtherListing['match'], string> = {
+  same_file: 'same file',
+  possibly_same: 'possibly the same file',
+};
+
+/**
+ * The other media servers that list a copy's file (docs/DECISIONS.md D11): "Also listed by B →
+ * Movies 1080p (same file)", with what Dupearr knows about that server's other copies.
+ */
+export function OtherServersCell({ listings }: { listings: readonly OtherListing[] }) {
+  if (listings.length === 0) return <Value primary="" secondary="Not listed by another server" />;
+  return (
+    <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+      {listings.map((l) => (
+        <li key={l.versionKey} className="min-w-0">
+          <div className="text-fg-strong">
+            Also listed by {l.serverName || `server ${l.serverId}`} → {l.libraryTitle || `library ${l.libraryId}`}{' '}
+            <span className="text-muted">({MATCH_LABELS[l.match] ?? l.match})</span>
+          </div>
+          <div className="mt-0.5 flex flex-wrap gap-1">
+            {l.itemKeepsAnother === true && (
+              <Badge kind="info" outline title="Checked on disk again right before a removal">
+                Keeps another copy there
+              </Badge>
+            )}
+            {l.itemKeepsAnother === false &&
+              (l.match === 'possibly_same' ? (
+                <Badge kind="warning" outline title="If it is the same file, removing this copy would leave that server without a copy">
+                  Maybe its only copy there
+                </Badge>
+              ) : (
+                <Badge kind="warning" outline title="Removing this copy would leave that server without a copy">
+                  Its only copy there
+                </Badge>
+              ))}
+            {l.keptByGroup === true && (
+              <Badge kind="warning" outline title="A duplicate group of that server keeps this file">
+                Kept by its duplicate
+              </Badge>
+            )}
+          </div>
+          {l.hint && <div className="mt-0.5 text-xs text-muted">{l.hint}</div>}
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 /**
  * Play history of a copy (docs/DECISIONS.md D10). The wording follows what the history can tell:

@@ -3,7 +3,9 @@ package database
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/sl0wz3r/dupearr/internal/models"
@@ -15,7 +17,7 @@ import (
 
 type mediaServerRepo struct{ d *DB }
 
-const mediaServerColumns = `id, name, kind, url, token, machine_identifier, verify_tls, enabled, created_at, updated_at`
+const mediaServerColumns = `id, name, kind, url, token, machine_identifier, verify_tls, enabled, storage, created_at, updated_at`
 
 func scanMediaServer(s scanner) (models.MediaServer, error) {
 	var (
@@ -23,7 +25,7 @@ func scanMediaServer(s scanner) (models.MediaServer, error) {
 		created, updated string
 	)
 	if err := s.Scan(&m.ID, &m.Name, &m.Kind, &m.URL, &m.Token, &m.MachineIdentifier,
-		&m.VerifyTLS, &m.Enabled, &created, &updated); err != nil {
+		&m.VerifyTLS, &m.Enabled, &m.Storage, &created, &updated); err != nil {
 		return models.MediaServer{}, err
 	}
 	var err error
@@ -52,40 +54,106 @@ func (r mediaServerRepo) Get(ctx context.Context, id int64) (*models.MediaServer
 	return &m, nil
 }
 
-// Create inserts s and sets its ID, CreatedAt (when zero) and UpdatedAt.
+// Create inserts s and sets its ID, CreatedAt (when zero) and UpdatedAt. See unconfirmArrLinks
+// for the *arr links a new media server affects.
 func (r mediaServerRepo) Create(ctx context.Context, s *models.MediaServer) error {
 	now := nowUTC()
 	created := orNow(s.CreatedAt, now)
-	res, err := r.d.w.ExecContext(ctx, `INSERT INTO media_servers
-		(name, kind, url, token, machine_identifier, verify_tls, enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		s.Name, s.Kind, s.URL, s.Token, s.MachineIdentifier, b2i(s.VerifyTLS), b2i(s.Enabled),
-		fmtTime(created), fmtTime(now))
+	var id int64
+	err := r.d.write(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `INSERT INTO media_servers
+			(name, kind, url, token, machine_identifier, verify_tls, enabled, storage, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			s.Name, s.Kind, s.URL, s.Token, s.MachineIdentifier, b2i(s.VerifyTLS), b2i(s.Enabled), s.Storage,
+			fmtTime(created), fmtTime(now))
+		if err != nil {
+			return wrap(err, "create media server")
+		}
+		if id, err = res.LastInsertId(); err != nil {
+			return wrap(err, "create media server")
+		}
+		if comparedServer(s.Kind, s.Enabled, s.Storage) {
+			return r.unconfirmArrLinks(ctx, tx, id)
+		}
+		return nil
+	})
 	if err != nil {
-		return wrap(err, "create media server")
-	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return wrap(err, "create media server")
+		return err
 	}
 	s.ID, s.CreatedAt, s.UpdatedAt = id, created, now
 	return nil
 }
 
-// Update replaces the mutable fields of s (by ID) and sets UpdatedAt.
+// Update replaces the mutable fields of s (by ID) and sets UpdatedAt. See unconfirmArrLinks for
+// the *arr links enabling a media server (or declaring it shared storage) affects.
 func (r mediaServerRepo) Update(ctx context.Context, s *models.MediaServer) error {
 	now := nowUTC()
-	res, err := r.d.w.ExecContext(ctx, `UPDATE media_servers SET
-		name = ?, kind = ?, url = ?, token = ?, machine_identifier = ?, verify_tls = ?, enabled = ?, updated_at = ?
-		WHERE id = ?`,
-		s.Name, s.Kind, s.URL, s.Token, s.MachineIdentifier, b2i(s.VerifyTLS), b2i(s.Enabled), fmtTime(now), s.ID)
+	err := r.d.write(ctx, func(tx *sql.Tx) error {
+		var (
+			kind    models.MediaServerKind
+			storage string
+			enabled bool
+		)
+		switch err := tx.QueryRowContext(ctx, `SELECT kind, enabled, storage FROM media_servers WHERE id = ?`, s.ID).
+			Scan(&kind, &enabled, &storage); {
+		case errors.Is(err, sql.ErrNoRows):
+			// The UPDATE below reports the missing row.
+		case err != nil:
+			return wrap(err, "update media server %d", s.ID)
+		}
+		res, err := tx.ExecContext(ctx, `UPDATE media_servers SET
+			name = ?, kind = ?, url = ?, token = ?, machine_identifier = ?, verify_tls = ?, enabled = ?, storage = ?, updated_at = ?
+			WHERE id = ?`,
+			s.Name, s.Kind, s.URL, s.Token, s.MachineIdentifier, b2i(s.VerifyTLS), b2i(s.Enabled), s.Storage, fmtTime(now), s.ID)
+		if err != nil {
+			return wrap(err, "update media server %d", s.ID)
+		}
+		if err := expectAffected(res, "update media server %d", s.ID); err != nil {
+			return err
+		}
+		if comparedServer(s.Kind, s.Enabled, s.Storage) && !comparedServer(kind, enabled, storage) {
+			return r.unconfirmArrLinks(ctx, tx, s.ID)
+		}
+		return nil
+	})
 	if err != nil {
-		return wrap(err, "update media server %d", s.ID)
-	}
-	if err := expectAffected(res, "update media server %d", s.ID); err != nil {
 		return err
 	}
 	s.UpdatedAt = now
+	return nil
+}
+
+// comparedServer reports an enabled Plex server that is not declared separate storage: one whose
+// versions *arr files may be matched to by raw path or by name and size (docs/DECISIONS.md D11).
+func comparedServer(kind models.MediaServerKind, enabled bool, storage string) bool {
+	return enabled && (kind == models.MediaServerPlex || kind == "") &&
+		!strings.EqualFold(strings.TrimSpace(storage), models.StorageSeparate)
+}
+
+// unconfirmArrLinks runs in the write transaction that added, enabled or declared shared storage a
+// media server (id): when two or more Plex servers are then enabled, the *arr instances whose links
+// were confirmed without this server were confirmed while a person could not choose it (or while
+// only one server was enabled, when the links are confirmed automatically). "Not linked" would
+// then mean "untracked" for its versions, so their links count as unconfirmed again until a person
+// saves them: rules 2 and 3 stay off for the instance and the versions it may track go to review.
+func (r mediaServerRepo) unconfirmArrLinks(ctx context.Context, tx *sql.Tx, id int64) error {
+	var enabled int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM media_servers WHERE enabled = 1 AND kind IN (?, '')`,
+		models.MediaServerPlex).Scan(&enabled); err != nil {
+		return wrap(err, "count media servers")
+	}
+	if enabled < 2 {
+		return nil
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE arr_instances SET links_confirmed = 0
+		WHERE links_confirmed = 1 AND id NOT IN (SELECT arr_id FROM arr_server_links WHERE server_id = ?)`, id)
+	if err != nil {
+		return wrap(err, "unconfirm the media server links of the *arr instances")
+	}
+	if n, err := res.RowsAffected(); err == nil && n > 0 {
+		r.d.log.Info("A media server was added or enabled: confirm again which Plex servers each *arr instance feeds (Settings → Applications)",
+			"instances", n)
+	}
 	return nil
 }
 
@@ -279,7 +347,7 @@ func (r libraryRepo) Update(ctx context.Context, l *models.Library) error {
 
 type arrInstanceRepo struct{ d *DB }
 
-const arrInstanceColumns = `id, name, kind, url, api_key, verify_tls, enabled, tags, created_at, updated_at`
+const arrInstanceColumns = `id, name, kind, url, api_key, verify_tls, enabled, tags, links_confirmed, created_at, updated_at`
 
 func scanArrInstance(s scanner) (models.ArrInstance, error) {
 	var (
@@ -287,9 +355,10 @@ func scanArrInstance(s scanner) (models.ArrInstance, error) {
 		tags, created, updated string
 	)
 	if err := s.Scan(&a.ID, &a.Name, &a.Kind, &a.URL, &a.APIKey, &a.VerifyTLS, &a.Enabled, &tags,
-		&created, &updated); err != nil {
+		&a.LinksConfirmed, &created, &updated); err != nil {
 		return models.ArrInstance{}, err
 	}
+	a.ServerIDs = []int64{} // filled by loadArrLinks
 	if err := fromJSON(tags, &a.Tags); err != nil {
 		return models.ArrInstance{}, fmt.Errorf("arr instance %d tags: %w", a.ID, err)
 	}
@@ -309,6 +378,9 @@ func (r arrInstanceRepo) List(ctx context.Context) ([]models.ArrInstance, error)
 	if err != nil {
 		return nil, wrap(err, "list arr instances")
 	}
+	if err := loadArrLinks(ctx, r.d.r, out, 0); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -317,10 +389,78 @@ func (r arrInstanceRepo) Get(ctx context.Context, id int64) (*models.ArrInstance
 	if err != nil {
 		return nil, wrap(err, "get arr instance %d", id)
 	}
-	return &a, nil
+	out := []models.ArrInstance{a}
+	if err := loadArrLinks(ctx, r.d.r, out, id); err != nil {
+		return nil, err
+	}
+	return &out[0], nil
 }
 
-// Create inserts a and sets its ID, CreatedAt (when zero) and UpdatedAt.
+// loadArrLinks fills the ServerIDs (sorted) of insts from arr_server_links with one query (for the
+// instance id only, when it is not 0).
+func loadArrLinks(ctx context.Context, q *sql.DB, insts []models.ArrInstance, id int64) error {
+	if len(insts) == 0 {
+		return nil
+	}
+	query, args := `SELECT arr_id, server_id FROM arr_server_links ORDER BY arr_id, server_id`, []any{}
+	if id != 0 {
+		query, args = `SELECT arr_id, server_id FROM arr_server_links WHERE arr_id = ? ORDER BY server_id`, []any{id}
+	}
+	rows, err := q.QueryContext(ctx, query, args...)
+	if err != nil {
+		return wrap(err, "list arr server links")
+	}
+	links := map[int64][]int64{}
+	for rows.Next() {
+		var arrID, serverID int64
+		if err := rows.Scan(&arrID, &serverID); err != nil {
+			_ = rows.Close()
+			return wrap(err, "list arr server links")
+		}
+		links[arrID] = append(links[arrID], serverID)
+	}
+	if err := rows.Close(); err != nil {
+		return wrap(err, "list arr server links")
+	}
+	if err := rows.Err(); err != nil {
+		return wrap(err, "list arr server links")
+	}
+	for i := range insts {
+		if ids := links[insts[i].ID]; ids != nil {
+			insts[i].ServerIDs = ids
+		}
+	}
+	return nil
+}
+
+// replaceArrLinks stores exactly serverIDs as the media server links of instance id, in the
+// caller's write transaction: an instance is never stored with only part of its links.
+func replaceArrLinks(ctx context.Context, tx *sql.Tx, id int64, serverIDs []int64) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM arr_server_links WHERE arr_id = ?`, id); err != nil {
+		return wrap(err, "replace the media server links of arr instance %d", id)
+	}
+	for _, sid := range serverIDs {
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO arr_server_links (arr_id, server_id) VALUES (?, ?)`, id, sid); err != nil {
+			return wrap(err, "link arr instance %d to media server %d", id, sid)
+		}
+	}
+	return nil
+}
+
+// sortedLinks returns the distinct server ids, sorted (never nil).
+func sortedLinks(ids []int64) []int64 {
+	out := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if !slices.Contains(out, id) {
+			out = append(out, id)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// Create inserts a with its media server links (ServerIDs, LinksConfirmed) and sets its ID,
+// CreatedAt (when zero) and UpdatedAt.
 func (r arrInstanceRepo) Create(ctx context.Context, a *models.ArrInstance) error {
 	tags, err := toJSON(nonNil(a.Tags))
 	if err != nil {
@@ -328,39 +468,61 @@ func (r arrInstanceRepo) Create(ctx context.Context, a *models.ArrInstance) erro
 	}
 	now := nowUTC()
 	created := orNow(a.CreatedAt, now)
-	res, err := r.d.w.ExecContext(ctx, `INSERT INTO arr_instances
-		(name, kind, url, api_key, verify_tls, enabled, tags, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		a.Name, a.Kind, a.URL, a.APIKey, b2i(a.VerifyTLS), b2i(a.Enabled), tags, fmtTime(created), fmtTime(now))
+	links := sortedLinks(a.ServerIDs)
+	var id int64
+	err = r.d.write(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `INSERT INTO arr_instances
+			(name, kind, url, api_key, verify_tls, enabled, tags, links_confirmed, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			a.Name, a.Kind, a.URL, a.APIKey, b2i(a.VerifyTLS), b2i(a.Enabled), tags, b2i(a.LinksConfirmed),
+			fmtTime(created), fmtTime(now))
+		if err != nil {
+			return wrap(err, "create arr instance")
+		}
+		if id, err = res.LastInsertId(); err != nil {
+			return wrap(err, "create arr instance")
+		}
+		return replaceArrLinks(ctx, tx, id, links)
+	})
 	if err != nil {
-		return wrap(err, "create arr instance")
+		return err
 	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return wrap(err, "create arr instance")
-	}
-	a.ID, a.CreatedAt, a.UpdatedAt, a.Tags = id, created, now, nonNil(a.Tags)
+	a.ID, a.CreatedAt, a.UpdatedAt, a.Tags, a.ServerIDs = id, created, now, nonNil(a.Tags), links
 	return nil
 }
 
-// Update replaces the mutable fields of a (by ID) and sets UpdatedAt.
+// Update replaces the mutable fields of a (by ID) and sets UpdatedAt. Its media server links are
+// replaced by ServerIDs in the same transaction; a nil ServerIDs keeps the stored links (callers
+// that never loaded them cannot drop them by accident), while LinksConfirmed is always written.
 func (r arrInstanceRepo) Update(ctx context.Context, a *models.ArrInstance) error {
 	tags, err := toJSON(nonNil(a.Tags))
 	if err != nil {
 		return fmt.Errorf("update arr instance %d: %w", a.ID, err)
 	}
 	now := nowUTC()
-	res, err := r.d.w.ExecContext(ctx, `UPDATE arr_instances SET
-		name = ?, kind = ?, url = ?, api_key = ?, verify_tls = ?, enabled = ?, tags = ?, updated_at = ?
-		WHERE id = ?`,
-		a.Name, a.Kind, a.URL, a.APIKey, b2i(a.VerifyTLS), b2i(a.Enabled), tags, fmtTime(now), a.ID)
+	err = r.d.write(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE arr_instances SET
+			name = ?, kind = ?, url = ?, api_key = ?, verify_tls = ?, enabled = ?, tags = ?, links_confirmed = ?, updated_at = ?
+			WHERE id = ?`,
+			a.Name, a.Kind, a.URL, a.APIKey, b2i(a.VerifyTLS), b2i(a.Enabled), tags, b2i(a.LinksConfirmed), fmtTime(now), a.ID)
+		if err != nil {
+			return wrap(err, "update arr instance %d", a.ID)
+		}
+		if err := expectAffected(res, "update arr instance %d", a.ID); err != nil {
+			return err
+		}
+		if a.ServerIDs == nil {
+			return nil
+		}
+		return replaceArrLinks(ctx, tx, a.ID, sortedLinks(a.ServerIDs))
+	})
 	if err != nil {
-		return wrap(err, "update arr instance %d", a.ID)
-	}
-	if err := expectAffected(res, "update arr instance %d", a.ID); err != nil {
 		return err
 	}
 	a.UpdatedAt = now
+	if a.ServerIDs != nil {
+		a.ServerIDs = sortedLinks(a.ServerIDs)
+	}
 	return nil
 }
 

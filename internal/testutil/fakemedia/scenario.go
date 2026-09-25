@@ -117,6 +117,11 @@ type PlexServer struct {
 	// AutoEmptyTrash is Plex's "Empty trash automatically after every scan": when true, refreshes
 	// remove media whose files vanished instead of keeping them listed as unavailable.
 	AutoEmptyTrash bool
+	// MediaRoot is the path this server sees the media root at ("" = RemoteMediaRoot, /data/media):
+	// a second server in another container layout (e.g. /srv) lists the same files under other
+	// paths. Library locations, part files and section scan paths use it; the *arrs keep
+	// RemoteMediaRoot.
+	MediaRoot string
 }
 
 // Library is a Plex library section.
@@ -637,6 +642,9 @@ func (v *validator) run() {
 	}
 	if s.Server.MachineIdentifier == "" {
 		v.addf("server: machine identifier is required")
+	}
+	if r := s.Server.MediaRoot; r != "" && (!strings.HasPrefix(r, "/") || path.Clean(r) != r || r == "/") {
+		v.addf("server: media root %q must be a clean absolute path", r)
 	}
 	for i := range s.Libraries {
 		l := &s.Libraries[i]

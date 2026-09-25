@@ -103,7 +103,9 @@ func checkEvaluable(g *models.DuplicateGroup) error {
 // non-optimized version kept whenever something is removed; protected, optimized, unavailable and
 // multi-episode versions are never removed; with intentional *arr instances no *arr-tracked
 // version is removed; a removed version never shares a file (path, inode or *arr file) with a kept
-// one. Evaluate is idempotent and deterministic.
+// one; with several media servers, a version whose file another server's item lists is never
+// removed unless that item keeps another version that could be proven a different file
+// (docs/DECISIONS.md D11). Evaluate is idempotent and deterministic.
 func Evaluate(g *models.DuplicateGroup, p models.Profile, env EvalEnv) error {
 	if err := checkEvaluable(g); err != nil {
 		return err
@@ -373,6 +375,11 @@ func (ev *evaluation) decide() {
 	ev.keepPlayable(ev.engineKeep, false)
 	ev.sameComp, ev.sameMembers = sameFileComponents(ev.vs)
 	ev.protectSameFile(ev.engineKeep, false)
+	// Another server's item may list a file this group would remove (docs/DECISIONS.md D11): each
+	// pass only adds keepers, so this ends; a new keeper can pull its same-file copies along.
+	for ev.protectOtherServers(ev.engineKeep, false) {
+		ev.protectSameFile(ev.engineKeep, false)
+	}
 	copy(ev.keep, ev.engineKeep)
 
 	// User overrides.
@@ -417,6 +424,10 @@ func (ev *evaluation) decide() {
 	ev.keepPlayable(ev.keep, true)
 	// Invariant: a removed version never shares a file with a kept one.
 	ev.protectSameFile(ev.keep, true)
+	// Overrides change the removal set: the other servers' copies are checked again.
+	for ev.protectOtherServers(ev.keep, true) {
+		ev.protectSameFile(ev.keep, true)
+	}
 }
 
 // playableReason is the protection reason of the regular copy KeepPlayableCopy keeps next to a disc.
@@ -792,7 +803,9 @@ func (ev *evaluation) values(i int) map[string]string {
 func engineOwnedFlag(f string) bool {
 	switch f {
 	case models.FlagMinAge, models.FlagArrUntrackedKeeper, models.FlagArrCutoffUnmet,
-		models.FlagMissingKeeperFile, models.FlagIntentionalArr, models.FlagWatchUnreadable:
+		models.FlagMissingKeeperFile, models.FlagIntentionalArr, models.FlagWatchUnreadable,
+		models.FlagOtherServerListing, models.FlagOtherServerKeeps, models.FlagOtherServerPossible,
+		models.FlagOtherServerUnread:
 		return true
 	}
 	return false
@@ -842,6 +855,7 @@ func (ev *evaluation) finish() {
 		// never decide (the versions of one Plex item, full discs): the ranking is the same either way.
 		flags = addFlag(flags, models.FlagWatchUnreadable)
 	}
+	flags = ev.crossServerFlags(flags, removals)
 	g.Flags = sortedUnique(flags)
 	if g.LibraryIDs == nil { // JSON: [] / {} rather than null
 		g.LibraryIDs = libraryIDsOf(ev.vs)
@@ -1000,6 +1014,7 @@ func (ev *evaluation) status(removals int) (status models.GroupStatus, reason st
 		review = append(review, fmt.Sprintf("%s; %s cannot decide: re-scan once %s is reachable",
 			cause, strings.Join(ev.watchLabels, " / "), source))
 	}
+	review = append(review, ev.crossServerReview()...)
 	switch {
 	case len(review) > 0:
 		return models.GroupReview, titleCase(strings.Join(review, "; ")), false
@@ -1097,7 +1112,8 @@ func titleCase(s string) string {
 // carries min_age or arr_queue_busy; no removed regular version has a file inside a full-disc
 // structure (a disc is only removed as a whole), and a removed disc version is a verified,
 // reachable, removable disc of a movie (docs/DECISIONS.md D9; the settings-dependent disc rules are
-// checked by the executor). The error wraps ErrInvariant and lists every problem.
+// checked by the executor); no removed version's file is the only copy another media server's item
+// has (docs/DECISIONS.md D11). The error wraps ErrInvariant and lists every problem.
 func ValidateDecisions(g *models.DuplicateGroup) error {
 	if g == nil {
 		return fmt.Errorf("%w: nil group", ErrInvariant)
@@ -1173,6 +1189,8 @@ func ValidateDecisions(g *models.DuplicateGroup) error {
 	if len(removed) > 0 && g.HasFlag(models.FlagArrQueueBusy) {
 		problems = append(problems, "the *arr has an active download or import for this title")
 	}
+	// docs/DECISIONS.md D11: a file another server's item needs is never removed.
+	problems = append(problems, otherServerProblems(g, removed)...)
 	if len(problems) > 0 {
 		return fmt.Errorf("%w: %s", ErrInvariant, strings.Join(problems, "; "))
 	}

@@ -337,6 +337,60 @@ type MediaVersion struct {
 	// Watch is the play history of the version's item (nil: no play-history source is configured
 	// for its media server). docs/DECISIONS.md D10.
 	Watch *WatchInfo `json:"watch,omitempty"`
+	// OtherServers are the items of other media servers that list this version's file, or a file
+	// with the same name and size (docs/DECISIONS.md D11). Set only with two or more enabled
+	// servers; nil otherwise.
+	OtherServers []OtherListing `json:"otherServers,omitempty"`
+}
+
+// OtherListing.Match values.
+const (
+	// OtherSameFile: the other server lists the same file (equal mapped local path, equal device
+	// and inode, or an equal raw path while a side is unmapped and neither server is separate).
+	OtherSameFile = "same_file"
+	// OtherPossiblySame: the other server lists a file with the same name and size that could not
+	// be told apart from this one.
+	OtherPossiblySame = "possibly_same"
+)
+
+// OtherListing is one media of another server's item that lists a version's file (or possibly
+// does). Removing the version would take that item's file too, so it is only removed while the
+// item keeps another version proven to be a different file (docs/DECISIONS.md D11).
+type OtherListing struct {
+	ServerID     int64  `json:"serverId"`
+	ServerName   string `json:"serverName"`
+	LibraryID    int64  `json:"libraryId"`
+	LibraryTitle string `json:"libraryTitle"`
+	RatingKey    string `json:"ratingKey"`
+	MediaID      int64  `json:"mediaId"`
+	VersionKey   string `json:"versionKey"` // "plex:<serverId>:<mediaId>"
+	ItemTitle    string `json:"itemTitle"`
+	Path         string `json:"path"` // as that server reports it
+	Match        string `json:"match"`
+	// ItemKeepsAnother reports, for a version this group removes, whether the other item keeps a
+	// version that could be proven a different file (nil on a kept version, or when unknown).
+	ItemKeepsAnother *bool `json:"itemKeepsAnother"`
+	// KeptByGroup reports whether a live group of the other server keeps this listing (nil =
+	// unknown or not looked up).
+	KeptByGroup *bool `json:"keptByGroup"`
+	// Others are the item's other non-optimized media, with the versions of this group each is
+	// (or may be) the file of and those it could be proven different from.
+	Others []OtherMedia `json:"others,omitempty"`
+	// Hint says what would let Dupearr tell the files apart ("" when nothing would).
+	Hint string `json:"hint,omitempty"`
+}
+
+// OtherMedia is another media of an OtherListing's item.
+type OtherMedia struct {
+	MediaID    int64  `json:"mediaId"`
+	VersionKey string `json:"versionKey"`
+	Path       string `json:"path"`
+	// Same lists the version keys of the group whose file this media is, or may be.
+	Same []string `json:"same,omitempty"`
+	// Distinct lists the version keys of the group this media could be proven different from (a
+	// mapped file on the same device, an allowlisted filesystem type and another inode; proven only
+	// at run time).
+	Distinct []string `json:"distinct,omitempty"`
 }
 
 // IsDisc reports a full-disc backup version.

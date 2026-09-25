@@ -23,6 +23,15 @@
 // automatically; with a keep-per profile (one per resolution or dynamic range) every partition a
 // version is removed from needs such a keeper of its own. Approve only queues the state it checked
 // (ApproveReviewed). Restore ignores the group of the restored file, so it is not removed again.
+//
+// Several media servers (crossserver.go, docs/DECISIONS.md D11): with two or more enabled servers
+// a group is only acted on with a complete cross-server record that names every enabled server;
+// another server's libraries must not have changed since the scan; every other server's item that
+// lists a file to remove must keep a version Dupearr finds on disk and proves to be a different
+// file (on files open at the same time, allowlisted filesystem types only), and no other server's
+// live group may keep that file. An *arr file is never confirmed by raw path for a server the
+// instance is not confirmed to feed, nor for a part the server has no mapping for while the *arr's
+// path maps.
 package executor
 
 import (
@@ -37,6 +46,7 @@ import (
 
 	"github.com/sl0wz3r/dupearr/internal/engine"
 	"github.com/sl0wz3r/dupearr/internal/events"
+	"github.com/sl0wz3r/dupearr/internal/fileid"
 	"github.com/sl0wz3r/dupearr/internal/integrations/arr"
 	"github.com/sl0wz3r/dupearr/internal/integrations/plex"
 	"github.com/sl0wz3r/dupearr/internal/models"
@@ -55,6 +65,9 @@ type PlexClient interface {
 	ScanPath(ctx context.Context, sectionKey, dir string) error
 	MediaDeletionAllowed(ctx context.Context) (bool, error)
 	ActiveSessions(ctx context.Context) (map[string]bool, error)
+	// Sections is read, with two or more enabled media servers, from the other servers right before
+	// a removal: a library that changed since the scan may list the file (docs/DECISIONS.md D11).
+	Sections(ctx context.Context) ([]plex.Section, error)
 }
 
 // ArrClient is the subset of *arr.Client the executor uses (fakes in tests).
@@ -89,6 +102,10 @@ type Deps struct {
 	// otherwise store the status it read ("pending") over the approval afterwards, which cancels
 	// the approved removals although the approval succeeded. nil = no such lock (tests).
 	GroupLock sync.Locker
+	// FileIdentity proves, with two or more media servers, that another server's remaining copy is
+	// a different file from the one being removed (docs/DECISIONS.md D11). nil = fileid.Default()
+	// per queue run.
+	FileIdentity *fileid.Prober
 }
 
 // Summary is the outcome of one ProcessQueue run.

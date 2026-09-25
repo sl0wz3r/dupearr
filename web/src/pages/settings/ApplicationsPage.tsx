@@ -16,7 +16,7 @@ import {
   SettingsSection,
   ToolbarButton,
 } from '@/components/page';
-import { ArrInstanceModal } from '@/components/settings/connections/ArrInstanceModal';
+import { ArrInstanceModal, linksConfirmedFor } from '@/components/settings/connections/ArrInstanceModal';
 import { ConnectionCard } from '@/components/settings/connections/ConnectionCard';
 import { TautulliModal } from '@/components/settings/connections/TautulliModal';
 import { WebhookInfo } from '@/components/settings/connections/WebhookInfo';
@@ -41,6 +41,8 @@ export default function ApplicationsPage() {
   const list = instances.data ?? [];
   const serverList = servers.data ?? [];
   const serverName = (id: number) => serverList.find((s) => s.id === id)?.name ?? `Media server ${id}`;
+  // Links confirmed without an enabled server count as not confirmed (docs/DECISIONS.md D11).
+  const enabledLinks = (a: ArrInstance) => (a.serverIds ?? []).filter((id) => serverList.some((s) => s.id === id && s.enabled));
 
   return (
     <PageContent title="Applications">
@@ -93,6 +95,11 @@ export default function ApplicationsPage() {
                           {t}
                         </Badge>
                       ))}
+                      {serverList.length >= 2 && !linksConfirmedFor({ ...a, serverIds: enabledLinks(a) }) && (
+                        <Badge kind="warning" outline title="Choose the Plex servers this application feeds">
+                          Plex servers not confirmed
+                        </Badge>
+                      )}
                     </>
                   }
                 />

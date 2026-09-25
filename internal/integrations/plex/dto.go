@@ -63,11 +63,14 @@ type containerDTO struct {
 }
 
 type directoryDTO struct {
-	Key      flexString        `json:"key"`
-	Type     flexString        `json:"type"`
-	Title    flexString        `json:"title"`
-	UUID     flexString        `json:"uuid"`
-	Location list[locationDTO] `json:"Location"`
+	Key              flexString        `json:"key"`
+	Type             flexString        `json:"type"`
+	Title            flexString        `json:"title"`
+	UUID             flexString        `json:"uuid"`
+	Location         list[locationDTO] `json:"Location"`
+	Refreshing       flexBool          `json:"refreshing"`
+	ScannedAt        flexInt           `json:"scannedAt"`
+	ContentChangedAt flexInt           `json:"contentChangedAt"`
 }
 
 type locationDTO struct {

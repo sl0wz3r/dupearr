@@ -5,11 +5,12 @@ import { errorMessage } from '@/api/client';
 import {
   useCreateMediaServer,
   useDeleteMediaServer,
+  useMediaServers,
   useTestMediaServer,
   useUpdateMediaServer,
 } from '@/api/hooks/useMediaServers';
-import type { Id, MediaServer, MediaServerInput, MediaServerTestResult } from '@/api/types';
-import { Alert, Badge, ConfirmDialog, FormGroup, Switch, TextInput, useToast } from '@/components/ui';
+import type { Id, MediaServer, MediaServerInput, MediaServerStorage, MediaServerTestResult } from '@/api/types';
+import { Alert, Badge, ConfirmDialog, FormGroup, Select, Switch, TextInput, useToast } from '@/components/ui';
 import { ConnectionModal, DetailList, SaveErrorAlert, TestResult } from './ConnectionModal';
 import {
   addressChanged,
@@ -36,9 +37,25 @@ export interface MediaServerFormValues {
   verifyTls: boolean;
   enabled: boolean;
   machineIdentifier: string;
+  /** docs/DECISIONS.md D11: "" (or absent) = same storage as the other servers, "separate" = its own. */
+  storage?: MediaServerStorage;
 }
 
-const FIELDS = ['name', 'url', 'token', 'verifyTls', 'enabled'] as const;
+const FIELDS = ['name', 'url', 'token', 'verifyTls', 'enabled', 'storage'] as const;
+
+const STORAGE_OPTIONS: readonly { value: MediaServerStorage; label: string }[] = [
+  { value: '', label: 'Same storage as the other servers (compare paths)' },
+  { value: 'separate', label: "Separate storage (another host, a friend's server)" },
+];
+
+/**
+ * The Storage setting only matters with several media servers: shown when another server exists
+ * (or this one is already declared separate, so it can be undone).
+ */
+export function showStorageField(server: MediaServer | null, servers: readonly MediaServer[] | undefined): boolean {
+  if (server?.storage === 'separate') return true;
+  return (servers ?? []).some((s) => s.id !== server?.id);
+}
 
 const PLEX_TOKEN_HELP_URL = 'https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/';
 
@@ -51,6 +68,7 @@ export function mediaServerFormValues(server: MediaServer | null): MediaServerFo
     verifyTls: server?.verifyTls ?? true,
     enabled: server?.enabled ?? true,
     machineIdentifier: server?.machineIdentifier ?? '',
+    storage: server?.storage ?? '',
   };
 }
 
@@ -88,8 +106,12 @@ export function changedMachineId(
   return candidate && candidate !== savedMachineId ? candidate : null;
 }
 
-/** Request body for create/update/test (masked tokens are sent back unchanged to keep the stored one). */
-export function mediaServerPayload(values: MediaServerFormValues, id?: Id): MediaServerInput {
+/**
+ * Request body for create/update/test (masked tokens are sent back unchanged to keep the stored
+ * one). The storage setting is sent when its field is shown (withStorage); otherwise the server
+ * keeps what it stored.
+ */
+export function mediaServerPayload(values: MediaServerFormValues, id?: Id, withStorage = false): MediaServerInput {
   return {
     ...(id ? { id } : {}),
     name: values.name.trim(),
@@ -99,6 +121,7 @@ export function mediaServerPayload(values: MediaServerFormValues, id?: Id): Medi
     verifyTls: values.verifyTls,
     enabled: values.enabled,
     ...(values.machineIdentifier ? { machineIdentifier: values.machineIdentifier } : {}),
+    ...(withStorage ? { storage: values.storage ?? '' } : {}),
   };
 }
 
@@ -123,6 +146,8 @@ export function MediaServerModal({ server, onClose }: MediaServerModalProps) {
   const update = useUpdateMediaServer();
   const remove = useDeleteMediaServer();
   const test = useTestMediaServer();
+  const servers = useMediaServers();
+  const withStorage = showStorageField(server, servers.data);
 
   const saving = create.isPending || update.isPending;
   const summary = summarizeSaveError(saveError, FIELDS);
@@ -197,7 +222,7 @@ export function MediaServerModal({ server, onClose }: MediaServerModalProps) {
       onClose();
     };
     const onError = (e: unknown) => setSaveError(e);
-    const payload = mediaServerPayload(values, server?.id);
+    const payload = mediaServerPayload(values, server?.id, withStorage);
     if (server) {
       update.mutate({ server: { ...payload, id: server.id }, forceSave }, { onSuccess, onError });
     } else {
@@ -330,6 +355,32 @@ export function MediaServerModal({ server, onClose }: MediaServerModalProps) {
             aria-label="Enabled"
           />
         </FormGroup>
+
+        {withStorage && (
+          <FormGroup
+            label="Storage"
+            htmlFor={id('storage')}
+            errors={errors.storage}
+            helpText={
+              <>
+                With several media servers, Dupearr never removes a file another server lists unless it can prove that
+                server keeps a different copy. The raw paths of a server with <strong>separate storage</strong> are never
+                compared with other servers&apos; paths, its versions are never matched to Radarr/Sonarr by raw path or
+                name, and its copies never count as keepers for another server; mapped folders are still compared in
+                Dupearr&apos;s own view. This removes the protection of its files that Dupearr cannot see through a path
+                mapping: never declare a server on the same storage as separate.
+              </>
+            }
+          >
+            <Select
+              id={id('storage')}
+              options={STORAGE_OPTIONS}
+              value={values.storage}
+              onChange={(v) => set('storage', v)}
+              invalid={!!errors.storage?.length}
+            />
+          </FormGroup>
+        )}
 
         {newMachineId && !test.data && (
           <Alert kind="warning" title="Different Plex server" className="mt-2">

@@ -32,6 +32,12 @@ var autoBlockingFlags = map[string]bool{
 	models.FlagDiscTracked:    true,
 	// docs/DECISIONS.md D10: decisions ranked on a play history that could not be read.
 	models.FlagWatchUnreadable: true,
+	// docs/DECISIONS.md D11: another media server may list, or its group keeps, a file this group
+	// removes, or it could not be read. other_server_listing is not here: its other item keeps a
+	// copy the executor proves different right before the removal (research Q10).
+	models.FlagOtherServerPossible: true,
+	models.FlagOtherServerKeeps:    true,
+	models.FlagOtherServerUnread:   true,
 }
 
 // BlocksAutoApproval reports whether a group flag keeps the group out of automatic approval (a

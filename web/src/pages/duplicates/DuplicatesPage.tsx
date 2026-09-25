@@ -553,6 +553,7 @@ export default function DuplicatesPage() {
             onReset={resetFilters}
             stats={stats.data}
             libraries={libraries.data}
+            serverCount={servers.data?.length ?? 1}
             collapsible={isMobile}
           />
 

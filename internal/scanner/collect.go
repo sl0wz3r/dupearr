@@ -283,6 +283,10 @@ func (p *pipeline) listLibraries(libs []models.Library, indexOnly map[int64]mode
 		jobs = append(jobs, job{lib: l, indexOnly: true})
 		p.indexOnly[l.ID] = true
 	}
+	scannedServers := map[int64]bool{}
+	for _, l := range libs {
+		scannedServers[l.ServerID] = true
+	}
 	var listings []libListing
 	for _, j := range jobs {
 		if p.ctx.Err() != nil {
@@ -299,9 +303,12 @@ func (p *pipeline) listLibraries(libs []models.Library, indexOnly map[int64]mode
 			p.libFailed(lib, err)
 			continue
 		}
-		if j.indexOnly {
+		switch {
+		case j.indexOnly && !scannedServers[lib.ServerID]:
+			p.progress(fmt.Sprintf("Listing library %q on %s (another media server may list the same files)", lib.Title, srv.Name))
+		case j.indexOnly:
 			p.progress(fmt.Sprintf("Listing library %q on %s (its folders overlap a scanned library)", lib.Title, srv.Name))
-		} else {
+		default:
 			p.progress(fmt.Sprintf("Listing library %q on %s", lib.Title, srv.Name))
 		}
 		refs, err := client.AllItems(p.ctx, lib.SectionKey, mediaTypeOf(lib.Type))
@@ -313,6 +320,7 @@ func (p *pipeline) listLibraries(libs []models.Library, indexOnly map[int64]mode
 			continue
 		}
 		listings = append(listings, libListing{lib: lib, server: srv, refs: refs, indexOnly: j.indexOnly})
+		p.indexed[lib.ID] = true
 		if j.indexOnly {
 			continue
 		}
@@ -327,9 +335,17 @@ func (p *pipeline) listLibraries(libs []models.Library, indexOnly map[int64]mode
 		}
 	}
 	p.index = buildIndex(listings)
+	if p.cfg.multi {
+		p.buildCrossIndex()
+	}
 	for _, j := range jobs {
-		if _, failed := p.failedLibs[j.lib.ID]; !failed {
+		err, failed := p.failedLibs[j.lib.ID]
+		if !failed {
 			continue
+		}
+		if p.cfg.multi {
+			// Another server may list any file: a library it could not list leaves its files unknown.
+			p.markUnread(j.lib.ServerID, fmt.Sprintf("its library %q could not be listed: %s", j.lib.Title, upstreamerr.Message(err)))
 		}
 		for _, l := range libs {
 			if l.ID != j.lib.ID && p.listed[l.ID] && l.ServerID == j.lib.ServerID && locationsOverlap(l, j.lib) {

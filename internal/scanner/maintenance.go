@@ -285,6 +285,9 @@ func (s *Service) reevaluateLocked(ctx context.Context, cfg *evalConfig, ignored
 	}
 	if incomplete != "" {
 		forceReview(g, incomplete)
+		if g.Status == models.GroupReview && crossIncomplete(incomplete) {
+			g.StatusReason = incomplete // see crossIncomplete
+		}
 	} else if reason := cfg.blockedReason(g); reason != "" {
 		holdBack(g, reason)
 	} else if reason := ignored.overlap(g); reason != "" && g.Status != models.GroupQueued {

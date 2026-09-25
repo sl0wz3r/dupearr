@@ -7,8 +7,9 @@ import {
   useTestArrInstance,
   useUpdateArrInstance,
 } from '@/api/hooks/useArr';
-import type { ArrInstance, ArrInstanceInput, ArrKind, ArrTestResult, Id } from '@/api/types';
-import { Alert, Button, FormGroup, Switch, TextInput, useToast } from '@/components/ui';
+import { useMediaServers } from '@/api/hooks/useMediaServers';
+import type { ArrInstance, ArrInstanceInput, ArrKind, ArrTestResult, Id, MediaServer } from '@/api/types';
+import { Alert, Button, Checkbox, FormGroup, Switch, TextInput, useToast } from '@/components/ui';
 import { ARR_KIND_LABELS, labelOf } from '@/lib/constants';
 import { ProviderCard } from './ConnectionCard';
 import { ConnectionModal, DetailList, SaveErrorAlert, TestResult } from './ConnectionModal';
@@ -63,9 +64,21 @@ export interface ArrFormValues {
   verifyTls: boolean;
   enabled: boolean;
   tags: string[];
+  /** The Plex servers the instance feeds (docs/DECISIONS.md D11); shown with two or more servers. */
+  serverIds?: Id[];
+  /**
+   * The person confirmed the list (an explicit tick, never implied by saving another field): the
+   * backend then uses it for matching without mapped paths.
+   */
+  linksConfirmed?: boolean;
 }
 
-const FIELDS = ['name', 'url', 'apiKey', 'verifyTls', 'enabled', 'tags'] as const;
+const FIELDS = ['name', 'url', 'apiKey', 'verifyTls', 'enabled', 'tags', 'serverIds', 'linksConfirmed'] as const;
+
+/** The "Plex servers it feeds" field only matters with two or more media servers. */
+export function showServerLinks(servers: readonly MediaServer[] | undefined): boolean {
+  return (servers ?? []).length >= 2;
+}
 
 export function arrFormValues(instance: ArrInstance | null, kind: ArrKind): ArrFormValues {
   return {
@@ -75,7 +88,17 @@ export function arrFormValues(instance: ArrInstance | null, kind: ArrKind): ArrF
     verifyTls: instance?.verifyTls ?? true,
     enabled: instance?.enabled ?? true,
     tags: [...(instance?.tags ?? [])],
+    serverIds: [...(instance?.serverIds ?? [])],
+    linksConfirmed: linksConfirmedFor(instance),
   };
+}
+
+/**
+ * Whether the stored links count as confirmed: confirmed with at least one server chosen (the
+ * backend's rule; "feeds none of them" is never a confirmation, docs/DECISIONS.md D11).
+ */
+export function linksConfirmedFor(instance: Pick<ArrInstance, 'serverIds' | 'linksConfirmed'> | null): boolean {
+  return !!instance?.linksConfirmed && (instance.serverIds ?? []).length > 0;
 }
 
 /**
@@ -100,7 +123,12 @@ export function looksLikeArrApiKey(value: string): boolean {
   return !key || isMaskedSecret(key) || /^[A-Za-z0-9]{16,64}$/.test(key);
 }
 
-export function arrPayload(values: ArrFormValues, kind: ArrKind, id?: Id): ArrInstanceInput {
+/**
+ * Request body for create/update/test. With the links field shown (withLinks), saving sends the
+ * chosen servers, confirmed only when the confirmation is ticked and a server is chosen; otherwise
+ * the server keeps (or, with one server, sets) them.
+ */
+export function arrPayload(values: ArrFormValues, kind: ArrKind, id?: Id, withLinks = false): ArrInstanceInput {
   return {
     ...(id ? { id } : {}),
     name: values.name.trim(),
@@ -110,6 +138,12 @@ export function arrPayload(values: ArrFormValues, kind: ArrKind, id?: Id): ArrIn
     verifyTls: values.verifyTls,
     enabled: values.enabled,
     tags: values.tags,
+    ...(withLinks
+      ? {
+          serverIds: [...(values.serverIds ?? [])].sort((a, b) => a - b),
+          linksConfirmed: !!values.linksConfirmed && (values.serverIds ?? []).length > 0,
+        }
+      : {}),
   };
 }
 
@@ -169,6 +203,8 @@ function ArrInstanceForm({
   const update = useUpdateArrInstance();
   const remove = useDeleteArrInstance();
   const test = useTestArrInstance();
+  const servers = useMediaServers();
+  const withLinks = showServerLinks(servers.data);
 
   const saving = create.isPending || update.isPending;
   const summary = summarizeSaveError(saveError, FIELDS);
@@ -200,7 +236,7 @@ function ArrInstanceForm({
     setClientErrors(errs);
     if (hasErrors(errs)) return;
     setSaveError(null);
-    const payload = arrPayload(values, kind, instance?.id);
+    const payload = arrPayload(values, kind, instance?.id, withLinks);
     const onSuccess = (saved: ArrInstance) => {
       toast.success(instance ? `${kindLabel} saved` : `${kindLabel} added`, saved?.name || payload.name);
       onClose();
@@ -310,6 +346,61 @@ function ArrInstanceForm({
       <FormGroup label="Tags" htmlFor={id('tags')} errors={errors.tags} helpText="Optional labels for this instance, e.g. 4k.">
         <TagsInput id={id('tags')} value={values.tags} onChange={(tags) => set('tags', tags)} />
       </FormGroup>
+
+      {withLinks && (
+        <FormGroup
+          label="Plex servers it feeds"
+          errors={errors.serverIds}
+          helpText={
+            <>
+              With several media servers, Dupearr matches this instance&apos;s files by path without a mapping, or by name and
+              size, only to versions of the servers chosen here (never to a server declared separate storage), and only once
+              you confirmed this choice; files that map to local paths are always compared by those. Choose only servers that
+              see the same files as {kindLabel}: if neither side has a path mapping, a server on another host chosen here by
+              mistake can make Dupearr attribute its copy to {kindLabel}&apos;s file. Check the list again after adding or
+              enabling a media server.
+              {instance && !linksConfirmedFor(instance) && (
+                <>
+                  {' '}
+                  <strong>Not confirmed yet:</strong> tick the servers, then confirm below.
+                </>
+              )}
+            </>
+          }
+        >
+          <div className="flex flex-col gap-1.5" role="group" aria-label="Plex servers it feeds">
+            {(servers.data ?? []).map((srv) => {
+              const checked = (values.serverIds ?? []).includes(srv.id);
+              return (
+                <Checkbox
+                  key={srv.id}
+                  checked={checked}
+                  onChange={(on) =>
+                    set(
+                      'serverIds',
+                      on ? [...(values.serverIds ?? []), srv.id] : (values.serverIds ?? []).filter((x) => x !== srv.id),
+                    )
+                  }
+                  label={srv.name}
+                  description={srv.storage === 'separate' ? 'Separate storage: never matched by path or name' : undefined}
+                />
+              );
+            })}
+          </div>
+          <Checkbox
+            className="mt-3"
+            checked={!!values.linksConfirmed && (values.serverIds ?? []).length > 0}
+            disabled={(values.serverIds ?? []).length === 0}
+            onChange={(on) => set('linksConfirmed', on)}
+            label={`${kindLabel} feeds exactly the servers ticked above`}
+            description={
+              (values.serverIds ?? []).length === 0
+                ? 'Tick at least one server first. Without a confirmed server, the duplicates it may track go to review.'
+                : 'Until you confirm, its files are only matched by mapped paths and the duplicates it may track go to review.'
+            }
+          />
+        </FormGroup>
+      )}
 
       <TestResult
         className="mt-3"

@@ -60,6 +60,11 @@ type plexState struct {
 	pageLimit                                      int
 	playing                                        []string
 	createdAt                                      int64
+	// mediaRoot is the path this server sees the media root at (PlexServer.MediaRoot).
+	mediaRoot string
+	// initiallyAvailable are the movies and episodes that had an available copy when the world was
+	// built (ItemsWithoutFile reports those that lost it).
+	initiallyAvailable map[*item]bool
 
 	sections []*section
 	items    map[string]*item
@@ -76,6 +81,10 @@ type section struct {
 	scanner               string   // Directory.scanner
 	dirs                  []string // media-root relative
 	createdAt, scannedAt  int64
+	// contentChangedAt changes when a scan changed the section's media (a refresh that trashed or
+	// found media); refreshing is reported while a scan runs (set with Env.SetSectionState).
+	contentChangedAt int64
+	refreshing       bool
 }
 
 type item struct {
@@ -129,14 +138,22 @@ func (w *world) local(rel string) string {
 func remote(rel string) string { return RemoteMediaRoot + "/" + rel }
 
 // relOf converts a remote media path back to a media-root relative path.
-func relOf(remotePath string) (string, bool) {
+func relOf(remotePath string) (string, bool) { return relUnder(RemoteMediaRoot, remotePath) }
+
+func relUnder(root, remotePath string) (string, bool) {
 	p := path.Clean(remotePath)
-	if !strings.HasPrefix(p, RemoteMediaRoot+"/") {
+	if !strings.HasPrefix(p, root+"/") {
 		return "", false
 	}
-	rel := strings.TrimPrefix(p, RemoteMediaRoot+"/")
+	rel := strings.TrimPrefix(p, root+"/")
 	return rel, validRel(rel)
 }
+
+// remote returns the path the Plex server sees for a media-root relative path (its media root).
+func (p *plexState) remote(rel string) string { return p.mediaRoot + "/" + rel }
+
+// relOf converts a path of the Plex server back to a media-root relative path.
+func (p *plexState) relOf(remotePath string) (string, bool) { return relUnder(p.mediaRoot, remotePath) }
 
 // remoteToLocal maps any remote path under RemoteRoot to its local path. Traversal is rejected.
 func (w *world) remoteToLocal(p string) (string, bool) {
@@ -237,6 +254,7 @@ func buildWorld(sc *Scenario, root string, now func() time.Time, discScanner boo
 		allowDeletion:  sc.Server.AllowMediaDeletion,
 		autoEmptyTrash: sc.Server.AutoEmptyTrash,
 		createdAt:      start.Add(-400 * 24 * time.Hour).Unix(),
+		mediaRoot:      sc.Server.MediaRoot,
 		items:          map[string]*item{},
 		nextMediaID:    1000,
 		nextPartID:     2000,
@@ -248,6 +266,9 @@ func buildWorld(sc *Scenario, root string, now func() time.Time, discScanner boo
 	if p.version == "" {
 		p.version = DefaultPlexVersion
 	}
+	if p.mediaRoot == "" {
+		p.mediaRoot = RemoteMediaRoot
+	}
 	w.plex = p
 
 	secByKey := map[string]*section{}
@@ -256,7 +277,8 @@ func buildWorld(sc *Scenario, root string, now func() time.Time, discScanner boo
 			key: l.Key, title: l.Title, typ: l.Type, dirs: append([]string(nil), l.Dirs...),
 			uuid:      uuidFrom(p.machineID, "section", l.Key),
 			createdAt: p.createdAt, scannedAt: start.Add(-time.Hour).Unix(),
-			scanner: l.Scanner,
+			contentChangedAt: start.Add(-time.Hour).Unix(),
+			scanner:          l.Scanner,
 		}
 		switch {
 		case l.Type == LibraryMovie && discScanner:
@@ -515,7 +537,7 @@ func isDescendant(it, anc *item) bool {
 // restored from a recycle bin shows up again. An item removed from the library when its last media
 // went is brought back. Files the scenario never declared are not picked up.
 // Callers hold w.mu.
-func (w *world) redetect(candidates []*item, scope string) {
+func (w *world) redetect(candidates []*item, scope string) (changed bool) {
 	p := w.plex
 	now := w.now().Unix()
 	for _, it := range candidates {
@@ -557,8 +579,10 @@ func (w *world) redetect(candidates []*item, scope string) {
 			it.media = append(it.media, p.newMedia(v, defaultDur, now))
 			it.updatedAt = now
 			p.restoreItem(it)
+			changed = true
 		}
 	}
+	return changed
 }
 
 // removeItem drops an item (and empty ancestors for episodes) from the library.
@@ -823,6 +847,58 @@ func prepareDir(dir string) error {
 		return fmt.Errorf("write marker: %w", err)
 	}
 	return nil
+}
+
+// materializeShared creates, in another Env's tree (Options.ShareMedia), the library folders and
+// the scenario files that are missing there; an existing file must have the declared size.
+func (w *world) materializeShared() error {
+	for _, s := range w.plex.sections {
+		for _, d := range s.dirs {
+			if err := os.MkdirAll(w.local(d), 0o755); err != nil {
+				return fmt.Errorf("create library dir: %w", err)
+			}
+		}
+	}
+	rels := make([]string, 0, len(w.partSpecs))
+	for rel := range w.partSpecs {
+		rels = append(rels, rel)
+	}
+	sort.Strings(rels)
+	for _, rel := range rels {
+		sp := w.partSpecs[rel]
+		if sp.Missing {
+			continue
+		}
+		lp := w.local(rel)
+		fi, err := os.Stat(lp)
+		switch {
+		case err == nil && !fi.Mode().IsRegular():
+			return fmt.Errorf("shared file %s is not a regular file", rel)
+		case err == nil && fi.Size() != sp.Size:
+			return fmt.Errorf("shared file %s is %d bytes, the scenario declares %d", rel, fi.Size(), sp.Size)
+		case err == nil:
+			continue
+		case !errors.Is(err, fs.ErrNotExist):
+			return fmt.Errorf("stat shared file %s: %w", rel, err)
+		}
+		if err := os.MkdirAll(filepath.Dir(lp), 0o755); err != nil {
+			return fmt.Errorf("create dir for %s: %w", rel, err)
+		}
+		if err := createSparse(lp, sp.Size); err != nil {
+			return fmt.Errorf("create %s: %w", rel, err)
+		}
+	}
+	return nil
+}
+
+// snapshotAvailability records the movies and episodes that have an available copy now.
+func (w *world) snapshotAvailability() {
+	w.plex.initiallyAvailable = map[*item]bool{}
+	for _, it := range w.plex.order {
+		if (it.typ == "movie" || it.typ == "episode") && w.hasAvailableCopy(it) {
+			w.plex.initiallyAvailable[it] = true
+		}
+	}
 }
 
 // materialize creates the directory tree and the (sparse) files of the scenario.

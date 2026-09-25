@@ -27,6 +27,13 @@
 // loose in movie folders, which Plex's default scanner lists as one version PER CLIP (60–190
 // "copies" of one movie). Deleting any of them through Plex or an *arr is reported on shutdown.
 //
+// A second Plex server (for developing the multi-server UI) is served with -plex2-port; -plex2-mode
+// picks what it lists: "shared" (every file of the scenario, over the same tree: two servers on one
+// share), "subset" (only the movies/ and tv/ folders of that tree) or "mirror" (the same layout on
+// its own tree, like a server on another host):
+//
+//	go run ./tools/fakemedia -plex2-port 32401 -plex2-mode subset
+//
 // Run with -h for all flags and -list for the available scenarios.
 package main
 
@@ -91,6 +98,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		lenient       = fs.Bool("lenient-accept", false, "serve Plex JSON without Accept: application/json (handy for curl and browsers)")
 		discScanner   = fs.Bool("disc-scanner", false, "movie libraries use Plex's legacy disc-image scanner: full-disc backups become versions with one Part per BDMV/STREAM clip")
 		verbose       = fs.Bool("v", false, "log every request to stderr (secrets redacted)")
+		plex2Port     = fs.Int("plex2-port", -1, "serve a second fake Plex Media Server on this `port` (-1 = none)")
+		plex2Mode     = fs.String("plex2-mode", "shared", "what the second server lists: `shared|subset|mirror`")
 	)
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -119,6 +128,14 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	sc, err := fakemedia.ByName(*scenario)
 	if err != nil {
 		return fmt.Errorf("%w: %v", errUsage, err)
+	}
+	switch *plex2Mode {
+	case "shared", "subset", "mirror":
+	default:
+		return fmt.Errorf("%w: -plex2-mode must be shared, subset or mirror", errUsage)
+	}
+	if *plex2Port < -1 || *plex2Port > 65535 {
+		return fmt.Errorf("%w: invalid plex2 port %d", errUsage, *plex2Port)
 	}
 	sc.Server.AllowMediaDeletion = *mediaDeletion
 	sc.Server.AutoEmptyTrash = *autoEmpty
@@ -152,8 +169,19 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if keys := splitList(*playing); len(keys) > 0 {
 		env.SetPlaying(keys...)
 	}
+	var env2 *fakemedia.Env
+	if *plex2Port >= 0 {
+		if env2, err = startSecond(env, sc, *plex2Mode, *dataDir, net.JoinHostPort(*host, strconv.Itoa(*plex2Port)), opts.Logf); err != nil {
+			_ = env.Close()
+			return err
+		}
+	}
 
 	env.Describe(stdout)
+	if env2 != nil {
+		fmt.Fprintf(stdout, "\nSecond Plex server (%s):\n", *plex2Mode)
+		env2.Describe(stdout)
+	}
 	if allInterfaces(*host) {
 		fmt.Fprintln(stdout, "\nListening on all interfaces: from a container use the host's address (e.g. host.docker.internal) instead of 127.0.0.1.")
 		fmt.Fprintln(stdout, "The credentials above are fixed, public test values: anyone who can reach these ports can delete files in the data directory.")
@@ -177,10 +205,46 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			fmt.Fprintf(stdout, "  %s\n", x)
 		}
 	}
+	if env2 != nil {
+		for _, x := range env2.Violations() {
+			fmt.Fprintf(stdout, "  second server: %s\n", x)
+		}
+		for _, it := range env2.ItemsWithoutFile() {
+			fmt.Fprintf(stdout, "  second server: %s has no available file any more\n", it)
+		}
+		if err := env2.Close(); err != nil {
+			return fmt.Errorf("shut down the second server: %w", err)
+		}
+	}
 	if err := env.Close(); err != nil {
 		return fmt.Errorf("shut down: %w", err)
 	}
 	return nil
+}
+
+// Identity of the second fake Plex server (fixed, public test values).
+const (
+	plex2MachineIdentifier = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3d"
+	plex2Token             = "fAkEpLeXtOkEn0000002"
+)
+
+// startSecond starts the second Plex server of -plex2-port (see the package comment).
+func startSecond(first *fakemedia.Env, sc *fakemedia.Scenario, mode, dataDir, addr string, logf func(string, ...any)) (*fakemedia.Env, error) {
+	opts := fakemedia.Options{Addrs: map[string]string{fakemedia.ServerPlex: addr}, Logf: logf}
+	switch mode {
+	case "mirror":
+		opts.Scenario = fakemedia.MirrorServer(sc, "Fake Plex 2", plex2MachineIdentifier, plex2Token)
+		if dataDir != "" {
+			opts.Dir = dataDir + "-plex2"
+		}
+	case "subset":
+		opts.Scenario = fakemedia.SharedServer(sc, "Fake Plex 2", plex2MachineIdentifier, plex2Token, fakemedia.DirMovies, fakemedia.DirTV)
+		opts.ShareMedia = first
+	default:
+		opts.Scenario = fakemedia.SharedServer(sc, "Fake Plex 2", plex2MachineIdentifier, plex2Token)
+		opts.ShareMedia = first
+	}
+	return fakemedia.New(opts)
 }
 
 // allInterfaces reports whether host is a wildcard listen address ("", 0.0.0.0, ::).

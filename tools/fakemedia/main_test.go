@@ -318,3 +318,23 @@ func TestSplitList(t *testing.T) {
 		}
 	}
 }
+
+// -plex2-port serves a second fake Plex server (UI development of several servers).
+func TestSecondPlexServer(t *testing.T) {
+	for _, mode := range []string{"shared", "subset", "mirror"} {
+		t.Run(mode, func(t *testing.T) {
+			stdout, _, stop := startRun(t, "-plex2-port", "0", "-plex2-mode", mode)
+			out := stdout.String()
+			if !strings.Contains(out, "Second Plex server ("+mode+")") || strings.Count(out, "Path mappings to configure") != 2 {
+				t.Fatalf("output:\n%s", out)
+			}
+			if err := stop(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	var stderr bytes.Buffer
+	if err := run(context.Background(), []string{"-plex2-mode", "bogus"}, io.Discard, &stderr); !errors.Is(err, errUsage) {
+		t.Fatalf("bad mode: %v", err)
+	}
+}

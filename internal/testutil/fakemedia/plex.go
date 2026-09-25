@@ -278,7 +278,7 @@ func (h *plexAPI) sections(w http.ResponseWriter, r *http.Request) {
 		var locs []any
 		for _, d := range s.dirs {
 			locID++
-			locs = append(locs, map[string]any{"id": locID, "path": remote(d)})
+			locs = append(locs, map[string]any{"id": locID, "path": h.w.plex.remote(d)})
 		}
 		res := "movie"
 		if s.typ == LibraryShow {
@@ -287,10 +287,10 @@ func (h *plexAPI) sections(w http.ResponseWriter, r *http.Request) {
 		dirs = append(dirs, map[string]any{
 			"allowSync": true, "art": "/:/resources/" + res + "-fanart.jpg",
 			"composite": fmt.Sprintf("/library/sections/%s/composite/%d", s.key, s.scannedAt),
-			"filters":   true, "refreshing": false, "thumb": "/:/resources/" + res + ".png",
+			"filters":   true, "refreshing": s.refreshing, "thumb": "/:/resources/" + res + ".png",
 			"key": s.key, "type": s.typ, "title": s.title, "agent": agent, "scanner": scanner,
 			"language": "en-US", "uuid": s.uuid, "updatedAt": s.scannedAt, "createdAt": s.createdAt,
-			"scannedAt": s.scannedAt, "content": true, "directory": true, "contentChangedAt": s.scannedAt,
+			"scannedAt": s.scannedAt, "content": true, "directory": true, "contentChangedAt": s.contentChangedAt,
 			"hidden": false, "Location": locs,
 		})
 	}
@@ -725,7 +725,7 @@ func (h *plexAPI) deleteSection(w http.ResponseWriter, r *http.Request) {
 // unavailable), takes restored ones out, and — with autoEmptyTrash — removes trashed media. Media
 // inside a section location that is missing or empty (an unmounted share) are left alone: PMS
 // treats such a location as unavailable rather than emptied (docs/research/plex-api.md §10.3).
-func (h *plexAPI) checkTrash(items []*item, scope string) {
+func (h *plexAPI) checkTrash(items []*item, scope string) (changed bool) {
 	p := h.w.plex
 	offline := map[string]bool{} // section location → unavailable (cached per call)
 	locationOffline := func(it *item, m *media) bool {
@@ -763,7 +763,9 @@ func (h *plexAPI) checkTrash(items []*item, scope string) {
 				}
 			}
 			if inScope && !locationOffline(it, m) {
-				m.trashed = missing == len(m.parts)
+				trashed := missing == len(m.parts)
+				changed = changed || trashed != m.trashed
+				m.trashed = trashed
 			}
 			if !(m.trashed && p.autoEmptyTrash) {
 				keep = append(keep, m)
@@ -772,11 +774,13 @@ func (h *plexAPI) checkTrash(items []*item, scope string) {
 		if len(keep) != len(it.media) {
 			it.media = keep
 			it.updatedAt = h.w.now().Unix()
+			changed = true
 			if len(keep) == 0 {
 				p.removeItem(it)
 			}
 		}
 	}
+	return changed
 }
 
 func (h *plexAPI) refreshItem(w http.ResponseWriter, r *http.Request) {
@@ -792,7 +796,7 @@ func (h *plexAPI) refreshItem(w http.ResponseWriter, r *http.Request) {
 		plexError(w, http.StatusNotFound)
 		return
 	}
-	h.checkTrash(found, "")
+	changed := h.checkTrash(found, "")
 	// A refresh also picks up the item's files that are back on disk (a show/season refresh
 	// covers its episodes, including ones that left the library with their last file).
 	var leaves []*item
@@ -804,7 +808,19 @@ func (h *plexAPI) refreshItem(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	h.w.redetect(leaves, "")
+	if h.w.redetect(leaves, "") {
+		changed = true
+	}
+	if changed {
+		// The library's content changed (UNVERIFIED for real Plex, research Q5: the fake assumes
+		// an item refresh that changes media counts as a content change of its library).
+		now := h.w.now().Unix()
+		for _, f := range found {
+			if f.sec != nil {
+				f.sec.contentChangedAt = max(now, f.sec.contentChangedAt+1)
+			}
+		}
+	}
 	plexOK(w)
 }
 
@@ -822,9 +838,9 @@ func (h *plexAPI) sectionRefresh(w http.ResponseWriter, r *http.Request) {
 	}
 	scope := ""
 	if dir := r.URL.Query().Get("path"); dir != "" {
-		rel, ok := relOf(dir)
+		rel, ok := p.relOf(dir)
 		if !ok {
-			h.w.violate(ServerPlex, r, RulePlexScanOutsideSection, fmt.Sprintf("path %q is not a Plex path inside %s (missing path mapping?)", dir, RemoteMediaRoot))
+			h.w.violate(ServerPlex, r, RulePlexScanOutsideSection, fmt.Sprintf("path %q is not a Plex path inside %s (missing path mapping?)", dir, p.mediaRoot))
 			plexError(w, http.StatusBadRequest)
 			return
 		}
@@ -844,7 +860,7 @@ func (h *plexAPI) sectionRefresh(w http.ResponseWriter, r *http.Request) {
 			items = append(items, it)
 		}
 	}
-	h.checkTrash(items, scope)
+	changed := h.checkTrash(items, scope)
 	// New files: declared versions whose files are back on disk (inside the scanned folder).
 	var known []*item
 	for _, it := range p.all {
@@ -852,8 +868,14 @@ func (h *plexAPI) sectionRefresh(w http.ResponseWriter, r *http.Request) {
 			known = append(known, it)
 		}
 	}
-	h.w.redetect(known, scope)
-	s.scannedAt = h.w.now().Unix()
+	if h.w.redetect(known, scope) {
+		changed = true
+	}
+	now := h.w.now().Unix()
+	s.scannedAt = max(now, s.scannedAt+1) // every scan is visible, even within one second
+	if changed {
+		s.contentChangedAt = max(now, s.contentChangedAt+1)
+	}
 	plexOK(w)
 }
 
@@ -1038,7 +1060,7 @@ func (h *plexAPI) itemJSON(it *item, o renderOpts) map[string]any {
 		j["leafCount"] = leaves
 		j["viewedLeafCount"] = 0
 		if o.detail && it.folder != "" {
-			j["Location"] = []any{map[string]any{"path": remote(it.folder)}}
+			j["Location"] = []any{map[string]any{"path": h.w.plex.remote(it.folder)}}
 		}
 	case "season":
 		show := it.parent
@@ -1198,7 +1220,7 @@ func (h *plexAPI) partJSON(m *media, pt *part, container string, o renderOpts) m
 	j := map[string]any{
 		"id":        id,
 		"key":       fmt.Sprintf("/library/parts/%d/%d/file.%s", pt.id, m.addedAt, ext),
-		"file":      remote(pt.rel),
+		"file":      h.w.plex.remote(pt.rel),
 		"size":      pt.size,
 		"container": container,
 	}

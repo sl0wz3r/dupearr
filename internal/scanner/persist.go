@@ -91,7 +91,11 @@ func (p *pipeline) persistGroup(g *models.DuplicateGroup) {
 	}
 	incomplete := p.incompleteReasons(g)
 	if len(incomplete) > 0 {
-		forceReview(g, incompletePrefix+strings.Join(incomplete, "; ")+" — re-scan once this is fixed")
+		reason := incompletePrefix + strings.Join(incomplete, "; ") + " — re-scan once this is fixed"
+		forceReview(g, reason)
+		if g.Status == models.GroupReview && crossIncomplete(reason) {
+			g.StatusReason = reason // see crossIncomplete
+		}
 	} else if reason := p.ignored.overlap(g); reason != "" && g.Status != models.GroupQueued {
 		// A queued group was approved by the user after seeing this; the approval stands.
 		forceReview(g, reason)
@@ -114,6 +118,9 @@ func (p *pipeline) persistGroup(g *models.DuplicateGroup) {
 		return
 	}
 	p.countGroup(g)
+	if p.cfg.multi && hasOtherServers(g) {
+		p.crossGroups = append(p.crossGroups, g.ID)
+	}
 	if created {
 		p.mu.Lock()
 		p.run.Stats.NewGroups++
@@ -518,6 +525,11 @@ func (p *pipeline) incompleteReasons(g *models.DuplicateGroup) []string {
 		if reason, ok := p.stale[g.Files[i].Version.Key]; ok {
 			add(reason)
 		}
+	}
+	// Several Plex servers (docs/DECISIONS.md D11): another server that may list these files could
+	// not be read, or a version's *arr tracking is unknown.
+	for _, r := range p.crossServerReasons(g) {
+		add(r)
 	}
 	return out
 }

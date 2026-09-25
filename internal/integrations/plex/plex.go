@@ -85,6 +85,13 @@ type Identity struct {
 type Section struct {
 	Key, Type, Title, UUID string
 	Locations              []string
+	// Refreshing reports a library scan in progress; ScannedAt and ContentChangedAt are Unix
+	// seconds of the last scan and of the last change of the library's content (0 = not reported).
+	// With several media servers the executor compares them with the scan's record right before a
+	// removal (docs/DECISIONS.md D11).
+	Refreshing       bool
+	ScannedAt        int64
+	ContentChangedAt int64
 }
 
 // ItemRef is a lightweight listing row (from /library/sections/{id}/all). Listing rows include

@@ -439,6 +439,119 @@ play history; no template uses them, so upgrades never change a decision.
   attribution (session recording), a resume/progress criterion, per-user filters, a play-count
   criterion, a "played" protection, Tautulli webhooks, older Tautulli via POST bodies.
 
+## D11. Several Plex servers (issue #8, multi-server)
+Research: `docs/research/multi-server.md` (§4 safety analysis M1–M26, §5.4 Phase 1). Groups stay
+per server; Phase 1 adds **no new way to remove anything**: every change protects a copy, sends a
+group to review, defers it, refuses a match, a confirmation or an approval, or adds information.
+Nothing of it runs with one enabled Plex server (`multi` = two or more enabled servers): no
+`/library/sections` read during scans, no cross-server listing, no new JSON (`otherServers`,
+`crossServer`, `separateNameMatches` are omitted), matcher rules 1–3 as before, no executor check,
+no health issue, no settings field.
+1. **A file another server's item lists is never removed** unless that item keeps another version
+   that could be proven a different file from every version the group removes and is not (or may
+   not be) the file of any of them; and never while another server's **live group** (neither
+   resolved nor ignored) keeps it. The engine applies the rule before and after the user's
+   overrides, repeating it with the same-file rule until nothing changes (each pass only adds
+   keepers; an override that would break it is ignored with "Override ignored — removing it would
+   leave <server> without a copy"). `ValidateDecisions` re-checks it in the API and the executor.
+   "Same file" means an equal mapped local path, equal device and inode numbers (also for a path of
+   another name with the same size: a renamed symbolic link or hard link), or an equal raw path
+   while a side is unmapped and neither server is separate. Equal name and size, or the same folder
+   and file name with another size (a server that has not re-scanned a file replaced in place), is
+   **possibly the same file** (`other_server_possible`, review) unless it could be proven a
+   different file. Symbolic links of another name on a server without a path mapping cannot be
+   followed and are not found.
+2. **Every enabled server that is not declared separate may list any file**, whatever its folders:
+   a full scan also lists, index-only, the disabled movie and TV libraries of the other servers,
+   and a targeted scan lists the same libraries whatever its media type (a server may list a movie
+   in a TV library). A server declared **`separate`** (`media_servers.storage`, another host or a
+   friend's server) counts only through its mapped local folders (those the last library sync
+   stored and those it reports during the scan); its raw paths and names are never compared, it is
+   never matched to an *arr by raw path or name, and its copies never count for another server. Declaring a server on
+   shared storage separate removes the protection of its unmapped files (a health warning names
+   matching names and sizes). A server that **could not be read** (unreachable, identity mismatch,
+   a failed listing or `GET /library/sections`, an unsynced movie or TV library — of a separate
+   server, one with a mapped folder) makes every dependent group with removals go to review
+   ("Incomplete data", flag `other_server_unread`) and the API refuses its approval (409) until a
+   new scan has read it (or ran after it was disabled or declared separate). **Disabled servers
+   are neither listed nor protected** (M23, documented): disabling one of two servers turns the
+   installation back into a one-server one, without any cross-server protection.
+3. **Distinct must be proven, sameness may be assumed** (package `internal/fileid`). Two local
+   files are different files only when both are open at the same time, `fstat` gives the same
+   `st_dev` and different `st_ino`, and the filesystem type of both descriptors is on the
+   allowlist: ext4, XFS and btrfs (`fstatfs` magic and the mountinfo entry of that device must
+   agree) and ZFS (mountinfo). **`fuse.shfs` (Unraid user shares) is not on the allowlist** until
+   the Phase 0 live checks (research Q2): until then every file on a user share that a second
+   server's item also lists is kept. NFS, CIFS/SMB, 9p, virtiofs, overlay, other FUSE types,
+   APFS, an undeterminable type, different devices and every platform but Linux are never
+   "distinct". Scan-time device and inode numbers only find same or possibly-same files and rule
+   out what can never be proven (M17); proof happens right before a removal.
+4. **Phase 2 (not implemented): cross-server groups** — opt-in per scope group, reachable servers,
+   on-disk keepers, filesystem method with a recycle bin on the loser's filesystem (rename only),
+   manual approval (research §5.5).
+5. **Dupearr never removes on, or relies on a keeper from, a server whose files it cannot see**:
+   another server's remaining copy counts only when Dupearr finds it on disk through its own
+   mapping (regular file, the size Plex reports, not reported missing or inaccessible) and proves
+   it different from every file being removed. Plex's `exists=true` alone never counts across
+   servers.
+6. **A group without a complete cross-server record is never acted on** while two or more servers
+   are enabled (M25): every group stores `duplicate_groups.cross_server` (the enabled servers with
+   their identity, storage, a fingerprint of their path mappings and whether each was read; the
+   other servers' movie and TV libraries **the scan listed and compared**, with `scannedAt`,
+   `contentChangedAt` and `refreshing` — never a library it did not compare, so the executor treats
+   any other library as new). A missing record (a group stored before this version, or scanned
+   while the other server was disabled), an incomplete one, or one that does not name every
+   enabled server with the same machine identifier, storage and path mappings sends the group to
+   review with a re-scan. Missing cross-server data is unknown, never "no other server
+   lists it".
+- ***arr ↔ server links** (`arr_server_links`, `arr_instances.links_confirmed`). With two or more
+  enabled servers, matcher rules 2 (raw path) and 3 (name and size) apply only between an instance
+  and a server it is **confirmed** to feed and that is not separate; rule 1 (mapped local paths)
+  is unchanged. **Whatever the links and storage say**, a mapped *arr file is never matched by raw
+  path or name and size, nor confirmed by raw path in the executor, against a part whose server
+  has no mapping for it (research scenario D). A version whose tracking cannot be decided (that
+  refusal, or an instance with unconfirmed links tracking the title while rule 1 cannot compare)
+  has an **unknown** tracking, never "untracked": its group goes to review and the API refuses its
+  approval (409). The data upgrade (marker `upgrade.arrServerLinks`) links every instance to the
+  only enabled server of a one-server installation and confirms the links; with two or more
+  servers it stores none (confirming every pair would re-enable raw-path matching against a remote
+  server by accident). The API does the same for an instance saved with one enabled server and no
+  links. A confirmation only covers the servers a person could choose from: **adding or enabling a
+  Plex server that makes two or more enabled, or declaring one shared storage, makes the links of
+  every instance not linked to it unconfirmed again** (in the same write); links confirmed without
+  any enabled server count as unconfirmed ("feeds none of them" never makes a version untracked),
+  the API never stores an instance without links as confirmed, and the settings page confirms
+  links only by an explicit tick, never as a side effect of saving another field. Residual risk
+  (M8): with neither side mapped, a link saved wrongly re-enables raw-path matching across hosts;
+  the setting's help text and the user documentation say so. A suggestion from the *arr's Plex
+  connections (research §5.4.1) is not implemented.
+- **Flags** (engine-owned, recomputed on every evaluation): `other_server_listing` (another server
+  lists a removed file and keeps a provable copy: information, **not** auto-blocking, research
+  Q10), `other_server_keeps` (its live group keeps the file; set by a scan-time pass after the
+  resolution, which re-evaluates changed groups and drops them from auto approval),
+  `other_server_possible` and `other_server_unread` (the record is incomplete and something is
+  removed); the last three are review and auto-blocking.
+- **Executor, right before any removal of a group** (after its own re-verification): the record
+  must cover the enabled servers (above); every other enabled server that is not separate, and
+  every separate one with a mapping, is re-read with `GET /library/sections` (an unreadable answer
+  defers; a new movie or TV library, changed folders, a library that is or was refreshing, and a
+  `scannedAt` or `contentChangedAt` that is newer than the record's or missing send the group to
+  review with a targeted scan, M14 — safe but noisy, research Q5); for every listing of every file
+  to remove, the server must be reachable, confirm its identity (**a server stored without one
+  defers the group**, M26) and not be playing the item, the item must still list the file (gone:
+  defer; changed: review and a targeted scan of that server), and it must keep another
+  non-optimized version proven different on disk (rule 5). `keptElsewhere` also looks up, for every
+  listing, the other server's live groups by rating key and refuses when one keeps the listing's
+  version key; `keptInRun` covers the listings of files kept earlier in the run. The re-scans of
+  the groups a run skips are merged: one targeted scan per server at the end of the run (each one
+  lists every movie and TV library of the other servers).
+- **Not in Phase 1** (research §5.4.5): cross-server groups; any removal the single-server rules
+  did not allow; using another server's copy as a keeper; deleting through a second server; a
+  partial refresh or stale-entry cleanup on the other server after a removal (it shows the copy as
+  unavailable until its own scan); the report-only "also on server B" title index
+  (`MediaVersion.Elsewhere`); the engine's `sameNamesAndSizes` rule-out across devices
+  (hash-based-detection §2.2, a Phase 2 prerequisite that would change one-server decisions).
+
 ## Post-implementation notes (v1 implementation and review)
 Decisions the implementation made on top of D1–D8 (append-only; the code comments carry details).
 

@@ -84,10 +84,23 @@ export interface FilterBarProps {
   onReset: () => void;
   stats?: DuplicateStats;
   libraries?: readonly Library[];
+  /**
+   * Number of configured media servers: the multi-server flags (other_server_*) are only offered
+   * with two or more (or while one is selected).
+   */
+  serverCount?: number;
   /** Start collapsed behind a "Filters" toggle (small screens). */
   collapsible?: boolean;
   className?: string;
 }
+
+/** Flags that only exist with several media servers (docs/DECISIONS.md D11). */
+export const MULTI_SERVER_FLAGS: readonly GroupFlag[] = [
+  'other_server_listing',
+  'other_server_keeps',
+  'other_server_possible',
+  'other_server_unread',
+];
 
 function SearchChip({ term, onClear }: { term: string; onClear: () => void }) {
   return (
@@ -119,7 +132,16 @@ function ResetButton({ onReset }: { onReset: () => void }) {
  * Filter chips under the stats strip: status (multi-select), media type, library, flag and the
  * active search term. Changes are reported as patches; the page owns the URL state.
  */
-export function FilterBar({ filters, onChange, onReset, stats, libraries, collapsible = false, className }: FilterBarProps) {
+export function FilterBar({
+  filters,
+  onChange,
+  onReset,
+  stats,
+  libraries,
+  serverCount = 1,
+  collapsible = false,
+  className,
+}: FilterBarProps) {
   const [expanded, setExpanded] = useState(false);
   const selected = new Set(filters.status);
   const active = activeFilterCount(filters);
@@ -165,7 +187,9 @@ export function FilterBar({ filters, onChange, onReset, stats, libraries, collap
   }
   const flagOptions = [
     { value: '', label: 'Any flag' },
-    ...(Object.keys(GROUP_FLAG_LABELS) as GroupFlag[]).map((f) => ({ value: f, label: GROUP_FLAG_LABELS[f] })),
+    ...(Object.keys(GROUP_FLAG_LABELS) as GroupFlag[])
+      .filter((f) => serverCount >= 2 || !MULTI_SERVER_FLAGS.includes(f) || filters.flag === f)
+      .map((f) => ({ value: f, label: GROUP_FLAG_LABELS[f] })),
   ];
 
   return (

@@ -158,7 +158,12 @@ export type GroupFlag =
   | 'full_disc'
   | 'disc_unreadable'
   | 'disc_tracked_clip'
-  | 'watch_unreadable';
+  | 'watch_unreadable'
+  // Several Plex servers (docs/DECISIONS.md D11): only with two or more enabled servers.
+  | 'other_server_listing'
+  | 'other_server_keeps'
+  | 'other_server_possible'
+  | 'other_server_unread';
 
 export type Decision = 'keep' | 'remove';
 
@@ -453,6 +458,79 @@ export interface MediaVersion {
    * play-history source (Tautulli) for its media server.
    */
   watch?: WatchInfo | null;
+  /**
+   * Items of other media servers that list this version's file, or a file with the same name and
+   * size (docs/DECISIONS.md D11). Absent with one media server.
+   */
+  otherServers?: OtherListing[] | null;
+}
+
+/** OtherListing.match */
+export type OtherListingMatch = 'same_file' | 'possibly_same';
+
+/** Another media server's media that lists a version's file (docs/DECISIONS.md D11). */
+export interface OtherListing {
+  serverId: Id;
+  serverName: string;
+  libraryId: Id;
+  libraryTitle: string;
+  ratingKey: string;
+  mediaId: Id;
+  /** "plex:<serverId>:<mediaId>" */
+  versionKey: string;
+  itemTitle: string;
+  /** The path as that server reports it. */
+  path: string;
+  match: OtherListingMatch;
+  /**
+   * For a version this group removes: whether the other item keeps a version that could be proven
+   * a different file (null on a kept version, or when unknown).
+   */
+  itemKeepsAnother: boolean | null;
+  /** Whether a live group of the other server keeps this listing (null = unknown). */
+  keptByGroup: boolean | null;
+  others?: OtherMedia[] | null;
+  /** What would let Dupearr tell the files apart. */
+  hint?: string;
+}
+
+/** Another media of an OtherListing's item. */
+export interface OtherMedia {
+  mediaId: Id;
+  versionKey: string;
+  path: string;
+  /** Version keys of the group whose file this media is, or may be. */
+  same?: string[] | null;
+  /** Version keys of the group this media could be proven a different file from. */
+  distinct?: string[] | null;
+}
+
+/** The scan's record of the media servers a group was compared with (docs/DECISIONS.md D11). */
+export interface CrossServerRecord {
+  complete: boolean;
+  servers: CrossServerServer[];
+  libraries: CrossServerLibrary[];
+}
+
+export interface CrossServerServer {
+  serverId: Id;
+  machineIdentifier: string;
+  separate: boolean;
+  mapped: boolean;
+  /** Why the server could not be read completely (absent when it was). */
+  unread?: string;
+}
+
+export interface CrossServerLibrary {
+  serverId: Id;
+  libraryId: Id;
+  sectionKey: string;
+  type: string;
+  locations: string[] | null;
+  /** Unix seconds; 0 = not reported. */
+  scannedAt: number;
+  contentChangedAt: number;
+  refreshing: boolean;
 }
 
 /** WatchInfo.status: an unknown or failed history is never "no plays". */
@@ -553,6 +631,8 @@ export interface DuplicateGroup {
   /** Hash of version keys + decisions; stableCount = consecutive scans with the same signature. */
   signature: string;
   stableCount: number;
+  /** The scan's cross-server record (absent with one media server). */
+  crossServer?: CrossServerRecord | null;
 }
 
 /** GET /api/v1/duplicate/{id} — full group plus its actions. */
@@ -778,9 +858,16 @@ export interface MediaServer {
   machineIdentifier: string;
   verifyTls: boolean;
   enabled: boolean;
+  /**
+   * "" = may share storage with the other servers (paths are compared); "separate" = another host
+   * or a friend's server (docs/DECISIONS.md D11). Absent = "".
+   */
+  storage?: MediaServerStorage;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
 }
+
+export type MediaServerStorage = '' | 'separate';
 
 export type MediaServerInput = Omit<MediaServer, 'id' | 'createdAt' | 'updatedAt' | 'machineIdentifier'> & {
   id?: Id;
@@ -859,6 +946,10 @@ export interface ArrInstance {
   verifyTls: boolean;
   enabled: boolean;
   tags: string[] | null;
+  /** The media servers the instance feeds (docs/DECISIONS.md D11). */
+  serverIds?: Id[] | null;
+  /** Whether a person confirmed serverIds (with two or more servers, unconfirmed links match less). */
+  linksConfirmed?: boolean;
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
 }
@@ -989,6 +1080,12 @@ export interface ScanStats {
   reclaimableBytes: number;
   autoApproved: number;
   errors: number;
+  /**
+   * Several Plex servers (docs/DECISIONS.md D11; full scans, absent with one server): per server
+   * declared separate storage (by id), how many of its files have the name and size of another
+   * server's file.
+   */
+  separateNameMatches?: Record<string, number>;
 }
 
 export interface ScanRun {

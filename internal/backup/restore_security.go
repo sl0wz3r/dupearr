@@ -372,24 +372,58 @@ func settingsChanges(ctx context.Context, r *rebuild, sum *RestoreSummary) error
 			sum.Changes = append(sum.Changes, RestoreChange{Setting: f.name, Current: current(f.cur), Backup: f.bak, Applied: true})
 		}
 	}
-	for _, l := range []struct{ name, table, query string }{
-		{"mediaServers", "media_servers", `SELECT name || ' → ' || url FROM %s.media_servers ORDER BY 1`},
-		{"arrInstances", "arr_instances", `SELECT kind || ' ' || name || ' → ' || url FROM %s.arr_instances ORDER BY 1`},
+	// Several Plex servers (docs/DECISIONS.md D11): a server declared separate storage (its unmapped
+	// files lose the cross-server protection) and confirmed *arr links (they re-enable matching by
+	// raw path and by name and size) decide which files are removed too. A backup from before they
+	// existed has neither: its servers share storage and its links are unconfirmed.
+	serversQuery := func(schema string) string {
+		if !r.hasColumn(ctx, schema, "media_servers", "storage") {
+			return fmt.Sprintf(`SELECT name || ' → ' || url FROM %s.media_servers ORDER BY 1`, schema)
+		}
+		return fmt.Sprintf(`SELECT name || ' → ' || url || CASE WHEN lower(trim(storage)) = 'separate'
+			THEN ' (separate storage)' ELSE '' END FROM %s.media_servers ORDER BY 1`, schema)
+	}
+	arrsQuery := func(schema string) string {
+		if !r.hasColumn(ctx, schema, "arr_instances", "links_confirmed") || !r.hasTable(ctx, schema, "arr_server_links") {
+			return fmt.Sprintf(`SELECT kind || ' ' || name || ' → ' || url FROM %s.arr_instances ORDER BY 1`, schema)
+		}
+		// Confirmed links only matter with two or more enabled Plex servers (one server: every
+		// instance feeds it), so a one-server installation lists no change.
+		return fmt.Sprintf(`SELECT a.kind || ' ' || a.name || ' → ' || a.url || CASE
+			WHEN a.links_confirmed = 1 AND (SELECT COUNT(*) FROM %[1]s.media_servers
+				WHERE enabled = 1 AND kind IN ('plex', '')) >= 2
+			THEN ' (feeds ' || COALESCE((SELECT group_concat(n, ', ') FROM (SELECT ms.name AS n
+				FROM %[1]s.arr_server_links l JOIN %[1]s.media_servers ms ON ms.id = l.server_id
+				WHERE l.arr_id = a.id ORDER BY ms.name)), 'no media server') || ', confirmed)'
+			ELSE '' END FROM %[1]s.arr_instances a ORDER BY 1`, schema)
+	}
+	for _, l := range []struct {
+		name, table, query string
+		build              func(schema string) string
+	}{
+		{"mediaServers", "media_servers", "", serversQuery},
+		{"arrInstances", "arr_instances", "", arrsQuery},
 		// Tautulli connections receive their API key with every scan (docs/DECISIONS.md D10).
-		{"tautulliInstances", "tautulli_instances", `SELECT name || ' (media server ' || server_id || ') → ' || url FROM %s.tautulli_instances ORDER BY 1`},
-		{"pathMappings", "path_mappings", `SELECT source_type || ' ' || source_id || ': ' || remote_path || ' → ' || local_path FROM %s.path_mappings ORDER BY 1`},
-		{"notifications", "notifications", `SELECT name || ' (' || kind || ')' FROM %s.notifications ORDER BY 1`},
+		{"tautulliInstances", "tautulli_instances", `SELECT name || ' (media server ' || server_id || ') → ' || url FROM %s.tautulli_instances ORDER BY 1`, nil},
+		{"pathMappings", "path_mappings", `SELECT source_type || ' ' || source_id || ': ' || remote_path || ' → ' || local_path FROM %s.path_mappings ORDER BY 1`, nil},
+		{"notifications", "notifications", `SELECT name || ' (' || kind || ')' FROM %s.notifications ORDER BY 1`, nil},
 	} {
+		query := func(schema string) string {
+			if l.build != nil {
+				return l.build(schema)
+			}
+			return fmt.Sprintf(l.query, schema)
+		}
 		bakList := "" // a backup from before the table existed has none
 		if r.staged[l.table] != "" {
 			var err error
-			if bakList, err = r.list(ctx, fmt.Sprintf(l.query, stagedSchema)); err != nil {
+			if bakList, err = r.list(ctx, query(stagedSchema)); err != nil {
 				return invalidDB("cannot read %s: %v", l.name, err)
 			}
 		}
 		curList := ""
 		if r.hasLive {
-			if curList, err = r.list(ctx, fmt.Sprintf(l.query, liveSchema)); err != nil {
+			if curList, err = r.list(ctx, query(liveSchema)); err != nil {
 				curList = ""
 			}
 		}
@@ -464,6 +498,22 @@ func canonicalJSON(s string) string {
 		return s
 	}
 	return string(out)
+}
+
+// hasColumn reports whether table (in schema) has column; false when it cannot be read.
+func (r *rebuild) hasColumn(ctx context.Context, schema, table, column string) bool {
+	cols, err := tableColumns(ctx, r.conn, schema, table)
+	return err == nil && slices.Contains(cols, column)
+}
+
+// hasTable reports whether schema has a plain table named table (the staged backup's are checked
+// by openRebuild; the live database is this build's).
+func (r *rebuild) hasTable(ctx context.Context, schema, table string) bool {
+	if schema == stagedSchema {
+		return r.staged[strings.ToLower(table)] != ""
+	}
+	cols, err := tableColumns(ctx, r.conn, schema, table)
+	return err == nil && len(cols) > 0
 }
 
 // maxListText bounds a list shown in a RestoreChange.

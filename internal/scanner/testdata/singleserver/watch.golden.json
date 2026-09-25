@@ -1,0 +1,2671 @@
+{
+ "scenario": "watch",
+ "scans": [
+  {
+   "name": "full scan 1",
+   "plex": [
+    "plex GET /",
+    "plex GET /library/sections/1/all",
+    "plex GET /library/sections/2/all",
+    "plex GET /library/sections/3/all",
+    "plex GET /library/metadata/103",
+    "plex GET /library/metadata/107",
+    "plex GET /library/metadata/105",
+    "plex GET /library/metadata/109",
+    "plex GET /library/metadata/104",
+    "plex GET /library/metadata/108",
+    "plex GET /library/metadata/106"
+   ],
+   "others": [
+    "radarr GET /api/v3/movie",
+    "radarr GET /api/v3/queue",
+    "radarr4k GET /api/v3/movie",
+    "radarr4k GET /api/v3/queue",
+    "tautulli GET /api/v2",
+    "tautulli GET /api/v2",
+    "tautulli GET /api/v2",
+    "tautulli GET /api/v2",
+    "tautulli GET /api/v2",
+    "tautulli GET /api/v2",
+    "tautulli GET /api/v2",
+    "tautulli GET /api/v2",
+    "tautulli GET /api/v2",
+    "tautulli GET /api/v2"
+   ]
+  },
+  {
+   "name": "full scan 2",
+   "plex": [
+    "plex GET /",
+    "plex GET /library/sections/1/all",
+    "plex GET /library/sections/2/all",
+    "plex GET /library/sections/3/all",
+    "plex GET /library/metadata/103",
+    "plex GET /library/metadata/107",
+    "plex GET /library/metadata/105",
+    "plex GET /library/metadata/109",
+    "plex GET /library/metadata/104",
+    "plex GET /library/metadata/108",
+    "plex GET /library/metadata/106"
+   ],
+   "others": [
+    "radarr GET /api/v3/movie",
+    "radarr GET /api/v3/queue",
+    "radarr4k GET /api/v3/movie",
+    "radarr4k GET /api/v3/queue",
+    "tautulli GET /api/v2",
+    "tautulli GET /api/v2",
+    "tautulli GET /api/v2",
+    "tautulli GET /api/v2",
+    "tautulli GET /api/v2",
+    "tautulli GET /api/v2",
+    "tautulli GET /api/v2",
+    "tautulli GET /api/v2",
+    "tautulli GET /api/v2",
+    "tautulli GET /api/v2"
+   ]
+  },
+  {
+   "name": "targeted scan tmdb 1124",
+   "plex": [
+    "plex GET /",
+    "plex GET /library/sections/1/all",
+    "plex GET /library/sections/2/all",
+    "plex GET /library/metadata/105",
+    "plex GET /library/metadata/106"
+   ],
+   "others": [
+    "radarr GET /api/v3/movie",
+    "radarr GET /api/v3/queue",
+    "radarr4k GET /api/v3/movie",
+    "radarr4k GET /api/v3/queue",
+    "tautulli GET /api/v2",
+    "tautulli GET /api/v2",
+    "tautulli GET /api/v2",
+    "tautulli GET /api/v2",
+    "tautulli GET /api/v2",
+    "tautulli GET /api/v2",
+    "tautulli GET /api/v2",
+    "tautulli GET /api/v2"
+   ]
+  }
+ ],
+ "states": [
+  {
+   "after": "full scan 1",
+   "groups": [
+    {
+     "key": "movie:tmdb:1124",
+     "status": "pending",
+     "flags": [
+      "cross_library"
+     ],
+     "signature": "1fad53b44e4b1b6f7ffee7fbff3be3b956a317a1",
+     "stableCount": 1,
+     "reclaimableBytes": 12240656793,
+     "profileId": 1,
+     "files": [
+      {
+       "key": "plex:1:1004",
+       "decision": "remove",
+       "engineDecision": "remove",
+       "protected": false,
+       "rank": 2,
+       "reasons": [
+        "Remove — lower Resolution: 1080p vs 2160p"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 8,
+        "bitrateKbps": 13831,
+        "container": "mkv",
+        "displayTitle": "1080p (H.264)",
+        "durationMs": 7080000,
+        "dynamicRange": "sdr",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 1080,
+        "itemTitle": "The Prestige",
+        "key": "plex:1:1004",
+        "libraryId": 1,
+        "libraryTitle": "Movies",
+        "mediaId": 1004,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2004,
+          "inode": "inode-1",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies/The Prestige (2006)/The Prestige (2006) [Bluray-1080p].mkv",
+          "path": "/data/media/movies/The Prestige (2006)/The Prestige (2006) [Bluray-1080p].mkv",
+          "size": 12240656793
+         }
+        ],
+        "ratingKey": "105",
+        "resolution": "1080",
+        "sectionKey": "1",
+        "serverId": 1,
+        "source": "bluray",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 11756,
+        "videoCodec": "h264",
+        "videoProfile": "high",
+        "watch": {
+         "lastPlayed": "2034-09-23T13:30:00Z",
+         "plays": 1,
+         "readAt": "2035-01-01T12:00:00Z",
+         "since": "2033-08-19T12:00:00Z",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "known",
+         "users": 1
+        },
+        "width": 1920
+       }
+      },
+      {
+       "key": "plex:1:1005",
+       "decision": "keep",
+       "engineDecision": "keep",
+       "protected": false,
+       "rank": 1,
+       "reasons": [
+        "Keep — best by Resolution (2160p vs 1080p)"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 10,
+        "bitrateKbps": 63939,
+        "container": "mkv",
+        "displayTitle": "4K HDR10 (HEVC Main 10)",
+        "durationMs": 7080000,
+        "dynamicRange": "hdr10",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 2160,
+        "itemTitle": "The Prestige",
+        "key": "plex:1:1005",
+        "libraryId": 2,
+        "libraryTitle": "Movies 4K",
+        "mediaId": 1005,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2005,
+          "inode": "inode-2",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies4k/The Prestige (2006)/The Prestige (2006) [Remux-2160p].mkv",
+          "path": "/data/media/movies4k/The Prestige (2006)/The Prestige (2006) [Remux-2160p].mkv",
+          "size": 56586194124
+         }
+        ],
+        "ratingKey": "106",
+        "resolution": "2160",
+        "sectionKey": "2",
+        "serverId": 1,
+        "source": "remux",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 54348,
+        "videoCodec": "hevc",
+        "videoProfile": "main 10",
+        "watch": {
+         "plays": 0,
+         "readAt": "2035-01-01T12:00:00Z",
+         "reason": "added before the recorded history starts (2033-11-07)",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "unknown",
+         "users": 0
+        },
+        "width": 3840
+       }
+      }
+     ]
+    },
+    {
+     "key": "movie:tmdb:273481",
+     "status": "pending",
+     "flags": [],
+     "signature": "f430b31b62f855e09948588f91e4cdeddaf64b3f",
+     "stableCount": 1,
+     "reclaimableBytes": 7945689497,
+     "profileId": 1,
+     "files": [
+      {
+       "key": "plex:1:1008",
+       "decision": "remove",
+       "engineDecision": "remove",
+       "protected": false,
+       "rank": 2,
+       "reasons": [
+        "Remove — lower Resolution: 1080p vs 2160p"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 8,
+        "bitrateKbps": 8978,
+        "container": "mkv",
+        "displayTitle": "1080p (H.264)",
+        "durationMs": 7080000,
+        "dynamicRange": "sdr",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 1080,
+        "itemTitle": "Sicario",
+        "key": "plex:1:1008",
+        "libraryId": 1,
+        "libraryTitle": "Movies",
+        "mediaId": 1008,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2008,
+          "inode": "inode-3",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies/Sicario (2015)/Sicario (2015) [WEBDL-1080p].mkv",
+          "path": "/data/media/movies/Sicario (2015)/Sicario (2015) [WEBDL-1080p].mkv",
+          "size": 7945689497
+         }
+        ],
+        "ratingKey": "109",
+        "resolution": "1080",
+        "sectionKey": "1",
+        "serverId": 1,
+        "source": "webdl",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 7631,
+        "videoCodec": "h264",
+        "videoProfile": "high",
+        "watch": {
+         "lastPlayed": "2034-12-27T13:30:00Z",
+         "plays": 2,
+         "readAt": "2035-01-01T12:00:00Z",
+         "since": "2033-08-19T12:00:00Z",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "known",
+         "users": 1
+        },
+        "width": 1920
+       }
+      },
+      {
+       "key": "plex:1:1009",
+       "decision": "keep",
+       "engineDecision": "keep",
+       "protected": false,
+       "rank": 1,
+       "reasons": [
+        "Keep — best by Resolution (2160p vs 1080p)"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 10,
+        "bitrateKbps": 66729,
+        "container": "mkv",
+        "displayTitle": "4K HDR10 (HEVC Main 10)",
+        "durationMs": 7080000,
+        "dynamicRange": "hdr10",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 2160,
+        "itemTitle": "Sicario",
+        "key": "plex:1:1009",
+        "libraryId": 1,
+        "libraryTitle": "Movies",
+        "mediaId": 1009,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2009,
+          "inode": "inode-4",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies/Sicario (2015)/Sicario (2015) [Remux-2160p].mkv",
+          "path": "/data/media/movies/Sicario (2015)/Sicario (2015) [Remux-2160p].mkv",
+          "size": 59055800320
+         }
+        ],
+        "ratingKey": "109",
+        "resolution": "2160",
+        "sectionKey": "1",
+        "serverId": 1,
+        "source": "remux",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 56719,
+        "videoCodec": "hevc",
+        "videoProfile": "main 10",
+        "watch": {
+         "lastPlayed": "2034-12-27T13:30:00Z",
+         "plays": 2,
+         "readAt": "2035-01-01T12:00:00Z",
+         "since": "2033-08-19T12:00:00Z",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "known",
+         "users": 1
+        },
+        "width": 3840
+       }
+      }
+     ]
+    },
+    {
+     "key": "movie:tmdb:329865",
+     "status": "pending",
+     "flags": [
+      "cross_library"
+     ],
+     "signature": "fa85d6c5a5264a8b489df79f0a3c8ce64a478425",
+     "stableCount": 1,
+     "reclaimableBytes": 7408818585,
+     "profileId": 1,
+     "files": [
+      {
+       "key": "plex:1:1002",
+       "decision": "remove",
+       "engineDecision": "remove",
+       "protected": false,
+       "rank": 2,
+       "reasons": [
+        "Remove — lower Resolution: 1080p vs 2160p"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 8,
+        "bitrateKbps": 8371,
+        "container": "mkv",
+        "displayTitle": "1080p (H.264)",
+        "durationMs": 7080000,
+        "dynamicRange": "sdr",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 1080,
+        "itemTitle": "Arrival",
+        "key": "plex:1:1002",
+        "libraryId": 1,
+        "libraryTitle": "Movies",
+        "mediaId": 1002,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2002,
+          "inode": "inode-5",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies/Arrival (2016)/Arrival (2016) [WEBDL-1080p][EAC3 5.1][h264].mkv",
+          "path": "/data/media/movies/Arrival (2016)/Arrival (2016) [WEBDL-1080p][EAC3 5.1][h264].mkv",
+          "size": 7408818585
+         }
+        ],
+        "ratingKey": "103",
+        "resolution": "1080",
+        "sectionKey": "1",
+        "serverId": 1,
+        "source": "webdl",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 7115,
+        "videoCodec": "h264",
+        "videoProfile": "high",
+        "watch": {
+         "lastPlayed": "2034-12-22T13:30:00Z",
+         "plays": 3,
+         "readAt": "2035-01-01T12:00:00Z",
+         "since": "2033-08-19T12:00:00Z",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "known",
+         "users": 2
+        },
+        "width": 1920
+       }
+      },
+      {
+       "key": "plex:1:1003",
+       "decision": "keep",
+       "engineDecision": "keep",
+       "protected": false,
+       "rank": 1,
+       "reasons": [
+        "Keep — best by Resolution (2160p vs 1080p)"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 10,
+        "bitrateKbps": 58479,
+        "container": "mkv",
+        "displayTitle": "4K HDR10 (HEVC Main 10)",
+        "durationMs": 7080000,
+        "dynamicRange": "hdr10",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 2160,
+        "itemTitle": "Arrival",
+        "key": "plex:1:1003",
+        "libraryId": 2,
+        "libraryTitle": "Movies 4K",
+        "mediaId": 1003,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2003,
+          "inode": "inode-6",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies4k/Arrival (2016)/Arrival (2016) [Remux-2160p][HDR10][TrueHD 7.1].mkv",
+          "path": "/data/media/movies4k/Arrival (2016)/Arrival (2016) [Remux-2160p][HDR10][TrueHD 7.1].mkv",
+          "size": 51754355916
+         }
+        ],
+        "ratingKey": "104",
+        "resolution": "2160",
+        "sectionKey": "2",
+        "serverId": 1,
+        "source": "remux",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 49707,
+        "videoCodec": "hevc",
+        "videoProfile": "main 10",
+        "watch": {
+         "plays": 0,
+         "readAt": "2035-01-01T12:00:00Z",
+         "since": "2034-12-02T12:00:00Z",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "known",
+         "users": 0
+        },
+        "width": 3840
+       }
+      }
+     ]
+    },
+    {
+     "key": "movie:tmdb:78",
+     "status": "pending",
+     "flags": [
+      "cross_library"
+     ],
+     "signature": "374b9e9721a71f6277692f638ba0091f672f47be",
+     "stableCount": 1,
+     "reclaimableBytes": 13851269529,
+     "profileId": 1,
+     "files": [
+      {
+       "key": "plex:1:1006",
+       "decision": "remove",
+       "engineDecision": "remove",
+       "protected": false,
+       "rank": 2,
+       "reasons": [
+        "Remove — lower Resolution: 1080p vs 2160p"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 8,
+        "bitrateKbps": 15651,
+        "container": "mkv",
+        "displayTitle": "1080p (H.264)",
+        "durationMs": 7080000,
+        "dynamicRange": "sdr",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 1080,
+        "itemTitle": "Blade Runner",
+        "key": "plex:1:1006",
+        "libraryId": 1,
+        "libraryTitle": "Movies",
+        "mediaId": 1006,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2006,
+          "inode": "inode-7",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies/Blade Runner (1982)/Blade Runner (1982) [Bluray-1080p].mkv",
+          "path": "/data/media/movies/Blade Runner (1982)/Blade Runner (1982) [Bluray-1080p].mkv",
+          "size": 13851269529
+         }
+        ],
+        "ratingKey": "107",
+        "resolution": "1080",
+        "sectionKey": "1",
+        "serverId": 1,
+        "source": "bluray",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 13303,
+        "videoCodec": "h264",
+        "videoProfile": "high",
+        "watch": {
+         "lastPlayed": "2034-11-12T13:30:00Z",
+         "plays": 1,
+         "readAt": "2035-01-01T12:00:00Z",
+         "since": "2033-08-19T12:00:00Z",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "known",
+         "users": 1
+        },
+        "width": 1920
+       }
+      },
+      {
+       "key": "plex:1:1007",
+       "decision": "keep",
+       "engineDecision": "keep",
+       "protected": false,
+       "rank": 1,
+       "reasons": [
+        "Keep — best by Resolution (2160p vs 1080p)"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 10,
+        "bitrateKbps": 74373,
+        "container": "mkv",
+        "displayTitle": "4K HDR10 (HEVC Main 10)",
+        "durationMs": 7080000,
+        "dynamicRange": "hdr10",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 2160,
+        "itemTitle": "Blade Runner",
+        "key": "plex:1:1007",
+        "libraryId": 2,
+        "libraryTitle": "Movies 4K",
+        "mediaId": 1007,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2007,
+          "inode": "inode-8",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies4k/Blade Runner (1982)/Blade Runner (1982) [Remux-2160p].mkv",
+          "path": "/data/media/movies4k/Blade Runner (1982)/Blade Runner (1982) [Remux-2160p].mkv",
+          "size": 65820373811
+         }
+        ],
+        "ratingKey": "108",
+        "resolution": "2160",
+        "sectionKey": "2",
+        "serverId": 1,
+        "source": "remux",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 63217,
+        "videoCodec": "hevc",
+        "videoProfile": "main 10",
+        "watch": {
+         "plays": 0,
+         "readAt": "2035-01-01T12:00:00Z",
+         "reason": "plays of this title in this library are recorded under an earlier Plex item",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "unknown",
+         "users": 0
+        },
+        "width": 3840
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "after": "full scan 2",
+   "groups": [
+    {
+     "key": "movie:tmdb:1124",
+     "status": "pending",
+     "flags": [
+      "cross_library"
+     ],
+     "signature": "1fad53b44e4b1b6f7ffee7fbff3be3b956a317a1",
+     "stableCount": 2,
+     "reclaimableBytes": 12240656793,
+     "profileId": 1,
+     "files": [
+      {
+       "key": "plex:1:1004",
+       "decision": "remove",
+       "engineDecision": "remove",
+       "protected": false,
+       "rank": 2,
+       "reasons": [
+        "Remove — lower Resolution: 1080p vs 2160p"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 8,
+        "bitrateKbps": 13831,
+        "container": "mkv",
+        "displayTitle": "1080p (H.264)",
+        "durationMs": 7080000,
+        "dynamicRange": "sdr",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 1080,
+        "itemTitle": "The Prestige",
+        "key": "plex:1:1004",
+        "libraryId": 1,
+        "libraryTitle": "Movies",
+        "mediaId": 1004,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2004,
+          "inode": "inode-1",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies/The Prestige (2006)/The Prestige (2006) [Bluray-1080p].mkv",
+          "path": "/data/media/movies/The Prestige (2006)/The Prestige (2006) [Bluray-1080p].mkv",
+          "size": 12240656793
+         }
+        ],
+        "ratingKey": "105",
+        "resolution": "1080",
+        "sectionKey": "1",
+        "serverId": 1,
+        "source": "bluray",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 11756,
+        "videoCodec": "h264",
+        "videoProfile": "high",
+        "watch": {
+         "lastPlayed": "2034-09-23T13:30:00Z",
+         "plays": 1,
+         "readAt": "2035-01-01T12:00:00Z",
+         "since": "2033-08-19T12:00:00Z",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "known",
+         "users": 1
+        },
+        "width": 1920
+       }
+      },
+      {
+       "key": "plex:1:1005",
+       "decision": "keep",
+       "engineDecision": "keep",
+       "protected": false,
+       "rank": 1,
+       "reasons": [
+        "Keep — best by Resolution (2160p vs 1080p)"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 10,
+        "bitrateKbps": 63939,
+        "container": "mkv",
+        "displayTitle": "4K HDR10 (HEVC Main 10)",
+        "durationMs": 7080000,
+        "dynamicRange": "hdr10",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 2160,
+        "itemTitle": "The Prestige",
+        "key": "plex:1:1005",
+        "libraryId": 2,
+        "libraryTitle": "Movies 4K",
+        "mediaId": 1005,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2005,
+          "inode": "inode-2",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies4k/The Prestige (2006)/The Prestige (2006) [Remux-2160p].mkv",
+          "path": "/data/media/movies4k/The Prestige (2006)/The Prestige (2006) [Remux-2160p].mkv",
+          "size": 56586194124
+         }
+        ],
+        "ratingKey": "106",
+        "resolution": "2160",
+        "sectionKey": "2",
+        "serverId": 1,
+        "source": "remux",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 54348,
+        "videoCodec": "hevc",
+        "videoProfile": "main 10",
+        "watch": {
+         "plays": 0,
+         "readAt": "2035-01-01T12:00:00Z",
+         "reason": "added before the recorded history starts (2033-11-07)",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "unknown",
+         "users": 0
+        },
+        "width": 3840
+       }
+      }
+     ]
+    },
+    {
+     "key": "movie:tmdb:273481",
+     "status": "pending",
+     "flags": [],
+     "signature": "f430b31b62f855e09948588f91e4cdeddaf64b3f",
+     "stableCount": 2,
+     "reclaimableBytes": 7945689497,
+     "profileId": 1,
+     "files": [
+      {
+       "key": "plex:1:1008",
+       "decision": "remove",
+       "engineDecision": "remove",
+       "protected": false,
+       "rank": 2,
+       "reasons": [
+        "Remove — lower Resolution: 1080p vs 2160p"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 8,
+        "bitrateKbps": 8978,
+        "container": "mkv",
+        "displayTitle": "1080p (H.264)",
+        "durationMs": 7080000,
+        "dynamicRange": "sdr",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 1080,
+        "itemTitle": "Sicario",
+        "key": "plex:1:1008",
+        "libraryId": 1,
+        "libraryTitle": "Movies",
+        "mediaId": 1008,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2008,
+          "inode": "inode-3",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies/Sicario (2015)/Sicario (2015) [WEBDL-1080p].mkv",
+          "path": "/data/media/movies/Sicario (2015)/Sicario (2015) [WEBDL-1080p].mkv",
+          "size": 7945689497
+         }
+        ],
+        "ratingKey": "109",
+        "resolution": "1080",
+        "sectionKey": "1",
+        "serverId": 1,
+        "source": "webdl",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 7631,
+        "videoCodec": "h264",
+        "videoProfile": "high",
+        "watch": {
+         "lastPlayed": "2034-12-27T13:30:00Z",
+         "plays": 2,
+         "readAt": "2035-01-01T12:00:00Z",
+         "since": "2033-08-19T12:00:00Z",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "known",
+         "users": 1
+        },
+        "width": 1920
+       }
+      },
+      {
+       "key": "plex:1:1009",
+       "decision": "keep",
+       "engineDecision": "keep",
+       "protected": false,
+       "rank": 1,
+       "reasons": [
+        "Keep — best by Resolution (2160p vs 1080p)"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 10,
+        "bitrateKbps": 66729,
+        "container": "mkv",
+        "displayTitle": "4K HDR10 (HEVC Main 10)",
+        "durationMs": 7080000,
+        "dynamicRange": "hdr10",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 2160,
+        "itemTitle": "Sicario",
+        "key": "plex:1:1009",
+        "libraryId": 1,
+        "libraryTitle": "Movies",
+        "mediaId": 1009,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2009,
+          "inode": "inode-4",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies/Sicario (2015)/Sicario (2015) [Remux-2160p].mkv",
+          "path": "/data/media/movies/Sicario (2015)/Sicario (2015) [Remux-2160p].mkv",
+          "size": 59055800320
+         }
+        ],
+        "ratingKey": "109",
+        "resolution": "2160",
+        "sectionKey": "1",
+        "serverId": 1,
+        "source": "remux",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 56719,
+        "videoCodec": "hevc",
+        "videoProfile": "main 10",
+        "watch": {
+         "lastPlayed": "2034-12-27T13:30:00Z",
+         "plays": 2,
+         "readAt": "2035-01-01T12:00:00Z",
+         "since": "2033-08-19T12:00:00Z",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "known",
+         "users": 1
+        },
+        "width": 3840
+       }
+      }
+     ]
+    },
+    {
+     "key": "movie:tmdb:329865",
+     "status": "pending",
+     "flags": [
+      "cross_library"
+     ],
+     "signature": "fa85d6c5a5264a8b489df79f0a3c8ce64a478425",
+     "stableCount": 2,
+     "reclaimableBytes": 7408818585,
+     "profileId": 1,
+     "files": [
+      {
+       "key": "plex:1:1002",
+       "decision": "remove",
+       "engineDecision": "remove",
+       "protected": false,
+       "rank": 2,
+       "reasons": [
+        "Remove — lower Resolution: 1080p vs 2160p"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 8,
+        "bitrateKbps": 8371,
+        "container": "mkv",
+        "displayTitle": "1080p (H.264)",
+        "durationMs": 7080000,
+        "dynamicRange": "sdr",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 1080,
+        "itemTitle": "Arrival",
+        "key": "plex:1:1002",
+        "libraryId": 1,
+        "libraryTitle": "Movies",
+        "mediaId": 1002,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2002,
+          "inode": "inode-5",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies/Arrival (2016)/Arrival (2016) [WEBDL-1080p][EAC3 5.1][h264].mkv",
+          "path": "/data/media/movies/Arrival (2016)/Arrival (2016) [WEBDL-1080p][EAC3 5.1][h264].mkv",
+          "size": 7408818585
+         }
+        ],
+        "ratingKey": "103",
+        "resolution": "1080",
+        "sectionKey": "1",
+        "serverId": 1,
+        "source": "webdl",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 7115,
+        "videoCodec": "h264",
+        "videoProfile": "high",
+        "watch": {
+         "lastPlayed": "2034-12-22T13:30:00Z",
+         "plays": 3,
+         "readAt": "2035-01-01T12:00:00Z",
+         "since": "2033-08-19T12:00:00Z",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "known",
+         "users": 2
+        },
+        "width": 1920
+       }
+      },
+      {
+       "key": "plex:1:1003",
+       "decision": "keep",
+       "engineDecision": "keep",
+       "protected": false,
+       "rank": 1,
+       "reasons": [
+        "Keep — best by Resolution (2160p vs 1080p)"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 10,
+        "bitrateKbps": 58479,
+        "container": "mkv",
+        "displayTitle": "4K HDR10 (HEVC Main 10)",
+        "durationMs": 7080000,
+        "dynamicRange": "hdr10",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 2160,
+        "itemTitle": "Arrival",
+        "key": "plex:1:1003",
+        "libraryId": 2,
+        "libraryTitle": "Movies 4K",
+        "mediaId": 1003,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2003,
+          "inode": "inode-6",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies4k/Arrival (2016)/Arrival (2016) [Remux-2160p][HDR10][TrueHD 7.1].mkv",
+          "path": "/data/media/movies4k/Arrival (2016)/Arrival (2016) [Remux-2160p][HDR10][TrueHD 7.1].mkv",
+          "size": 51754355916
+         }
+        ],
+        "ratingKey": "104",
+        "resolution": "2160",
+        "sectionKey": "2",
+        "serverId": 1,
+        "source": "remux",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 49707,
+        "videoCodec": "hevc",
+        "videoProfile": "main 10",
+        "watch": {
+         "plays": 0,
+         "readAt": "2035-01-01T12:00:00Z",
+         "since": "2034-12-02T12:00:00Z",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "known",
+         "users": 0
+        },
+        "width": 3840
+       }
+      }
+     ]
+    },
+    {
+     "key": "movie:tmdb:78",
+     "status": "pending",
+     "flags": [
+      "cross_library"
+     ],
+     "signature": "374b9e9721a71f6277692f638ba0091f672f47be",
+     "stableCount": 2,
+     "reclaimableBytes": 13851269529,
+     "profileId": 1,
+     "files": [
+      {
+       "key": "plex:1:1006",
+       "decision": "remove",
+       "engineDecision": "remove",
+       "protected": false,
+       "rank": 2,
+       "reasons": [
+        "Remove — lower Resolution: 1080p vs 2160p"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 8,
+        "bitrateKbps": 15651,
+        "container": "mkv",
+        "displayTitle": "1080p (H.264)",
+        "durationMs": 7080000,
+        "dynamicRange": "sdr",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 1080,
+        "itemTitle": "Blade Runner",
+        "key": "plex:1:1006",
+        "libraryId": 1,
+        "libraryTitle": "Movies",
+        "mediaId": 1006,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2006,
+          "inode": "inode-7",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies/Blade Runner (1982)/Blade Runner (1982) [Bluray-1080p].mkv",
+          "path": "/data/media/movies/Blade Runner (1982)/Blade Runner (1982) [Bluray-1080p].mkv",
+          "size": 13851269529
+         }
+        ],
+        "ratingKey": "107",
+        "resolution": "1080",
+        "sectionKey": "1",
+        "serverId": 1,
+        "source": "bluray",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 13303,
+        "videoCodec": "h264",
+        "videoProfile": "high",
+        "watch": {
+         "lastPlayed": "2034-11-12T13:30:00Z",
+         "plays": 1,
+         "readAt": "2035-01-01T12:00:00Z",
+         "since": "2033-08-19T12:00:00Z",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "known",
+         "users": 1
+        },
+        "width": 1920
+       }
+      },
+      {
+       "key": "plex:1:1007",
+       "decision": "keep",
+       "engineDecision": "keep",
+       "protected": false,
+       "rank": 1,
+       "reasons": [
+        "Keep — best by Resolution (2160p vs 1080p)"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 10,
+        "bitrateKbps": 74373,
+        "container": "mkv",
+        "displayTitle": "4K HDR10 (HEVC Main 10)",
+        "durationMs": 7080000,
+        "dynamicRange": "hdr10",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 2160,
+        "itemTitle": "Blade Runner",
+        "key": "plex:1:1007",
+        "libraryId": 2,
+        "libraryTitle": "Movies 4K",
+        "mediaId": 1007,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2007,
+          "inode": "inode-8",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies4k/Blade Runner (1982)/Blade Runner (1982) [Remux-2160p].mkv",
+          "path": "/data/media/movies4k/Blade Runner (1982)/Blade Runner (1982) [Remux-2160p].mkv",
+          "size": 65820373811
+         }
+        ],
+        "ratingKey": "108",
+        "resolution": "2160",
+        "sectionKey": "2",
+        "serverId": 1,
+        "source": "remux",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 63217,
+        "videoCodec": "hevc",
+        "videoProfile": "main 10",
+        "watch": {
+         "plays": 0,
+         "readAt": "2035-01-01T12:00:00Z",
+         "reason": "plays of this title in this library are recorded under an earlier Plex item",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "unknown",
+         "users": 0
+        },
+        "width": 3840
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "after": "targeted scan",
+   "groups": [
+    {
+     "key": "movie:tmdb:1124",
+     "status": "pending",
+     "flags": [
+      "cross_library"
+     ],
+     "signature": "1fad53b44e4b1b6f7ffee7fbff3be3b956a317a1",
+     "stableCount": 2,
+     "reclaimableBytes": 12240656793,
+     "profileId": 1,
+     "files": [
+      {
+       "key": "plex:1:1004",
+       "decision": "remove",
+       "engineDecision": "remove",
+       "protected": false,
+       "rank": 2,
+       "reasons": [
+        "Remove — lower Resolution: 1080p vs 2160p"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 8,
+        "bitrateKbps": 13831,
+        "container": "mkv",
+        "displayTitle": "1080p (H.264)",
+        "durationMs": 7080000,
+        "dynamicRange": "sdr",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 1080,
+        "itemTitle": "The Prestige",
+        "key": "plex:1:1004",
+        "libraryId": 1,
+        "libraryTitle": "Movies",
+        "mediaId": 1004,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2004,
+          "inode": "inode-1",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies/The Prestige (2006)/The Prestige (2006) [Bluray-1080p].mkv",
+          "path": "/data/media/movies/The Prestige (2006)/The Prestige (2006) [Bluray-1080p].mkv",
+          "size": 12240656793
+         }
+        ],
+        "ratingKey": "105",
+        "resolution": "1080",
+        "sectionKey": "1",
+        "serverId": 1,
+        "source": "bluray",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 11756,
+        "videoCodec": "h264",
+        "videoProfile": "high",
+        "watch": {
+         "lastPlayed": "2034-09-23T13:30:00Z",
+         "plays": 1,
+         "readAt": "2035-01-01T12:00:00Z",
+         "since": "2033-08-19T12:00:00Z",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "known",
+         "users": 1
+        },
+        "width": 1920
+       }
+      },
+      {
+       "key": "plex:1:1005",
+       "decision": "keep",
+       "engineDecision": "keep",
+       "protected": false,
+       "rank": 1,
+       "reasons": [
+        "Keep — best by Resolution (2160p vs 1080p)"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 10,
+        "bitrateKbps": 63939,
+        "container": "mkv",
+        "displayTitle": "4K HDR10 (HEVC Main 10)",
+        "durationMs": 7080000,
+        "dynamicRange": "hdr10",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 2160,
+        "itemTitle": "The Prestige",
+        "key": "plex:1:1005",
+        "libraryId": 2,
+        "libraryTitle": "Movies 4K",
+        "mediaId": 1005,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2005,
+          "inode": "inode-2",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies4k/The Prestige (2006)/The Prestige (2006) [Remux-2160p].mkv",
+          "path": "/data/media/movies4k/The Prestige (2006)/The Prestige (2006) [Remux-2160p].mkv",
+          "size": 56586194124
+         }
+        ],
+        "ratingKey": "106",
+        "resolution": "2160",
+        "sectionKey": "2",
+        "serverId": 1,
+        "source": "remux",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 54348,
+        "videoCodec": "hevc",
+        "videoProfile": "main 10",
+        "watch": {
+         "plays": 0,
+         "readAt": "2035-01-01T12:00:00Z",
+         "reason": "added before the recorded history starts (2033-11-07)",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "unknown",
+         "users": 0
+        },
+        "width": 3840
+       }
+      }
+     ]
+    },
+    {
+     "key": "movie:tmdb:273481",
+     "status": "pending",
+     "flags": [],
+     "signature": "f430b31b62f855e09948588f91e4cdeddaf64b3f",
+     "stableCount": 2,
+     "reclaimableBytes": 7945689497,
+     "profileId": 1,
+     "files": [
+      {
+       "key": "plex:1:1008",
+       "decision": "remove",
+       "engineDecision": "remove",
+       "protected": false,
+       "rank": 2,
+       "reasons": [
+        "Remove — lower Resolution: 1080p vs 2160p"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 8,
+        "bitrateKbps": 8978,
+        "container": "mkv",
+        "displayTitle": "1080p (H.264)",
+        "durationMs": 7080000,
+        "dynamicRange": "sdr",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 1080,
+        "itemTitle": "Sicario",
+        "key": "plex:1:1008",
+        "libraryId": 1,
+        "libraryTitle": "Movies",
+        "mediaId": 1008,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2008,
+          "inode": "inode-3",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies/Sicario (2015)/Sicario (2015) [WEBDL-1080p].mkv",
+          "path": "/data/media/movies/Sicario (2015)/Sicario (2015) [WEBDL-1080p].mkv",
+          "size": 7945689497
+         }
+        ],
+        "ratingKey": "109",
+        "resolution": "1080",
+        "sectionKey": "1",
+        "serverId": 1,
+        "source": "webdl",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 7631,
+        "videoCodec": "h264",
+        "videoProfile": "high",
+        "watch": {
+         "lastPlayed": "2034-12-27T13:30:00Z",
+         "plays": 2,
+         "readAt": "2035-01-01T12:00:00Z",
+         "since": "2033-08-19T12:00:00Z",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "known",
+         "users": 1
+        },
+        "width": 1920
+       }
+      },
+      {
+       "key": "plex:1:1009",
+       "decision": "keep",
+       "engineDecision": "keep",
+       "protected": false,
+       "rank": 1,
+       "reasons": [
+        "Keep — best by Resolution (2160p vs 1080p)"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 10,
+        "bitrateKbps": 66729,
+        "container": "mkv",
+        "displayTitle": "4K HDR10 (HEVC Main 10)",
+        "durationMs": 7080000,
+        "dynamicRange": "hdr10",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 2160,
+        "itemTitle": "Sicario",
+        "key": "plex:1:1009",
+        "libraryId": 1,
+        "libraryTitle": "Movies",
+        "mediaId": 1009,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2009,
+          "inode": "inode-4",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies/Sicario (2015)/Sicario (2015) [Remux-2160p].mkv",
+          "path": "/data/media/movies/Sicario (2015)/Sicario (2015) [Remux-2160p].mkv",
+          "size": 59055800320
+         }
+        ],
+        "ratingKey": "109",
+        "resolution": "2160",
+        "sectionKey": "1",
+        "serverId": 1,
+        "source": "remux",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 56719,
+        "videoCodec": "hevc",
+        "videoProfile": "main 10",
+        "watch": {
+         "lastPlayed": "2034-12-27T13:30:00Z",
+         "plays": 2,
+         "readAt": "2035-01-01T12:00:00Z",
+         "since": "2033-08-19T12:00:00Z",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "known",
+         "users": 1
+        },
+        "width": 3840
+       }
+      }
+     ]
+    },
+    {
+     "key": "movie:tmdb:329865",
+     "status": "pending",
+     "flags": [
+      "cross_library"
+     ],
+     "signature": "fa85d6c5a5264a8b489df79f0a3c8ce64a478425",
+     "stableCount": 2,
+     "reclaimableBytes": 7408818585,
+     "profileId": 1,
+     "files": [
+      {
+       "key": "plex:1:1002",
+       "decision": "remove",
+       "engineDecision": "remove",
+       "protected": false,
+       "rank": 2,
+       "reasons": [
+        "Remove — lower Resolution: 1080p vs 2160p"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 8,
+        "bitrateKbps": 8371,
+        "container": "mkv",
+        "displayTitle": "1080p (H.264)",
+        "durationMs": 7080000,
+        "dynamicRange": "sdr",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 1080,
+        "itemTitle": "Arrival",
+        "key": "plex:1:1002",
+        "libraryId": 1,
+        "libraryTitle": "Movies",
+        "mediaId": 1002,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2002,
+          "inode": "inode-5",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies/Arrival (2016)/Arrival (2016) [WEBDL-1080p][EAC3 5.1][h264].mkv",
+          "path": "/data/media/movies/Arrival (2016)/Arrival (2016) [WEBDL-1080p][EAC3 5.1][h264].mkv",
+          "size": 7408818585
+         }
+        ],
+        "ratingKey": "103",
+        "resolution": "1080",
+        "sectionKey": "1",
+        "serverId": 1,
+        "source": "webdl",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 7115,
+        "videoCodec": "h264",
+        "videoProfile": "high",
+        "watch": {
+         "lastPlayed": "2034-12-22T13:30:00Z",
+         "plays": 3,
+         "readAt": "2035-01-01T12:00:00Z",
+         "since": "2033-08-19T12:00:00Z",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "known",
+         "users": 2
+        },
+        "width": 1920
+       }
+      },
+      {
+       "key": "plex:1:1003",
+       "decision": "keep",
+       "engineDecision": "keep",
+       "protected": false,
+       "rank": 1,
+       "reasons": [
+        "Keep — best by Resolution (2160p vs 1080p)"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 10,
+        "bitrateKbps": 58479,
+        "container": "mkv",
+        "displayTitle": "4K HDR10 (HEVC Main 10)",
+        "durationMs": 7080000,
+        "dynamicRange": "hdr10",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 2160,
+        "itemTitle": "Arrival",
+        "key": "plex:1:1003",
+        "libraryId": 2,
+        "libraryTitle": "Movies 4K",
+        "mediaId": 1003,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2003,
+          "inode": "inode-6",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies4k/Arrival (2016)/Arrival (2016) [Remux-2160p][HDR10][TrueHD 7.1].mkv",
+          "path": "/data/media/movies4k/Arrival (2016)/Arrival (2016) [Remux-2160p][HDR10][TrueHD 7.1].mkv",
+          "size": 51754355916
+         }
+        ],
+        "ratingKey": "104",
+        "resolution": "2160",
+        "sectionKey": "2",
+        "serverId": 1,
+        "source": "remux",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 49707,
+        "videoCodec": "hevc",
+        "videoProfile": "main 10",
+        "watch": {
+         "plays": 0,
+         "readAt": "2035-01-01T12:00:00Z",
+         "since": "2034-12-02T12:00:00Z",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "known",
+         "users": 0
+        },
+        "width": 3840
+       }
+      }
+     ]
+    },
+    {
+     "key": "movie:tmdb:78",
+     "status": "pending",
+     "flags": [
+      "cross_library"
+     ],
+     "signature": "374b9e9721a71f6277692f638ba0091f672f47be",
+     "stableCount": 2,
+     "reclaimableBytes": 13851269529,
+     "profileId": 1,
+     "files": [
+      {
+       "key": "plex:1:1006",
+       "decision": "remove",
+       "engineDecision": "remove",
+       "protected": false,
+       "rank": 2,
+       "reasons": [
+        "Remove — lower Resolution: 1080p vs 2160p"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 8,
+        "bitrateKbps": 15651,
+        "container": "mkv",
+        "displayTitle": "1080p (H.264)",
+        "durationMs": 7080000,
+        "dynamicRange": "sdr",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 1080,
+        "itemTitle": "Blade Runner",
+        "key": "plex:1:1006",
+        "libraryId": 1,
+        "libraryTitle": "Movies",
+        "mediaId": 1006,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2006,
+          "inode": "inode-7",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies/Blade Runner (1982)/Blade Runner (1982) [Bluray-1080p].mkv",
+          "path": "/data/media/movies/Blade Runner (1982)/Blade Runner (1982) [Bluray-1080p].mkv",
+          "size": 13851269529
+         }
+        ],
+        "ratingKey": "107",
+        "resolution": "1080",
+        "sectionKey": "1",
+        "serverId": 1,
+        "source": "bluray",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 13303,
+        "videoCodec": "h264",
+        "videoProfile": "high",
+        "watch": {
+         "lastPlayed": "2034-11-12T13:30:00Z",
+         "plays": 1,
+         "readAt": "2035-01-01T12:00:00Z",
+         "since": "2033-08-19T12:00:00Z",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "known",
+         "users": 1
+        },
+        "width": 1920
+       }
+      },
+      {
+       "key": "plex:1:1007",
+       "decision": "keep",
+       "engineDecision": "keep",
+       "protected": false,
+       "rank": 1,
+       "reasons": [
+        "Keep — best by Resolution (2160p vs 1080p)"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 10,
+        "bitrateKbps": 74373,
+        "container": "mkv",
+        "displayTitle": "4K HDR10 (HEVC Main 10)",
+        "durationMs": 7080000,
+        "dynamicRange": "hdr10",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 2160,
+        "itemTitle": "Blade Runner",
+        "key": "plex:1:1007",
+        "libraryId": 2,
+        "libraryTitle": "Movies 4K",
+        "mediaId": 1007,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2007,
+          "inode": "inode-8",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies4k/Blade Runner (1982)/Blade Runner (1982) [Remux-2160p].mkv",
+          "path": "/data/media/movies4k/Blade Runner (1982)/Blade Runner (1982) [Remux-2160p].mkv",
+          "size": 65820373811
+         }
+        ],
+        "ratingKey": "108",
+        "resolution": "2160",
+        "sectionKey": "2",
+        "serverId": 1,
+        "source": "remux",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 63217,
+        "videoCodec": "hevc",
+        "videoProfile": "main 10",
+        "watch": {
+         "plays": 0,
+         "readAt": "2035-01-01T12:00:00Z",
+         "reason": "plays of this title in this library are recorded under an earlier Plex item",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "unknown",
+         "users": 0
+        },
+        "width": 3840
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "after": "re-evaluation",
+   "groups": [
+    {
+     "key": "movie:tmdb:1124",
+     "status": "pending",
+     "flags": [
+      "cross_library"
+     ],
+     "signature": "1fad53b44e4b1b6f7ffee7fbff3be3b956a317a1",
+     "stableCount": 2,
+     "reclaimableBytes": 12240656793,
+     "profileId": 1,
+     "files": [
+      {
+       "key": "plex:1:1004",
+       "decision": "remove",
+       "engineDecision": "remove",
+       "protected": false,
+       "rank": 2,
+       "reasons": [
+        "Remove — lower Resolution: 1080p vs 2160p"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 8,
+        "bitrateKbps": 13831,
+        "container": "mkv",
+        "displayTitle": "1080p (H.264)",
+        "durationMs": 7080000,
+        "dynamicRange": "sdr",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 1080,
+        "itemTitle": "The Prestige",
+        "key": "plex:1:1004",
+        "libraryId": 1,
+        "libraryTitle": "Movies",
+        "mediaId": 1004,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2004,
+          "inode": "inode-1",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies/The Prestige (2006)/The Prestige (2006) [Bluray-1080p].mkv",
+          "path": "/data/media/movies/The Prestige (2006)/The Prestige (2006) [Bluray-1080p].mkv",
+          "size": 12240656793
+         }
+        ],
+        "ratingKey": "105",
+        "resolution": "1080",
+        "sectionKey": "1",
+        "serverId": 1,
+        "source": "bluray",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 11756,
+        "videoCodec": "h264",
+        "videoProfile": "high",
+        "watch": {
+         "lastPlayed": "2034-09-23T13:30:00Z",
+         "plays": 1,
+         "readAt": "2035-01-01T12:00:00Z",
+         "since": "2033-08-19T12:00:00Z",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "known",
+         "users": 1
+        },
+        "width": 1920
+       }
+      },
+      {
+       "key": "plex:1:1005",
+       "decision": "keep",
+       "engineDecision": "keep",
+       "protected": false,
+       "rank": 1,
+       "reasons": [
+        "Keep — best by Resolution (2160p vs 1080p)"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 10,
+        "bitrateKbps": 63939,
+        "container": "mkv",
+        "displayTitle": "4K HDR10 (HEVC Main 10)",
+        "durationMs": 7080000,
+        "dynamicRange": "hdr10",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 2160,
+        "itemTitle": "The Prestige",
+        "key": "plex:1:1005",
+        "libraryId": 2,
+        "libraryTitle": "Movies 4K",
+        "mediaId": 1005,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2005,
+          "inode": "inode-2",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies4k/The Prestige (2006)/The Prestige (2006) [Remux-2160p].mkv",
+          "path": "/data/media/movies4k/The Prestige (2006)/The Prestige (2006) [Remux-2160p].mkv",
+          "size": 56586194124
+         }
+        ],
+        "ratingKey": "106",
+        "resolution": "2160",
+        "sectionKey": "2",
+        "serverId": 1,
+        "source": "remux",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 54348,
+        "videoCodec": "hevc",
+        "videoProfile": "main 10",
+        "watch": {
+         "plays": 0,
+         "readAt": "2035-01-01T12:00:00Z",
+         "reason": "added before the recorded history starts (2033-11-07)",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "unknown",
+         "users": 0
+        },
+        "width": 3840
+       }
+      }
+     ]
+    },
+    {
+     "key": "movie:tmdb:273481",
+     "status": "pending",
+     "flags": [],
+     "signature": "f430b31b62f855e09948588f91e4cdeddaf64b3f",
+     "stableCount": 2,
+     "reclaimableBytes": 7945689497,
+     "profileId": 1,
+     "files": [
+      {
+       "key": "plex:1:1008",
+       "decision": "remove",
+       "engineDecision": "remove",
+       "protected": false,
+       "rank": 2,
+       "reasons": [
+        "Remove — lower Resolution: 1080p vs 2160p"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 8,
+        "bitrateKbps": 8978,
+        "container": "mkv",
+        "displayTitle": "1080p (H.264)",
+        "durationMs": 7080000,
+        "dynamicRange": "sdr",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 1080,
+        "itemTitle": "Sicario",
+        "key": "plex:1:1008",
+        "libraryId": 1,
+        "libraryTitle": "Movies",
+        "mediaId": 1008,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2008,
+          "inode": "inode-3",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies/Sicario (2015)/Sicario (2015) [WEBDL-1080p].mkv",
+          "path": "/data/media/movies/Sicario (2015)/Sicario (2015) [WEBDL-1080p].mkv",
+          "size": 7945689497
+         }
+        ],
+        "ratingKey": "109",
+        "resolution": "1080",
+        "sectionKey": "1",
+        "serverId": 1,
+        "source": "webdl",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 7631,
+        "videoCodec": "h264",
+        "videoProfile": "high",
+        "watch": {
+         "lastPlayed": "2034-12-27T13:30:00Z",
+         "plays": 2,
+         "readAt": "2035-01-01T12:00:00Z",
+         "since": "2033-08-19T12:00:00Z",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "known",
+         "users": 1
+        },
+        "width": 1920
+       }
+      },
+      {
+       "key": "plex:1:1009",
+       "decision": "keep",
+       "engineDecision": "keep",
+       "protected": false,
+       "rank": 1,
+       "reasons": [
+        "Keep — best by Resolution (2160p vs 1080p)"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 10,
+        "bitrateKbps": 66729,
+        "container": "mkv",
+        "displayTitle": "4K HDR10 (HEVC Main 10)",
+        "durationMs": 7080000,
+        "dynamicRange": "hdr10",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 2160,
+        "itemTitle": "Sicario",
+        "key": "plex:1:1009",
+        "libraryId": 1,
+        "libraryTitle": "Movies",
+        "mediaId": 1009,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2009,
+          "inode": "inode-4",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies/Sicario (2015)/Sicario (2015) [Remux-2160p].mkv",
+          "path": "/data/media/movies/Sicario (2015)/Sicario (2015) [Remux-2160p].mkv",
+          "size": 59055800320
+         }
+        ],
+        "ratingKey": "109",
+        "resolution": "2160",
+        "sectionKey": "1",
+        "serverId": 1,
+        "source": "remux",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 56719,
+        "videoCodec": "hevc",
+        "videoProfile": "main 10",
+        "watch": {
+         "lastPlayed": "2034-12-27T13:30:00Z",
+         "plays": 2,
+         "readAt": "2035-01-01T12:00:00Z",
+         "since": "2033-08-19T12:00:00Z",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "known",
+         "users": 1
+        },
+        "width": 3840
+       }
+      }
+     ]
+    },
+    {
+     "key": "movie:tmdb:329865",
+     "status": "pending",
+     "flags": [
+      "cross_library"
+     ],
+     "signature": "fa85d6c5a5264a8b489df79f0a3c8ce64a478425",
+     "stableCount": 2,
+     "reclaimableBytes": 7408818585,
+     "profileId": 1,
+     "files": [
+      {
+       "key": "plex:1:1002",
+       "decision": "remove",
+       "engineDecision": "remove",
+       "protected": false,
+       "rank": 2,
+       "reasons": [
+        "Remove — lower Resolution: 1080p vs 2160p"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 8,
+        "bitrateKbps": 8371,
+        "container": "mkv",
+        "displayTitle": "1080p (H.264)",
+        "durationMs": 7080000,
+        "dynamicRange": "sdr",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 1080,
+        "itemTitle": "Arrival",
+        "key": "plex:1:1002",
+        "libraryId": 1,
+        "libraryTitle": "Movies",
+        "mediaId": 1002,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2002,
+          "inode": "inode-5",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies/Arrival (2016)/Arrival (2016) [WEBDL-1080p][EAC3 5.1][h264].mkv",
+          "path": "/data/media/movies/Arrival (2016)/Arrival (2016) [WEBDL-1080p][EAC3 5.1][h264].mkv",
+          "size": 7408818585
+         }
+        ],
+        "ratingKey": "103",
+        "resolution": "1080",
+        "sectionKey": "1",
+        "serverId": 1,
+        "source": "webdl",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 7115,
+        "videoCodec": "h264",
+        "videoProfile": "high",
+        "watch": {
+         "lastPlayed": "2034-12-22T13:30:00Z",
+         "plays": 3,
+         "readAt": "2035-01-01T12:00:00Z",
+         "since": "2033-08-19T12:00:00Z",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "known",
+         "users": 2
+        },
+        "width": 1920
+       }
+      },
+      {
+       "key": "plex:1:1003",
+       "decision": "keep",
+       "engineDecision": "keep",
+       "protected": false,
+       "rank": 1,
+       "reasons": [
+        "Keep — best by Resolution (2160p vs 1080p)"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 10,
+        "bitrateKbps": 58479,
+        "container": "mkv",
+        "displayTitle": "4K HDR10 (HEVC Main 10)",
+        "durationMs": 7080000,
+        "dynamicRange": "hdr10",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 2160,
+        "itemTitle": "Arrival",
+        "key": "plex:1:1003",
+        "libraryId": 2,
+        "libraryTitle": "Movies 4K",
+        "mediaId": 1003,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2003,
+          "inode": "inode-6",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies4k/Arrival (2016)/Arrival (2016) [Remux-2160p][HDR10][TrueHD 7.1].mkv",
+          "path": "/data/media/movies4k/Arrival (2016)/Arrival (2016) [Remux-2160p][HDR10][TrueHD 7.1].mkv",
+          "size": 51754355916
+         }
+        ],
+        "ratingKey": "104",
+        "resolution": "2160",
+        "sectionKey": "2",
+        "serverId": 1,
+        "source": "remux",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 49707,
+        "videoCodec": "hevc",
+        "videoProfile": "main 10",
+        "watch": {
+         "plays": 0,
+         "readAt": "2035-01-01T12:00:00Z",
+         "since": "2034-12-02T12:00:00Z",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "known",
+         "users": 0
+        },
+        "width": 3840
+       }
+      }
+     ]
+    },
+    {
+     "key": "movie:tmdb:78",
+     "status": "pending",
+     "flags": [
+      "cross_library"
+     ],
+     "signature": "374b9e9721a71f6277692f638ba0091f672f47be",
+     "stableCount": 2,
+     "reclaimableBytes": 13851269529,
+     "profileId": 1,
+     "files": [
+      {
+       "key": "plex:1:1006",
+       "decision": "remove",
+       "engineDecision": "remove",
+       "protected": false,
+       "rank": 2,
+       "reasons": [
+        "Remove — lower Resolution: 1080p vs 2160p"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 8,
+        "bitrateKbps": 15651,
+        "container": "mkv",
+        "displayTitle": "1080p (H.264)",
+        "durationMs": 7080000,
+        "dynamicRange": "sdr",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 1080,
+        "itemTitle": "Blade Runner",
+        "key": "plex:1:1006",
+        "libraryId": 1,
+        "libraryTitle": "Movies",
+        "mediaId": 1006,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2006,
+          "inode": "inode-7",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies/Blade Runner (1982)/Blade Runner (1982) [Bluray-1080p].mkv",
+          "path": "/data/media/movies/Blade Runner (1982)/Blade Runner (1982) [Bluray-1080p].mkv",
+          "size": 13851269529
+         }
+        ],
+        "ratingKey": "107",
+        "resolution": "1080",
+        "sectionKey": "1",
+        "serverId": 1,
+        "source": "bluray",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 13303,
+        "videoCodec": "h264",
+        "videoProfile": "high",
+        "watch": {
+         "lastPlayed": "2034-11-12T13:30:00Z",
+         "plays": 1,
+         "readAt": "2035-01-01T12:00:00Z",
+         "since": "2033-08-19T12:00:00Z",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "known",
+         "users": 1
+        },
+        "width": 1920
+       }
+      },
+      {
+       "key": "plex:1:1007",
+       "decision": "keep",
+       "engineDecision": "keep",
+       "protected": false,
+       "rank": 1,
+       "reasons": [
+        "Keep — best by Resolution (2160p vs 1080p)"
+       ],
+       "decidingCriterion": "resolution",
+       "version": {
+        "audioTracks": [
+         {
+          "atmos": false,
+          "channels": 6,
+          "codec": "eac3",
+          "default": true,
+          "format": "eac3",
+          "language": "English",
+          "languageCode": "eng",
+          "profile": "",
+          "title": ""
+         }
+        ],
+        "bitDepth": 10,
+        "bitrateKbps": 74373,
+        "container": "mkv",
+        "displayTitle": "4K HDR10 (HEVC Main 10)",
+        "durationMs": 7080000,
+        "dynamicRange": "hdr10",
+        "edition": "",
+        "frameRate": "24p",
+        "height": 2160,
+        "itemTitle": "Blade Runner",
+        "key": "plex:1:1007",
+        "libraryId": 2,
+        "libraryTitle": "Movies 4K",
+        "mediaId": 1007,
+        "optimizedVersion": false,
+        "parts": [
+         {
+          "accessible": true,
+          "duration": 7080000,
+          "exists": true,
+          "id": 2007,
+          "inode": "inode-8",
+          "linkCount": 1,
+          "localPath": "$DIR/media/movies4k/Blade Runner (1982)/Blade Runner (1982) [Remux-2160p].mkv",
+          "path": "/data/media/movies4k/Blade Runner (1982)/Blade Runner (1982) [Remux-2160p].mkv",
+          "size": 65820373811
+         }
+        ],
+        "ratingKey": "108",
+        "resolution": "2160",
+        "sectionKey": "2",
+        "serverId": 1,
+        "source": "remux",
+        "subtitleTracks": [],
+        "videoBitrateKbps": 63217,
+        "videoCodec": "hevc",
+        "videoProfile": "main 10",
+        "watch": {
+         "plays": 0,
+         "readAt": "2035-01-01T12:00:00Z",
+         "reason": "plays of this title in this library are recorded under an earlier Plex item",
+         "source": "tautulli",
+         "sourceName": "Tautulli",
+         "status": "unknown",
+         "users": 0
+        },
+        "width": 3840
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

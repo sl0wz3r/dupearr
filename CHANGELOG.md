@@ -34,6 +34,25 @@ All notable changes to Dupearr are documented here. The format follows
   stable scans again. The group page shows a *Plays* row; health
   checks *TautulliConnectivityCheck* and *WatchHistoryCheck*; API `/api/v1/tautulli`,
   `MediaVersion.watch`, `CriterionSchema.requiresWatchHistory` / `minDeltaUnit` (additive).
+- Cross-server protection for several Plex servers (#8): with two or more enabled servers, every
+  scan also lists the other servers' movie and TV libraries, and a file another server's item
+  lists is only removed while that item keeps a file proven to be a different one — on disk, right
+  before the removal, from open files on the same disk of an ext4, XFS, btrfs or ZFS filesystem.
+  Otherwise the copy is kept ("the only copy of … on …", also over a manual override). No new way
+  to remove anything; groups are still per server. See
+  [Safety](docs/user/safety.md#several-plex-servers).
+- A **Storage** setting per media server (*same storage as the other servers* or *separate*, for
+  another host or a friend's server) and a **Plex servers it feeds** choice per Radarr/Sonarr
+  instance, shown once there are two servers (#8). With one server, instances are linked to it
+  automatically, including existing ones on upgrade; adding or enabling a second server makes those
+  links unconfirmed again, so check them in *Settings → Applications* afterwards. The choice is
+  confirmed with an explicit tick, never by saving another field.
+- Flags *Also on another server*, *Kept by another server*, *Maybe on another server* and *Media
+  server not read*, an *Other servers* row on the group page, and the health checks
+  *MultiServerFoldersCheck*, *ArrServerLinksCheck*, *MultiServerMappingCheck*,
+  *SeparateServerCheck* and *MediaServerIdentityCheck* (#8). API (additive): `MediaServer.storage`,
+  `ArrInstance.serverIds` / `linksConfirmed`, `MediaVersion.otherServers`,
+  `DuplicateGroup.crossServer`, `ScanRun.stats.separateNameMatches`.
 
 ### Changed
 
@@ -50,6 +69,30 @@ All notable changes to Dupearr are documented here. The format follows
 - An existing `config.xml` gains empty `<TrustedProxies>` and `<AllowedHosts>` elements on the
   first start, and both lists are stored as `a, b` whatever separators were typed (#1).
 - `ReverseProxyCheck` clears as soon as the reported proxy is trusted, without a restart (#1).
+- With two or more enabled Plex servers, Radarr/Sonarr files are only matched by raw path or by
+  name and size to versions of the servers the instance is confirmed to feed, and never to a
+  server declared separate; a version whose \*arr tracking cannot be told goes to review and
+  cannot be approved until it can (#8).
+- After the upgrade, with two or more enabled Plex servers, a group scanned before it is not
+  removed: when its queued removal runs, it goes to review with a re-scan, and it can be approved
+  again once a scan has compared it with every server. A group whose other server could not be
+  read cannot be approved until a scan reads it (#8). Installations with one Plex server behave
+  exactly as before.
+- Files on an Unraid user share (`/mnt/user`) that a second Plex server also lists stay protected
+  until the behaviour of user-share file identities has been checked on live arrays (#8).
+- With two or more enabled Plex servers, a queue run that sends groups back to review queues one
+  re-scan per server at its end instead of one per group, and a group whose other server changed
+  its path mappings since the scan goes to review (#8).
+
+### Fixed
+
+- With several Plex servers, a removal on one server could take the only copy another server
+  lists (when that server indexes fewer folders) (#8).
+- A remote Plex server without path mappings whose paths equal local ones could have its copy
+  matched to the local Radarr/Sonarr file, so approving its group could remove the local file
+  (#8).
+- Two Plex servers indexing one share could each remove the copy the other's profile keeps; such
+  a group now goes to review (#8).
 
 ## [0.1.1] - 2026-09-24
 

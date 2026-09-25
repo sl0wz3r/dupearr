@@ -114,6 +114,24 @@
 // [Env.SetStartingUp], [Env.SetRecycleBin], [Env.Unmount] and [Env.CreateFile] change the world
 // while it runs; every method is safe for concurrent use.
 //
+// # Several Plex servers
+//
+// One [Env] serves one Plex server. A second server runs as a second Env: on its own tree (a
+// server on another host, e.g. [MirrorServer]: the same relative paths and sizes, other files), or
+// over the first Env's tree with [Options].ShareMedia ([SharedServer]: two servers on one share).
+// A shared Env never resets or removes the tree, creates only files it declares that are missing
+// (an existing file must have the declared size) and serves a Plex server only. A file deleted
+// through one server stays listed by the other until that server refreshes, while its checkFiles
+// reports exists=false — as a real second server behaves between its scans. [PlexServer].MediaRoot
+// makes a server see the media root at another path (e.g. /srv; the *arrs keep /data/media), and
+// [Env.PathMappings] follows it. /library/sections reports scannedAt (bumped by every section
+// refresh), contentChangedAt (bumped only when a refresh trashed or found media) and refreshing;
+// [Env.SetSectionState] sets them and [Env.SetMachineIdentifier] makes the server answer as
+// another one. Outages use [Env.InjectFault] with Server [ServerPlex]. Two assertions check the
+// multi-server safety rules at the end of a test: [Env.AssertEveryItemHasAFile]
+// ([RuleDeleteOtherServerLastCopy]: an item that had a file has none now) and [TitlesWithoutFile]
+// ([RuleDeleteLastCopyAnywhere]: a title has no file on any server).
+//
 // # Usage
 //
 //	env := fakemedia.Start(t, fakemedia.Default())
