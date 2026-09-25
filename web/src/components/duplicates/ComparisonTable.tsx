@@ -1,7 +1,7 @@
 import { clsx } from 'clsx';
-import { Disc3, Lock, TriangleAlert } from 'lucide-react';
+import { Disc3, ExternalLink, Lock, TriangleAlert } from 'lucide-react';
 import type { ReactNode } from 'react';
-import type { CriterionType, DiscInfo, GroupFile, Id, MediaPart, MediaVersion, OtherListing, Profile } from '@/api/types';
+import type { ArrLink, CriterionType, DiscInfo, GroupFile, Id, MediaPart, MediaVersion, OtherListing, Profile } from '@/api/types';
 import { usePreferences } from '@/app/preferences';
 import { Badge, ByteSize, CopyButton, DecisionBadge, RelativeTime } from '@/components/ui';
 import {
@@ -30,6 +30,7 @@ import {
   sourceLabel,
   videoCodecLabel,
 } from '@/lib/format';
+import { arrAppName, arrLinkFor, safeHref } from './arrLinks';
 import { bestForCriterion, decidingCriteria } from './comparison';
 import { clipCountOf, discMemberBlocker, discRelativePath, isClipName, isClipSet, mainClipName } from './disc';
 import { DiscBadge } from './DiscBadge';
@@ -44,6 +45,8 @@ interface RowContext {
   libraryNames?: ReadonlyMap<Id, string>;
   /** Every copy is a version of one Plex item (one rating key): they share its play history. */
   sameItem?: boolean;
+  /** Links to the group's Radarr/Sonarr items (GET /api/v1/duplicate/{id}). */
+  arrLinks?: readonly ArrLink[] | null;
 }
 
 interface RowSpec {
@@ -405,10 +408,13 @@ const ROWS: RowSpec[] = [
     criteria: ['arr_managed', 'custom_format_score'],
     best: (files, profile) =>
       firstNonEmpty(bestForCriterion('custom_format_score', files, profile), bestForCriterion('arr_managed', files, profile)),
-    render: (f) => {
+    render: (f, ctx) => {
       const a = f.version.arr;
       if (!a) return <Value primary="" secondary="Not tracked by an *arr" />;
       const score = a.customFormatScore;
+      // The link carries the instance's current name (a.instanceName is the one at scan time).
+      const link = arrLinkFor(ctx.arrLinks, a.instanceId, a.itemId);
+      const itemUrl = safeHref(link?.itemUrl);
       return (
         <div className="flex min-w-0 flex-col gap-0.5">
           <div className="text-fg-strong">
@@ -433,6 +439,17 @@ const ROWS: RowSpec[] = [
               </Badge>
             )}
           </div>
+          {itemUrl && (
+            <a
+              href={itemUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex w-fit items-center gap-1 text-xs text-accent-soft no-underline hover:underline"
+            >
+              Open in {link?.instanceName || a.instanceName || arrAppName(a.kind)}
+              <ExternalLink aria-hidden width={11} height={11} />
+            </a>
+          )}
         </div>
       );
     },
@@ -617,6 +634,8 @@ export interface ComparisonTableProps {
   pendingFileId?: Id | null;
   /** Reason overrides are locked (null/undefined = editable). */
   lockedReason?: string | null;
+  /** Links to the group's Radarr/Sonarr items ("Open in Radarr" in the *arr row). */
+  arrLinks?: readonly ArrLink[] | null;
 }
 
 /**
@@ -633,12 +652,13 @@ export function ComparisonTable({
   onOverride,
   pendingFileId,
   lockedReason,
+  arrLinks,
 }: ComparisonTableProps) {
   const deciding = decidingCriteria(files);
   const decidingSet = new Set(deciding.keys());
   const firstKey = files[0]?.version.ratingKey;
   const sameItem = files.length > 1 && !!firstKey && files.every((f) => f.version.ratingKey === firstKey);
-  const ctx: RowContext = { libraryNames, sameItem };
+  const ctx: RowContext = { libraryNames, sameItem, arrLinks };
 
   // Criteria the engine reported that no fixed row covers (forward compatible).
   const extraCriteria = new Set<CriterionType>();

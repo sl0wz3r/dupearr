@@ -119,6 +119,11 @@ type DuplicateGroup struct {
 	// with (docs/DECISIONS.md D11). nil with one enabled server, and for groups stored before
 	// multi-server support: with two or more enabled servers such a group is never acted on.
 	CrossServer *CrossServerRecord `json:"crossServer,omitempty"`
+	// ArrItems are the Radarr movies / Sonarr series the last scan found for the group's versions
+	// (duplicate_groups.arr_items; see ArrItemRef), with a summary of their download queue while
+	// it deferred the group. Display only: nil for groups without *arr items, and for groups
+	// stored before it existed until their next scan.
+	ArrItems []ArrItemRef `json:"arrItems,omitempty"`
 }
 
 // CrossServerRecord is what a scan knew about the other media servers when it evaluated a group
@@ -409,6 +414,10 @@ type ArrInstance struct {
 	VerifyTLS bool     `json:"verifyTls"`
 	Enabled   bool     `json:"enabled"`
 	Tags      []string `json:"tags"`
+	// ExternalURL is the address a browser opens the *arr at, incl. its URL base
+	// (e.g. https://radarr.example.com), used only for the "Open in Radarr/Sonarr" links; "" = URL.
+	// Dupearr never sends a request to it.
+	ExternalURL string `json:"externalUrl"`
 	// ServerIDs are the media servers the instance feeds (never nil). With two or more enabled
 	// servers the scanner matches its files by raw path or by name and size only to versions of a
 	// linked server, and only once LinksConfirmed (a person saved the links); with one enabled

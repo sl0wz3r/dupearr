@@ -434,8 +434,12 @@ type pipeline struct {
 	arrFailed  map[models.MediaType][]string
 	// arrUnlookable: items the *arrs could not be asked about (no usable id) → reason.
 	arrUnlookable map[refKey]string
-	// busyItems: items whose *arr title has active download/import queue entries.
-	busyItems map[refKey]bool
+	// busyItems: items whose *arr title has active download/import queue entries → the *arr
+	// items (by id) that made them busy.
+	busyItems map[refKey][]arrItemKey
+	// arrItems: what the enrichment read about each *arr item a candidate's title has (page slug,
+	// queue), for the groups' ArrItems (display only).
+	arrItems map[arrItemKey]*arrItemInfo
 	// indexOnly: libraries listed only to complete the shared-file index (their folders overlap
 	// a scanned library); they are never candidates and never resolved.
 	indexOnly map[int64]bool
@@ -516,7 +520,8 @@ func newPipeline(ctx context.Context, s *Service, run *models.ScanRun, progress 
 		arrFailed:  map[models.MediaType][]string{},
 
 		arrUnlookable:    map[refKey]string{},
-		busyItems:        map[refKey]bool{},
+		busyItems:        map[refKey][]arrItemKey{},
+		arrItems:         map[arrItemKey]*arrItemInfo{},
 		indexOnly:        map[int64]bool{},
 		sharedIncomplete: map[int64]string{},
 		placedAt:         map[string]time.Time{},

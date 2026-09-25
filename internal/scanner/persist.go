@@ -48,12 +48,15 @@ func (p *pipeline) persistGroups(groups []*models.DuplicateGroup, busy queueStat
 		}
 		for i := range g.Files {
 			v := &g.Files[i].Version
-			if busy.busy(v.Arr) || p.busyItems[refKey{server: v.ServerID, rk: v.RatingKey}] {
+			if busy.busy(v.Arr) || len(p.busyItems[refKey{server: v.ServerID, rk: v.RatingKey}]) > 0 {
 				// Before Evaluate, so the group is deferred (docs/DECISIONS.md D3 A4).
 				g.Flags = append(g.Flags, models.FlagArrQueueBusy)
 				break
 			}
 		}
+		// Display only (links, and the queue entries a deferral reason names); before Evaluate,
+		// which words the reason from it.
+		g.ArrItems = p.groupArrItems(g)
 		for i := range g.Files {
 			v := &g.Files[i].Version
 			if p.discNearby[refKey{server: v.ServerID, rk: v.RatingKey}] && !slices.Contains(g.Flags, models.FlagFullDisc) {

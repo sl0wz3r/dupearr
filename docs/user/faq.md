@@ -59,6 +59,10 @@ time: bulk approval skips review groups).
 **… *deferred*?**
 A copy to remove is younger than the minimum age (7 days) or has no known date added, the \*arr is
 still downloading or importing the title, or a copy is playing. It is re-evaluated on the next scan.
+For the \*arr's queue, the group's page lists the queue entries with a link to the \*arr's
+*Activity → Queue*: a download Radarr/Sonarr refuses to import (for instance "Not an upgrade for
+existing movie file") stays there, and keeps the duplicate deferred, until you remove it there
+([troubleshooting](troubleshooting.md#duplicates-and-decisions)).
 
 **… *protected* although I have a 4K and a 1080p copy?**
 Each copy is tracked by a different Radarr/Sonarr instance, which Dupearr treats as intentional

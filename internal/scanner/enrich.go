@@ -147,7 +147,7 @@ func (p *pipeline) enrich(items []models.MediaItem) queueState {
 			matcher.SetServers(p.cfg.matchPolicy())
 		}
 		unconfirmed := map[int64]*unconfirmedTitles{} // docs/DECISIONS.md D11
-		busyIDs := map[string]bool{}
+		busyIDs := map[string][]arrItemKey{}
 		for _, inst := range insts {
 			if p.ctx.Err() != nil {
 				return busy
@@ -164,11 +164,15 @@ func (p *pipeline) enrich(items []models.MediaItem) queueState {
 			if p.cfg.multi && !p.cfg.confirmed[inst.ID] {
 				unconfirmed[inst.ID] = p.unconfirmedTitles(inst, files, mt)
 			}
-			busy[inst.ID] = queue
+			busy[inst.ID] = busyItemIDs(queue)
+			p.noteArrItems(inst, files, queue)
 			for i := range files {
-				if id := files[i].Info.ItemID; id > 0 && queue[id] {
+				if id := files[i].Info.ItemID; id > 0 && queue[id] != nil {
+					key := arrItemKey{inst: inst.ID, item: id}
 					for _, tok := range trackedArrIDs(&files[i], mt) {
-						busyIDs[tok] = true
+						if !slices.Contains(busyIDs[tok], key) {
+							busyIDs[tok] = append(busyIDs[tok], key)
+						}
 					}
 				}
 			}
@@ -378,8 +382,8 @@ func (p *pipeline) noteUnlookable(items []models.MediaItem, mt models.MediaType,
 }
 
 // markBusyItems records the items of media type mt whose *arr title (by id) has active queue
-// entries.
-func (p *pipeline) markBusyItems(items []models.MediaItem, mt models.MediaType, busyIDs map[string]bool) {
+// entries, with the *arr items that have them.
+func (p *pipeline) markBusyItems(items []models.MediaItem, mt models.MediaType, busyIDs map[string][]arrItemKey) {
 	if len(busyIDs) == 0 {
 		return
 	}
@@ -390,10 +394,12 @@ func (p *pipeline) markBusyItems(items []models.MediaItem, mt models.MediaType, 
 		if it.MediaType != mt {
 			continue
 		}
+		ref := refKey{server: it.ServerID, rk: it.RatingKey}
 		for _, tok := range itemArrIDs(it, mt) {
-			if busyIDs[tok] {
-				p.busyItems[refKey{server: it.ServerID, rk: it.RatingKey}] = true
-				break
+			for _, key := range busyIDs[tok] {
+				if !slices.Contains(p.busyItems[ref], key) {
+					p.busyItems[ref] = append(p.busyItems[ref], key)
+				}
 			}
 		}
 	}
@@ -414,7 +420,7 @@ func itemLabel(it *models.MediaItem) string {
 
 // readArr reads the tracked files and queue of one instance. A panicking client is converted
 // into an error.
-func (p *pipeline) readArr(inst models.ArrInstance, filter arr.TrackedFilter) (files []arr.TrackedFile, queue map[int64]bool, err error) {
+func (p *pipeline) readArr(inst models.ArrInstance, filter arr.TrackedFilter) (files []arr.TrackedFile, queue map[int64]*arr.QueueItem, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			files, queue, err = nil, nil, fmt.Errorf("unexpected panic: %v", r)
@@ -436,16 +442,28 @@ func (p *pipeline) readArr(inst models.ArrInstance, filter arr.TrackedFilter) (f
 		return nil, nil, fmt.Errorf("tracked files: %w", err)
 	}
 	err = p.retryArr(inst, "download queue", func() (e error) {
-		queue, e = client.QueueItemIDs(p.ctx)
+		queue, e = client.Queue(p.ctx)
 		return e
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("download queue: %w", err)
 	}
 	if queue == nil {
-		queue = map[int64]bool{}
+		queue = map[int64]*arr.QueueItem{}
 	}
 	return files, queue, nil
+}
+
+// busyItemIDs returns the item ids with at least one queue entry: whatever the entries' state
+// (downloading, completed but not imported, failed …), the item is busy (docs/DECISIONS.md D3 A4).
+func busyItemIDs(queue map[int64]*arr.QueueItem) map[int64]bool {
+	ids := make(map[int64]bool, len(queue))
+	for id, q := range queue {
+		if q != nil && id > 0 {
+			ids[id] = true
+		}
+	}
+	return ids
 }
 
 // retryArr runs read once more after a pause when it fails with an error that may be transient:

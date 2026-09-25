@@ -1067,7 +1067,7 @@ func (ev *evaluation) status(removals int) (status models.GroupStatus, reason st
 		}
 	}
 	if g.HasFlag(models.FlagArrQueueBusy) {
-		deferred = append(deferred, "the *arr has an active download or import for this title")
+		deferred = append(deferred, queueBusyReason(g))
 	}
 	playing := g.HasFlag(models.FlagPlaying)
 	if playing {
@@ -1077,6 +1077,68 @@ func (ev *evaluation) status(removals int) (status models.GroupStatus, reason st
 		return models.GroupDeferred, titleCase(strings.Join(deferred, "; ")), playing && len(deferred) == 1
 	}
 	return models.GroupPending, "", false
+}
+
+// queueBusyReason words the deferral of a group whose *arr item has download/import queue
+// entries: the generic sentence, followed — when the scan recorded them (g.ArrItems, display only)
+// — by what the queue holds, so a download the *arr will not import (it stays in the queue until
+// someone removes it there) is recognizable, e.g.
+//
+//	the *arr has an active download or import for this title (Radarr: "Toy.Story.5.2026.2160p.WEB-DL"
+//	Downloaded - Waiting to Import — Not an upgrade for existing movie file…)
+//
+// At most two entries are named; the texts come from the *arr (and may come from a restored
+// backup), so each is capped again and the whole summary stays within 400 runes.
+func queueBusyReason(g *models.DuplicateGroup) string {
+	const (
+		generic      = "the *arr has an active download or import for this title"
+		maxNamed     = 2
+		maxTitle     = 120
+		maxLabel     = 64
+		maxMessage   = 160
+		maxSummary   = 400
+		entrySpacing = " · "
+	)
+	var parts []string
+	total := 0
+	for i := range g.ArrItems {
+		it := &g.ArrItems[i]
+		total += max(it.QueueCount, len(it.Queue))
+		for _, e := range it.Queue {
+			if len(parts) == maxNamed {
+				break
+			}
+			part := arrName(&models.ArrFileInfo{InstanceID: it.InstanceID, InstanceName: it.InstanceName, Kind: it.Kind}) + ":"
+			if t := models.CleanArrText(e.Title, maxTitle); t != "" {
+				part += ` "` + t + `"`
+			}
+			label := e.Label
+			if label == "" {
+				label = e.Status
+			}
+			if label = models.CleanArrText(label, maxLabel); label != "" {
+				part += " " + label
+			}
+			msg := e.ErrorMessage
+			if len(e.Messages) > 0 {
+				msg = e.Messages[0]
+			}
+			if msg = models.CleanArrText(msg, maxMessage); msg != "" {
+				part += " — " + msg
+			}
+			parts = append(parts, part)
+		}
+	}
+	if len(parts) == 0 {
+		return generic
+	}
+	switch more := total - len(parts); {
+	case more == 1:
+		parts = append(parts, "1 more queue entry")
+	case more > 1:
+		parts = append(parts, strconv.Itoa(more)+" more queue entries")
+	}
+	return generic + " (" + models.CleanArrText(strings.Join(parts, entrySpacing), maxSummary) + ")"
 }
 
 // signature is the hex SHA-1 of the sorted "versionKey=decision" lines (docs/DECISIONS.md D4). A

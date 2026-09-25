@@ -16,6 +16,7 @@ import { ConnectionModal, DetailList, SaveErrorAlert, TestResult } from './Conne
 import {
   addressChanged,
   arrUrlCheck,
+  arrWebUrlCheck,
   hasErrors,
   isMaskedSecret,
   mergeFieldErrors,
@@ -60,6 +61,8 @@ function providerOf(kind: ArrKind): ArrProvider {
 export interface ArrFormValues {
   name: string;
   url: string;
+  /** Where a browser opens the instance ("" = url); only used for "Open in Radarr/Sonarr" links. */
+  externalUrl?: string;
   apiKey: string;
   verifyTls: boolean;
   enabled: boolean;
@@ -73,7 +76,7 @@ export interface ArrFormValues {
   linksConfirmed?: boolean;
 }
 
-const FIELDS = ['name', 'url', 'apiKey', 'verifyTls', 'enabled', 'tags', 'serverIds', 'linksConfirmed'] as const;
+const FIELDS = ['name', 'url', 'externalUrl', 'apiKey', 'verifyTls', 'enabled', 'tags', 'serverIds', 'linksConfirmed'] as const;
 
 /** The "Media servers it feeds" field only matters with two or more media servers. */
 export function showServerLinks(servers: readonly MediaServer[] | undefined): boolean {
@@ -84,6 +87,7 @@ export function arrFormValues(instance: ArrInstance | null, kind: ArrKind): ArrF
   return {
     name: instance?.name ?? labelOf(ARR_KIND_LABELS, kind),
     url: instance?.url ?? '',
+    externalUrl: instance?.externalUrl ?? '',
     apiKey: instance?.apiKey ?? '',
     verifyTls: instance?.verifyTls ?? true,
     enabled: instance?.enabled ?? true,
@@ -110,6 +114,11 @@ export function validateArr(values: ArrFormValues, saved?: Pick<ArrInstance, 'ur
   if (!values.name.trim()) errors.name = ['Name is required'];
   const urlError = validateHttpUrl(values.url, { extra: arrUrlCheck });
   if (urlError) errors.url = [urlError];
+  // Optional: empty means "links use the URL above".
+  if ((values.externalUrl ?? '').trim()) {
+    const extError = validateHttpUrl(values.externalUrl, { label: 'External URL', extra: arrWebUrlCheck });
+    if (extError) errors.externalUrl = [extError];
+  }
   if (!values.apiKey.trim()) errors.apiKey = ['API key is required'];
   else if (saved && isMaskedSecret(values.apiKey) && addressChanged(saved.url, values.url)) {
     errors.apiKey = [secretAtNewAddressMessage('API key')];
@@ -134,6 +143,8 @@ export function arrPayload(values: ArrFormValues, kind: ArrKind, id?: Id, withLi
     name: values.name.trim(),
     kind,
     url: trimTrailingSlash(values.url),
+    // Always sent by the form ("" clears it); absent only for callers without the field.
+    ...(values.externalUrl !== undefined ? { externalUrl: trimTrailingSlash(values.externalUrl) } : {}),
     apiKey: isMaskedSecret(values.apiKey) ? values.apiKey : values.apiKey.trim(),
     verifyTls: values.verifyTls,
     enabled: values.enabled,
@@ -308,6 +319,24 @@ function ArrInstanceForm({
           autoComplete="off"
           spellCheck={false}
           invalid={!!errors.url?.length}
+        />
+      </FormGroup>
+
+      <FormGroup
+        label="External URL"
+        htmlFor={id('externalUrl')}
+        errors={errors.externalUrl}
+        helpText={`Optional. The address your browser opens ${kindLabel} at (with its URL base), e.g. https://${kind}.example.com — used only for the "Open in ${kindLabel}" links. Leave empty to use the URL above. Dupearr never connects to it.`}
+      >
+        <TextInput
+          id={id('externalUrl')}
+          value={values.externalUrl ?? ''}
+          onChange={(e) => set('externalUrl', e.target.value)}
+          placeholder={values.url.trim() || `https://${kind}.example.com`}
+          inputMode="url"
+          autoComplete="off"
+          spellCheck={false}
+          invalid={!!errors.externalUrl?.length}
         />
       </FormGroup>
 

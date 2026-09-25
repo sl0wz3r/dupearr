@@ -244,14 +244,17 @@ func cloneItem(it *models.MediaItem) *models.MediaItem {
 // ---------------------------------------------------------------------------
 
 type fakeArr struct {
-	mu         sync.Mutex
-	files      []arr.TrackedFile
-	queue      map[int64]bool
-	filesErr   error
-	queueErr   error
-	onceErr    error // returned by the next TrackedFiles call only
-	lastFilter arr.TrackedFilter
-	calls      int
+	mu    sync.Mutex
+	files []arr.TrackedFile
+	queue map[int64]bool
+	// queueEntries (optional) are the queue entries Queue reports for a busy item (default: one
+	// entry without a summary).
+	queueEntries map[int64][]arr.QueueEntry
+	filesErr     error
+	queueErr     error
+	onceErr      error // returned by the next TrackedFiles call only
+	lastFilter   arr.TrackedFilter
+	calls        int
 }
 
 func (f *fakeArr) TrackedFiles(ctx context.Context, flt arr.TrackedFilter) ([]arr.TrackedFile, error) {
@@ -279,15 +282,24 @@ func (f *fakeArr) TrackedFiles(ctx context.Context, flt arr.TrackedFilter) ([]ar
 	return out, nil
 }
 
-func (f *fakeArr) QueueItemIDs(ctx context.Context) (map[int64]bool, error) {
+// Queue reports every item set in queue (true) with one entry, or with queueEntries[item] when
+// set, like arr.Client.Queue.
+func (f *fakeArr) Queue(ctx context.Context) (map[int64]*arr.QueueItem, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.queueErr != nil {
 		return nil, f.queueErr
 	}
-	out := map[int64]bool{}
+	out := map[int64]*arr.QueueItem{}
 	for k, v := range f.queue {
-		out[k] = v
+		if !v {
+			continue
+		}
+		it := &arr.QueueItem{Count: 1}
+		if entries := f.queueEntries[k]; len(entries) > 0 {
+			it.Count, it.Entries = len(entries), append([]arr.QueueEntry(nil), entries...)
+		}
+		out[k] = it
 	}
 	return out, nil
 }

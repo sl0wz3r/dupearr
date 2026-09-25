@@ -866,6 +866,22 @@ type QueueItem struct {
 	// State is trackedDownloadState: downloading (default), importBlocked, importPending,
 	// importing, imported, failedPending, failed, ignored.
 	State string
+	// Status overrides the queue status derived from State (downloading, completed, failed, …):
+	// queued, paused, warning, delay, downloadClientUnavailable, ….
+	Status string
+	// TrackedStatus is trackedDownloadStatus: ok (default), warning or error.
+	TrackedStatus string
+	// StatusMessages are the *arr's messages about the entry, e.g. a completed download it refuses
+	// to import ({Title: <release>, Messages: ["Not an upgrade for existing movie file. …"]}).
+	StatusMessages []QueueStatusMessage
+	// ErrorMessage is the download client's error ("" = none).
+	ErrorMessage string
+}
+
+// QueueStatusMessage is one element of a queue record's statusMessages.
+type QueueStatusMessage struct {
+	Title    string
+	Messages []string
 }
 
 // AddQueueItem adds a download-queue entry for a movie (Radarr) or series/episode (Sonarr) and
@@ -891,6 +907,17 @@ func (e *Env) AddQueueItem(instance string, q QueueItem) (int64, error) {
 	case "failedPending", "failed":
 		qi.status = "failed"
 	}
+	if q.Status != "" {
+		qi.status = q.Status
+	}
+	qi.trackedStatus = q.TrackedStatus
+	if qi.trackedStatus == "" {
+		qi.trackedStatus = "ok"
+	}
+	for _, m := range q.StatusMessages {
+		qi.statusMessages = append(qi.statusMessages, QueueStatusMessage{Title: m.Title, Messages: append([]string{}, m.Messages...)})
+	}
+	qi.errorMessage = q.ErrorMessage
 	qi.downloadID = strings.ToUpper(hashHex(40, instance, strconv.FormatInt(qi.id, 10)))
 	if a.isRadarr() {
 		for _, m := range a.movies {

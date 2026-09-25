@@ -174,6 +174,7 @@ also lists is protected ([Several Plex servers](#several-plex-servers)).
 |---|---|
 | Name | Shown in the UI and in explanations ("tracked by Radarr 4K"). |
 | URL | Including the \*arr's URL base if it has one: `http://radarr:7878` or `https://proxy.example/radarr`. A missing URL base shows up as a redirect error on **Test**. |
+| External URL | Optional. The address your browser opens Radarr/Sonarr's start page at, with its URL base, when that differs from the URL Dupearr connects to (a reverse proxy, a domain name): `https://radarr.example.com`, not the address of a page in it such as a movie or the queue. Used only for the **Open in Radarr/Sonarr** and **Open queue** links on a duplicate's page; empty = the URL above. Dupearr never connects to it (so **Test** does not check it: a wrong value only shows up as a broken link). |
 | API key | Radarr/Sonarr → *Settings → General → Security → API Key*. Sent only in the `X-Api-Key` header. |
 | Verify TLS | As for Plex. |
 | Media servers it feeds | Shown once there are two or more media servers (Plex or Jellyfin). Tick the servers that see the same files as this instance (the same disks or share), never a server on another host that only holds copies of them, then tick the confirmation below the list. |

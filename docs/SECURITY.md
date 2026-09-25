@@ -392,6 +392,19 @@ not need to change them. They should stay that way.
   The Plex auth URL is allowlisted to `https://*.plex.tv`, and the popup opener is nulled. No
   source maps and no third-party origins. Stored-XSS payloads in Plex and *arr metadata rendered as
   text in a real browser.
+- **Links to Radarr/Sonarr** (added after the review). The "Open in Radarr/Sonarr" and "Open queue"
+  links are built by the server on every request from the instance's External URL or URL — only an
+  absolute `http(s)` URL with a host and without credentials; an External URL that is set but
+  unusable (only possible through a restored backup) gives no links rather than falling back — and
+  a page slug restricted to `[A-Za-z0-9_~-]`. The API key is never part of a link. The External URL
+  is never requested (no connection test, no API-key endpoint check), and a restore that changes it
+  is listed in the restore summary. The UI checks every href again (`http(s)`, no credentials) and
+  opens links with `target="_blank" rel="noopener noreferrer"`. The queue summaries shown with a
+  queue deferral (`arr_items`) are the *arr's own texts: rendered as text, masked with the log
+  redaction rules before they are shortened (a cut could otherwise drop the `@` or closing quote a
+  rule needs after a secret), length-capped when stored and again when read (a malformed restored value is
+  ignored); download ids, client and indexer names and output paths are never kept, although an
+  *arr message may name a file, as the *arr's own queue page does.
 - **Redirects and TLS.** The *arr and notification clients never follow redirects. TLS 1.2 is the
   minimum everywhere. plex.tv is always verified, and SMTP always verifies TLS.
 - **Event bus.** SSE fan-out never blocks on slow clients and never publishes connection objects

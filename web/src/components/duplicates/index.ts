@@ -1,5 +1,7 @@
 /** Duplicates list/detail building blocks — import from '@/components/duplicates'. */
 export * from './ApproveGroupDialog';
+export * from './arrLinks';
+export * from './ArrQueueNotice';
 export * from './BulkActionDialog';
 export * from './comparison';
 export * from './ComparisonTable';

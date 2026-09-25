@@ -652,11 +652,65 @@ export interface DuplicateGroup {
   stableCount: number;
   /** The scan's cross-server record (absent with one media server). */
   crossServer?: CrossServerRecord | null;
+  /**
+   * The Radarr movies / Sonarr series the last scan found for the group's copies, with a summary of
+   * their download queue while it defers the group (display only; absent for groups scanned before
+   * it existed).
+   */
+  arrItems?: ArrItemRef[] | null;
+}
+
+/** One *arr item of a group (models.ArrItemRef). */
+export interface ArrItemRef {
+  instanceId: Id;
+  instanceName: string;
+  kind: ArrKind;
+  /** movieId (Radarr) / seriesId (Sonarr). */
+  itemId: Id;
+  /** Page slug in the *arr web UI (Radarr: the TMDB id). */
+  titleSlug?: string;
+  /** Queue entries of the item when the group was scanned (absent/0 = none). */
+  queueCount?: number;
+  /** The first of them (at most 10). */
+  queue?: ArrQueueEntry[] | null;
+}
+
+/** One entry of an *arr's download/import queue, as the *arr shows it. */
+export interface ArrQueueEntry {
+  /** Release title. */
+  title: string;
+  /** queued, paused, downloading, completed, failed, warning, delay, downloadClientUnavailable, … */
+  status?: string;
+  /** downloading, importBlocked, importPending, importing, imported, failedPending, failed, ignored */
+  trackedDownloadState?: string;
+  /** ok, warning, error */
+  trackedDownloadStatus?: string;
+  /** The status in the *arr's own words, e.g. "Downloaded - Waiting to Import". */
+  label?: string;
+  /** The *arr's messages about the entry. */
+  messages?: string[] | null;
+  /** The download client's error. */
+  errorMessage?: string;
+}
+
+/** A group's *arr item in the *arr's web UI (GET /api/v1/duplicate/{id} arrLinks). */
+export interface ArrLink {
+  instanceId: Id;
+  /** The instance's current name. */
+  instanceName: string;
+  kind: ArrKind;
+  itemId: Id;
+  /** The movie/series page (absent when the page is not known yet: re-scan the group). */
+  itemUrl?: string;
+  /** Activity → Queue. */
+  queueUrl: string;
 }
 
 /** GET /api/v1/duplicate/{id} — full group plus its actions. */
 export interface DuplicateGroupDetail extends DuplicateGroup {
   actions: Action[];
+  /** Links to the group's Radarr/Sonarr items (optional: older servers do not send it). */
+  arrLinks?: ArrLink[] | null;
 }
 
 /** Disc facts of a DuplicateGroupSummaryFile (the list shows no paths). */
@@ -974,6 +1028,11 @@ export interface ArrInstance {
   verifyTls: boolean;
   enabled: boolean;
   tags: string[] | null;
+  /**
+   * Where a browser opens the instance (with its URL base), used only for "Open in Radarr/Sonarr"
+   * links; "" = url. Dupearr never connects to it.
+   */
+  externalUrl?: string;
   /** The media servers the instance feeds (docs/DECISIONS.md D11). */
   serverIds?: Id[] | null;
   /** Whether a person confirmed serverIds (with two or more servers, unconfirmed links match less). */

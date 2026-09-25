@@ -195,6 +195,7 @@ Plex finish (or *Analyze* the item in Plex); the group stays in review until the
 | `503` / "starting up" | The \*arr is still starting; Dupearr retries later. |
 | Queue run aborted with a "folder missing" (`409`) error | Radarr/Sonarr says the movie's root folder or the series folder does not exist, usually an unmounted disk or share. Dupearr stops the whole run on purpose. Fix the mount, then run *Process Queue* again. |
 | Copies show as "not tracked" although the \*arr has them | The \*arr reports a different path than Plex: add [path mappings](#path-mapping-mistakes) for the \*arr. |
+| **Open in Radarr/Sonarr** or **Open queue** opens the wrong address, or no link is shown | The links use the application's URL, which may be an address only Dupearr reaches (a container name). Set its **External URL** to the address your browser uses for the \*arr's start page, with the URL base (`https://radarr.example.com`). The \*arr may ask you to log in first. No link is shown while the External URL is not a plain `http(s)://` address; the movie/series link appears after the group's next scan. It is the page the \*arr named at that scan: if Sonarr renamed a series' page since (a metadata refresh can change its slug), the link finds no series until the group is scanned again (**Re-scan**). |
 | The \*arr downloads the removed copy again | Keep *Unmonitor when the keeper is elsewhere* on, make sure the removal went through the \*arr (method `arr`), and check the \*arr's quality cutoff (flag *cutoff not met*: it may keep upgrading). |
 
 ## Several Plex servers
@@ -294,6 +295,24 @@ known date added, the \*arr is still downloading/importing the title, or it was 
 is re-evaluated on the next scan. A copy no \*arr tracks is dated by when its file was put on disk
 (its change time): after `chown -R`/`chmod -R` on the media (e.g. Unraid's *New Permissions*) such
 copies wait the minimum age again.
+
+**A group stays *deferred* although the movie is downloaded.** The reason starts with "The \*arr has
+an active download or import for this title": Radarr (or Sonarr) still has an entry for the title in
+*Activity → Queue*, and Dupearr removes nothing while one is there, because an import could still
+replace or delete files. Open the group: it lists the entries (release, status and the \*arr's
+message) with **Open queue** and **Open in Radarr** links. A download that finished but that the
+\*arr will not import on its own — "Downloaded - Waiting to Import" or "Downloaded - Unable to
+Import Automatically", with a message — stays in the queue forever. With a message such as *Not an
+upgrade for existing movie file* the file you have is already as good: remove the entry in
+Radarr/Sonarr (*Remove from queue*, then *Removal Method*: *Remove from Download Client*, or *Ignore
+Download* to keep the download in the download client, e.g. to keep seeding; *Blocklist Release*:
+*Blocklist Only* so the release is not grabbed again). Use *Manual Import* only when you want that
+release instead of the file the \*arr has now (for instance after a title mismatch): importing
+replaces that file. The next scan (or **Re-scan** on the group) then evaluates the duplicate
+normally. Sonarr's queue is checked per series: any entry of a series defers every duplicate of that
+series. A group scanned before Dupearr recorded queue entries shows the queue link only; re-scan it
+to see them. If the links open the wrong address, set the application's **External URL**
+([configuration](configuration.md#radarr-and-sonarr-applications)).
 
 **A group is in *review*.** Open it: the reason is shown (suspect match, duration mismatch,
 unanalyzed, same file, kept copy unavailable, incomplete \*arr data, stale data). Fix the cause in

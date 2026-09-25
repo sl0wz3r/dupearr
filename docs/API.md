@@ -204,7 +204,8 @@ them back after reviewing). Only the settings this build knows are taken from th
 `allowDiscRemoval`, `keepPlayableCopy` (the backup's unsafe value is never applied), `mode`,
 `deletionMethods`, `recycleBinPath`, `recycleBinCleanupDays`, `minAgeHours`, `maxDeletionsPerRun`,
 `maxBytesPerRunGb`, `stableScansRequired`, `detectDiscs`, `historyRetentionDays`, `logLevel`,
-`logSizeLimit`, `mediaServers`, `arrInstances` and `tautulliInstances` (name → URL), `pathMappings`, `notifications`
+`logSizeLimit`, `mediaServers`, `arrInstances` and `tautulliInstances` (name → URL; an *arr's External URL as
+"(links open …)"), `pathMappings`, `notifications`
 (name and kind only) and `notificationDestinations` (the connections whose destination or
 credentials differ under the same name and kind; never the URLs or tokens).
 
@@ -405,6 +406,16 @@ PlexServer = { name, clientIdentifier, productVersion, owned, accessToken,
 | GET/PUT/DELETE | `/api/v1/arr/{id}` | PUT → 202 (tests first unless `?forceSave=true`): absent fields (incl. `tags`) keep their values; `kind` cannot change (400); 409 on a duplicate URL; a URL change re-points the instance (see Duplicates: approve 409) |
 | POST | `/api/v1/arr/test` | body `ArrInstance` → `{"appName","version","instanceName","recycleBin":"", "recycleBinCleanupDays":7}`; 400 (credentials, wrong application, redirect = missing URL base) / 502 (unreachable); error messages never carry the server's response body |
 
+`externalUrl` (optional, `""` = none): the address a browser opens the instance at, with its URL
+base (e.g. `https://radarr.example.com`), used only to build the "Open in Radarr/Sonarr" links of
+`GET /api/v1/duplicate/{id}`. Validated like `url` (http(s), a host, no credentials, query or
+fragment; trailing slashes removed; 400 on `externalUrl`), and it must be the start page: a path
+ending in a page of the *arr's web UI or its API (`…/movie/<x>`, `…/series/<x>`, `…/activity…`,
+`…/settings…`, `…/system…`, `…/wanted…`, `…/add…`, `…/calendar`, `…/api[/vN]`) → 400. Absent from a
+PUT it keeps its value, `""` clears it. Dupearr never sends a request to it: it takes no part in the connection test, the
+API-key endpoint check (changing only `externalUrl` keeps a masked `apiKey`) or the duplicate-URL
+check.
+
 `serverIds` / `linksConfirmed` (DECISIONS D11): the media servers the instance feeds (sorted,
 de-duplicated, never `null`) and whether a person confirmed them. An id that names no media server
 → 400 on `serverIds`. With exactly one enabled Plex server and no ids sent, the instance is linked
@@ -483,7 +494,7 @@ refused (400) with `direction: "lower"` on either criterion, or a `tolerancePerc
 |---|---|---|
 | GET | `/api/v1/duplicate` | *paged* `DuplicateGroupSummary`; filters `status` (comma list), `mediaType` (`movie`/`episode`), `libraryId`, `serverId`, `flag`, `search`. sortKey ∈ `title,lastSeenAt,firstSeenAt,reclaimableBytes,status` (default `lastSeenAt` descending) |
 | GET | `/api/v1/duplicate/stats` | `{"total","byStatus":{pending:…},"reclaimableBytes","reclaimedBytes","lastScan": ScanRun|null}` (`byStatus` lists every status). A **stable contract**: see [Duplicate statistics](#duplicate-statistics-stable-contract) |
-| GET | `/api/v1/duplicate/{id}` | full `DuplicateGroup` (models) + `"actions": Action[]` |
+| GET | `/api/v1/duplicate/{id}` | full `DuplicateGroup` (models) + `"actions": Action[]` + `"arrLinks": ArrLink[]` (never `null`; see below) |
 | POST | `/api/v1/duplicate/{id}/approve` | optional body `{"signature":"…"}` → 200 `Action[]` (queues ProcessQueue); 400 when invariants fail; 409 cases below |
 | POST | `/api/v1/duplicate/{id}/ignore` | optional body `{"addExclusion":false}` → group (queued removals are cancelled; `addExclusion` also adds a `group_key` exclusion); 409 when resolved |
 | POST | `/api/v1/duplicate/{id}/unignore` | → group (re-evaluated; its `group_key` exclusion is removed); 409 when not ignored |
@@ -636,6 +647,37 @@ under), `episodeEnd?` (the last episode of a multi-episode file), `reportOnly?: 
 `parts[].itemId?` (a stack part's own item id) and `parts[].shortcutOf?: string[]` (the `.strm`
 shortcuts Jellyfin lists that point to the file: it is protected). Jellyfin never reports whether a file exists:
 `parts[].exists` is `false` only when Dupearr found the mapped file gone from an existing folder.
+
+**Radarr/Sonarr items** (`DuplicateGroup.arrItems`, `arrLinks`; display only — nothing decides on
+them). `arrItems` are the Radarr movies / Sonarr series the last scan found for the group (the items
+its versions are tracked by, and the items whose queue made one of its titles busy), with the page
+slug and, while the item has download/import queue entries, a summary of them (at most 10 entries of
+the item, `queueCount` counts all; texts on one line, capped, secrets masked; never download ids,
+download client or indexer names or output paths). Absent for groups without *arr items and for
+groups stored before it existed, until their next scan. A group with flag `arr_queue_busy` is
+deferred for as long as its *arr item has **any** queue entry — also a completed download the *arr
+refuses to import ("Not an upgrade for existing movie file", `trackedDownloadState`
+`importPending`/`importBlocked` with `trackedDownloadStatus` `warning`), which stays in the *arr's
+queue until someone removes it there (or imports it by hand) —, and its `statusReason` names up to
+two entries:
+`The *arr has an active download or import for this title (Radarr: "<release>" <label> — <first
+message> · … · N more queue entries)` (the part in parentheses is at most 400 characters; without
+recorded entries the sentence ends before it). `arrLinks` are built on every request from the
+instance's current name and `externalUrl` (or `url`, with its URL base) — an item of an instance
+that no longer exists, or whose address is not an http(s) URL without credentials (a restored
+backup), gets none. `itemUrl` uses the page slug stored at the group's last scan and is absent while
+it is unknown: Radarr's slug is the TMDB id and never changes, but Sonarr can change a series' slug
+on a metadata refresh, and the link then finds no series until the group is scanned again.
+```ts
+ArrItemRef = { instanceId, instanceName, kind: "radarr"|"sonarr", itemId /* movieId | seriesId */,
+  titleSlug? /* Radarr: the TMDB id; Sonarr: e.g. "the-expanse" */, queueCount?, queue?: ArrQueueEntry[] }
+ArrQueueEntry = { title /* release */, status?, trackedDownloadState?, trackedDownloadStatus?,
+  label? /* the *arr's wording: "Downloaded - Waiting to Import", "Downloaded - Unable to Import
+  Automatically", "Downloading", "Paused", "Queued", "Pending", "Download failed", "Download warning",
+  "Import failed", … */, messages?: string[], errorMessage? }
+ArrLink = { instanceId, instanceName /* current */, kind, itemId,
+  itemUrl? /* <base>/movie/<titleSlug> | <base>/series/<titleSlug> */, queueUrl /* <base>/activity/queue */ }
+```
 
 **Other Plex servers** (`MediaVersion.otherServers`, `DuplicateGroup.crossServer`, DECISIONS D11;
 both absent with one enabled server). `otherServers` lists the media of other servers' items that

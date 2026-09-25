@@ -88,6 +88,9 @@ type movieResource struct {
 	Monitored   bool          `json:"monitored"`
 	Tags        []int64       `json:"tags"`
 	MovieFile   *fileResource `json:"movieFile"`
+	// TitleSlug names the movie's page in Radarr's web UI (/movie/<titleSlug>): the TMDB id as a
+	// string in Radarr v5 and v6 (MovieResource.cs). Only used for links.
+	TitleSlug string `json:"titleSlug"`
 }
 
 // trackedFileID returns the id of the file Radarr tracks for m, or 0 when it has none.
@@ -115,6 +118,9 @@ type seriesResource struct {
 	Statistics *struct {
 		EpisodeFileCount *int `json:"episodeFileCount"`
 	} `json:"statistics"`
+	// TitleSlug names the series' page in Sonarr's web UI (/series/<titleSlug>), e.g. "the-expanse"
+	// (from Sonarr's metadata, so it cannot be derived from an id). Only used for links.
+	TitleSlug string `json:"titleSlug"`
 }
 
 // mayHaveFiles reports whether the series can have episode files (unknown statistics = maybe).
@@ -140,13 +146,50 @@ type tagResource struct {
 
 // queuePage is PagingResource<QueueResource> (only the fields Dupearr needs).
 type queuePage struct {
-	Page         int `json:"page"`
-	PageSize     int `json:"pageSize"`
-	TotalRecords int `json:"totalRecords"`
-	Records      []struct {
-		MovieID  int64 `json:"movieId"`
-		SeriesID int64 `json:"seriesId"`
-	} `json:"records"`
+	Page         int           `json:"page"`
+	PageSize     int           `json:"pageSize"`
+	TotalRecords int           `json:"totalRecords"`
+	Records      []queueRecord `json:"records"`
+}
+
+// queueRecord is the subset of QueueResource Dupearr reads (Radarr/Sonarr
+// src/*.Api.V3/Queue/QueueResource.cs). Only the item ids are decoded strictly: they decide which
+// groups are deferred. The other fields only describe the entry to a person, so they are decoded
+// leniently: an unexpected value is dropped instead of failing the queue read, which would send
+// every group of the media type to review.
+type queueRecord struct {
+	MovieID  int64 `json:"movieId"`
+	SeriesID int64 `json:"seriesId"`
+	// Title is the release title; Status (QueueStatus), TrackedDownloadState and
+	// TrackedDownloadStatus are camelCase enum names (STJson.cs).
+	Title                 looseString `json:"title"`
+	Status                looseString `json:"status"`
+	TrackedDownloadState  looseString `json:"trackedDownloadState"`
+	TrackedDownloadStatus looseString `json:"trackedDownloadStatus"`
+	// StatusMessages is [{title, messages[]}] (TrackedDownloadStatusMessage), read best effort.
+	StatusMessages json.RawMessage `json:"statusMessages"`
+	ErrorMessage   looseString     `json:"errorMessage"`
+}
+
+// statusMessage is one element of QueueResource.statusMessages.
+type statusMessage struct {
+	Title    looseString     `json:"title"`
+	Messages json.RawMessage `json:"messages"`
+}
+
+// looseString decodes a JSON string; any other JSON value (a number, null, an object) decodes to
+// "" instead of failing the surrounding value.
+type looseString string
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (s *looseString) UnmarshalJSON(b []byte) error {
+	// Display-only text: a value of another type is dropped, never an error.
+	var v string
+	if json.Unmarshal(b, &v) != nil {
+		v = ""
+	}
+	*s = looseString(v)
+	return nil
 }
 
 // mediaManagementResource is the subset of MediaManagementConfigResource.

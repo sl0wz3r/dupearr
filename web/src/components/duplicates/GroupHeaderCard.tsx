@@ -76,7 +76,8 @@ export function GroupHeaderCard({ group, libraryNames, profileName }: GroupHeade
               Jellyfin
             </Badge>
           )}
-          {group.statusReason && <span className="text-sm text-fg">{group.statusReason}</span>}
+          {/* A reason can quote a release title with no space in it: let it wrap instead of widening the page. */}
+          {group.statusReason && <span className="min-w-0 text-sm break-words text-fg">{group.statusReason}</span>}
         </div>
 
         {flags.length > 0 && (

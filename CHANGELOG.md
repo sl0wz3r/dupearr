@@ -6,6 +6,39 @@ All notable changes to Dupearr are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Links to Radarr and Sonarr.** A duplicate's page links each copy an \*arr tracks to its movie
+  (Radarr) or series (Sonarr) page — *Open in Radarr* in the comparison's \*arr row — and, while
+  the \*arr's download queue defers the duplicate, to the instance's *Activity → Queue*. Links
+  follow the \*arr's URL base and open in a new tab; the API key is never part of a link. Existing
+  duplicates get the movie/series link, and their queue entries, with their next scan (or
+  **Re-scan** on the group); the queue link works at once. API: `GET /api/v1/duplicate/{id}`
+  answers `arrLinks` (additive).
+- **External URL** for an application (*Settings → Applications → Radarr/Sonarr*): optional, the
+  address your browser opens the \*arr's start page at (a reverse proxy or domain name, with its
+  URL base; the address of a page in it, such as a movie or the queue, is refused).
+  It is used only for the links above — empty = the connection URL — and Dupearr never connects
+  to it. API field `externalUrl` (additive; included in backups, and a restore that changes it is
+  listed in the restore summary).
+- **Why the \*arr's queue defers a duplicate.** The group page lists the queue entries the last
+  scan saw (release, status in the \*arr's words such as *Downloaded - Waiting to Import*, and the
+  \*arr's message such as *Not an upgrade for existing movie file*), explains that a completed
+  download the \*arr will not import stays in its queue — and the duplicate deferred — until it is
+  removed there (or imported by hand, which replaces the file the \*arr has), and notes that
+  Sonarr's queue is checked per series. The explanation calls a group deferred only when it is;
+  a group in review shows the queue entries too. API field
+  `DuplicateGroup.arrItems` (additive, display only).
+
+### Changed
+
+- The deferral reason of a group whose \*arr has a queue entry for the title now names up to two
+  entries, e.g. *The \*arr has an active download or import for this title (Radarr:
+  "Toy.Story.5.2026.2160p.WEB-DL" Downloaded - Waiting to Import — Not an upgrade for existing movie
+  file…)*. What defers is unchanged: any queue entry, whatever its state, still defers the group
+  (an import can still replace or delete files). Groups scanned before this version keep the short
+  reason until their next scan.
+
 ## [0.3.0] - 2026-09-25
 
 ### Added

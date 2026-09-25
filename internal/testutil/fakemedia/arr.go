@@ -1467,13 +1467,20 @@ type queueJSON struct {
 	Status                              string           `json:"status"`
 	TrackedDownloadStatus               string           `json:"trackedDownloadStatus"`
 	TrackedDownloadState                string           `json:"trackedDownloadState"`
-	StatusMessages                      []any            `json:"statusMessages"`
+	StatusMessages                      []statusMsgJSON  `json:"statusMessages"`
+	ErrorMessage                        string           `json:"errorMessage,omitempty"`
 	DownloadID                          string           `json:"downloadId"`
 	Protocol                            string           `json:"protocol"`
 	DownloadClient                      string           `json:"downloadClient"`
 	DownloadClientHasPostImportCategory bool             `json:"downloadClientHasPostImportCategory"`
 	Indexer                             string           `json:"indexer"`
 	OutputPath                          string           `json:"outputPath,omitempty"`
+}
+
+// statusMsgJSON is TrackedDownloadStatusMessage.
+type statusMsgJSON struct {
+	Title    string   `json:"title"`
+	Messages []string `json:"messages"`
 }
 
 func (h *arrAPI) queue(w http.ResponseWriter, r *http.Request) {
@@ -1505,9 +1512,12 @@ func (h *arrAPI) queue(w http.ResponseWriter, r *http.Request) {
 			ID: qi.id, MovieID: qi.movieID, SeriesID: qi.seriesID, EpisodeID: qi.episodeID, SeasonNumber: qi.season,
 			Languages: languagesJSON([]string{"English"}), Quality: qualityModelJSON{Quality: qi.quality, Revision: revisionJSON{Version: 1}},
 			CustomFormats: []cfRefJSON{}, Size: float64(qi.size), Title: qi.title, Sizeleft: float64(qi.sizeLeft),
-			Added: arrTime(qi.added), Status: qi.status, TrackedDownloadStatus: "ok", TrackedDownloadState: qi.state,
-			StatusMessages: []any{}, DownloadID: qi.downloadID, Protocol: qi.protocol, DownloadClient: qi.client,
-			Indexer: qi.indexer, OutputPath: RemoteRoot + "/torrents/" + qi.title,
+			Added: arrTime(qi.added), Status: qi.status, TrackedDownloadStatus: qi.trackedStatus, TrackedDownloadState: qi.state,
+			StatusMessages: []statusMsgJSON{}, ErrorMessage: qi.errorMessage, DownloadID: qi.downloadID, Protocol: qi.protocol,
+			DownloadClient: qi.client, Indexer: qi.indexer, OutputPath: RemoteRoot + "/torrents/" + qi.title,
+		}
+		for _, m := range qi.statusMessages {
+			j.StatusMessages = append(j.StatusMessages, statusMsgJSON{Title: m.Title, Messages: append([]string{}, m.Messages...)})
 		}
 		if qi.sizeLeft > 0 {
 			j.Timeleft = "00:10:00"

@@ -384,8 +384,15 @@ func settingsChanges(ctx context.Context, r *rebuild, sum *RestoreSummary) error
 			THEN ' (separate storage)' ELSE '' END FROM %s.media_servers ORDER BY 1`, schema)
 	}
 	arrsQuery := func(schema string) string {
+		// The External URL is where the "Open in Radarr/Sonarr" links of the UI lead (Dupearr never
+		// requests it): a restore that changes it is listed, so links to another site do not
+		// arrive unnoticed.
+		links := ""
+		if r.hasColumn(ctx, schema, "arr_instances", "external_url") {
+			links = ` || CASE WHEN trim(a.external_url) <> '' THEN ' (links open ' || trim(a.external_url) || ')' ELSE '' END`
+		}
 		if !r.hasColumn(ctx, schema, "arr_instances", "links_confirmed") || !r.hasTable(ctx, schema, "arr_server_links") {
-			return fmt.Sprintf(`SELECT kind || ' ' || name || ' → ' || url FROM %s.arr_instances ORDER BY 1`, schema)
+			return fmt.Sprintf(`SELECT a.kind || ' ' || a.name || ' → ' || a.url%s FROM %s.arr_instances a ORDER BY 1`, links, schema)
 		}
 		// Confirmed links only matter with two or more enabled servers of a supported kind (one
 		// server: every instance feeds it), so a one-server installation lists no change.
@@ -395,7 +402,7 @@ func settingsChanges(ctx context.Context, r *rebuild, sum *RestoreSummary) error
 			THEN ' (feeds ' || COALESCE((SELECT group_concat(n, ', ') FROM (SELECT ms.name AS n
 				FROM %[1]s.arr_server_links l JOIN %[1]s.media_servers ms ON ms.id = l.server_id
 				WHERE l.arr_id = a.id ORDER BY ms.name)), 'no media server') || ', confirmed)'
-			ELSE '' END FROM %[1]s.arr_instances a ORDER BY 1`, schema, supportedKindsSQL())
+			ELSE '' END%[3]s FROM %[1]s.arr_instances a ORDER BY 1`, schema, supportedKindsSQL(), links)
 	}
 	for _, l := range []struct {
 		name, table, query string

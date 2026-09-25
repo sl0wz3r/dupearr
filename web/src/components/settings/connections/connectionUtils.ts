@@ -74,6 +74,19 @@ export function arrUrlCheck(url: URL): string | null {
   return null;
 }
 
+/**
+ * Radarr/Sonarr External URL: the start page's address (with the URL base), never a page in it or
+ * the API. An address copied from the browser on a movie or queue page would get every link's
+ * route appended to it (…/movie/603/movie/603); nothing tests this address, so say it here. The
+ * server refuses the same paths.
+ */
+export function arrWebUrlCheck(url: URL): string | null {
+  if (/\/(?:api(?:\/v\d+)?|(?:movie|series)\/[^/]+|(?:activity|settings|system|wanted|add|calendar)(?:\/[^/]+)?)\/?$/i.test(url.pathname)) {
+    return 'Enter the address of the start page (with its URL base, if any), not of a page in it, e.g. https://radarr.example.com';
+  }
+  return null;
+}
+
 /** Lower-case `host[:port]` of a URL (the port only when it isn't the scheme default), or null. */
 export function urlHost(value: string | null | undefined): string | null {
   const s = (value ?? '').trim();

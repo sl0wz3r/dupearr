@@ -18,15 +18,18 @@ package arr
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/sl0wz3r/dupearr/internal/logging"
 	"github.com/sl0wz3r/dupearr/internal/models"
 )
 
@@ -118,6 +121,9 @@ type TrackedFile struct {
 	Episodes []int // episode numbers covered (multi-episode files → several)
 	// MediaInfo is the *arr's ffprobe summary (nil when the *arr has not analysed the file).
 	MediaInfo *MediaInfo
+	// TitleSlug names the item's page in the *arr's web UI (movie/series titleSlug; see
+	// ItemWebURL). "" when the *arr did not send one. Only used for links.
+	TitleSlug string
 }
 
 // TrackedFileRef is what one moviefile/episodefile row currently names (Client.File): the file's
@@ -498,10 +504,84 @@ func (c *Client) MediaManagement(ctx context.Context) (*MediaManagement, error) 
 	return &MediaManagement{RecycleBin: strings.TrimSpace(mm.RecycleBin), RecycleBinCleanupDays: mm.RecycleBinCleanupDays}, nil
 }
 
-// QueueItemIDs returns the movie ids (Radarr) or series ids (Sonarr) that currently have entries in
-// the download/import queue (GET /api/v3/queue, all pages). Groups whose *arr item is busy are
-// deferred by the scanner (docs/DECISIONS.md D3).
-func (c *Client) QueueItemIDs(ctx context.Context) (map[int64]bool, error) {
+// QueueItem is what the download/import queue (the *arr's Activity → Queue) holds for one movie
+// (Radarr) or series (Sonarr) — for Sonarr the entries of every episode of the series.
+type QueueItem struct {
+	// Count is the number of queue records of the item (≥ 1).
+	Count int
+	// Entries summarizes the first records: at most models.MaxArrQueueEntries, fewer once the whole
+	// queue walk kept maxQueueEntriesKept of them (Count still counts every record).
+	Entries []QueueEntry
+}
+
+// QueueEntry summarizes one queue record the way the *arr's queue page shows it. Texts are on one
+// line, secrets masked and length-capped (queueText, models caps). Download ids, the download
+// client and indexer names and the output path are never kept; Messages are the *arr's own status
+// messages (they may name a file, as the *arr's page does).
+type QueueEntry struct {
+	Title                 string   // release title
+	Status                string   // QueueStatus: queued, paused, downloading, completed, failed, warning, delay, downloadClientUnavailable, …
+	TrackedDownloadState  string   // downloading, importBlocked, importPending, importing, imported, failedPending, failed, ignored
+	TrackedDownloadStatus string   // ok, warning, error
+	Messages              []string // statusMessages, "<title>: <message>" unless the title is the release's
+	ErrorMessage          string   // the download client's error
+}
+
+// Label is the status the *arr's queue page shows for e, in its English wording (Radarr v5.28
+// frontend/src/Activity/Queue/QueueStatus.tsx with src/NzbDrone.Core/Localization/Core/en.json;
+// Sonarr v4.0.20 is identical): e.g. "Downloaded - Waiting to Import" for a completed download the
+// *arr has not imported, or "Downloaded - Unable to Import Automatically".
+func (e QueueEntry) Label() string {
+	status, state := strings.ToLower(e.Status), strings.ToLower(e.TrackedDownloadState)
+	label := "Downloading"
+	switch status {
+	case "paused":
+		label = "Paused"
+	case "queued":
+		label = "Queued"
+	case "completed":
+		label = "Downloaded"
+		switch state {
+		case "importblocked":
+			label += " - Unable to Import Automatically"
+		case "importpending":
+			label += " - Waiting to Import"
+		case "importing":
+			label += " - Importing"
+		case "failedpending":
+			label += " - Waiting to Process"
+		}
+	case "delay":
+		label = "Pending"
+	case "downloadclientunavailable":
+		label = "Pending - Download client is unavailable"
+	case "failed":
+		label = "Download failed"
+	case "warning":
+		// The *arr appends the error message, which QueueEntry keeps separately.
+		label = "Download warning"
+	}
+	if strings.EqualFold(e.TrackedDownloadStatus, "error") {
+		if status == "completed" {
+			label = "Import failed"
+		} else {
+			label = "Download failed"
+		}
+	}
+	return label
+}
+
+// maxQueueEntriesKept bounds the entries one Queue call keeps in total (a queue of thousands of
+// records would otherwise keep all of their texts); counts are never capped.
+const maxQueueEntriesKept = 2000
+
+// Queue returns, per movie id (Radarr) or series id (Sonarr), the entries it currently has in the
+// download/import queue (GET /api/v3/queue, all pages; records of unknown items are not requested).
+// Groups whose *arr item has any entry are deferred by the scanner, whatever the entry's state
+// (docs/DECISIONS.md D3 A4): a completed download the *arr refuses to import stays in its queue
+// until someone removes it there, and the summaries let the UI say so. A failed or partial walk
+// returns an error and no items.
+func (c *Client) Queue(ctx context.Context) (map[int64]*QueueItem, error) {
 	if err := c.check(); err != nil {
 		return nil, err
 	}
@@ -509,7 +589,8 @@ func (c *Client) QueueItemIDs(ctx context.Context) (map[int64]bool, error) {
 	if c.inst.Kind == models.ArrSonarr {
 		unknownParam = "includeUnknownSeriesItems"
 	}
-	ids := make(map[int64]bool)
+	items := make(map[int64]*QueueItem)
+	kept := 0
 	for page := 1; ; page++ {
 		if page > maxQueuePages {
 			return nil, fmt.Errorf("arr: queue has more than %d pages; refusing to continue", maxQueuePages)
@@ -523,13 +604,24 @@ func (c *Client) QueueItemIDs(ctx context.Context) (map[int64]bool, error) {
 		if err := c.do(ctx, request{method: http.MethodGet, path: "queue", query: q}, &p); err != nil {
 			return nil, err
 		}
-		for _, r := range p.Records {
+		for i := range p.Records {
+			r := &p.Records[i]
 			id := r.MovieID
 			if c.inst.Kind == models.ArrSonarr {
 				id = r.SeriesID
 			}
-			if id > 0 {
-				ids[id] = true
+			if id <= 0 {
+				continue
+			}
+			it := items[id]
+			if it == nil {
+				it = &QueueItem{}
+				items[id] = it
+			}
+			it.Count++
+			if len(it.Entries) < models.MaxArrQueueEntries && kept < maxQueueEntriesKept {
+				it.Entries = append(it.Entries, r.entry())
+				kept++
 			}
 		}
 		size := p.PageSize
@@ -540,7 +632,94 @@ func (c *Client) QueueItemIDs(ctx context.Context) (map[int64]bool, error) {
 		// a missing (0) total with a full page must not hide the next pages, or a busy item would
 		// not be deferred.
 		if len(p.Records) == 0 || len(p.Records) < size || (p.TotalRecords > 0 && page*size >= p.TotalRecords) {
-			return ids, nil
+			return items, nil
 		}
 	}
+}
+
+// QueueItemIDs returns the movie ids (Radarr) or series ids (Sonarr) that currently have entries in
+// the download/import queue: Queue reduced to its item ids.
+func (c *Client) QueueItemIDs(ctx context.Context) (map[int64]bool, error) {
+	items, err := c.Queue(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ids := make(map[int64]bool, len(items))
+	for id := range items {
+		ids[id] = true
+	}
+	return ids, nil
+}
+
+// entry summarizes a queue record (QueueEntry).
+func (r *queueRecord) entry() QueueEntry {
+	title := queueText(string(r.Title), models.MaxArrQueueTitleRunes)
+	return QueueEntry{
+		Title:                 title,
+		Status:                queueWord(r.Status),
+		TrackedDownloadState:  queueWord(r.TrackedDownloadState),
+		TrackedDownloadStatus: queueWord(r.TrackedDownloadStatus),
+		Messages:              statusMessages(r.StatusMessages, title),
+		ErrorMessage:          queueText(string(r.ErrorMessage), models.MaxArrQueueTextRunes),
+	}
+}
+
+// maxQueueRawRunes bounds a queue text before its secrets are masked. Anything past it is cut by
+// the much shorter final cap anyway.
+const maxQueueRawRunes = 8192
+
+// queueText returns an *arr text for a queue summary: on one line, secrets masked
+// (logging.Redact: the texts come from the *arr and its download client) and at most limit runes.
+// Masking comes before the cap: several rules need the token after a secret (the '@' after URL
+// user info, a JSON field's closing quote), so a cap that cut it would leave the secret unmasked.
+func queueText(s string, limit int) string {
+	return models.CleanArrText(logging.Redact(models.CleanArrText(s, maxQueueRawRunes)), limit)
+}
+
+// queueWord cleans an enum value (camelCase names; anything longer is not one).
+func queueWord(s looseString) string {
+	return queueText(string(s), 64)
+}
+
+// statusMessages flattens statusMessages ([{title, messages[]}]) into at most
+// models.MaxArrQueueMessages distinct lines, best effort: an element of another shape is skipped.
+// The *arr titles a message group with the release title (nothing to add) or, when several files
+// of the download were rejected, with the file's name, which is kept ("<file>: <message>").
+func statusMessages(raw json.RawMessage, release string) []string {
+	var list []json.RawMessage
+	if len(raw) == 0 || json.Unmarshal(raw, &list) != nil {
+		return nil
+	}
+	var out []string
+	add := func(m string) {
+		if m = models.CleanArrText(m, models.MaxArrQueueTextRunes); m != "" && len(out) < models.MaxArrQueueMessages && !slices.Contains(out, m) {
+			out = append(out, m)
+		}
+	}
+	for _, el := range list {
+		var sm statusMessage
+		if json.Unmarshal(el, &sm) != nil {
+			continue
+		}
+		var msgs []looseString
+		if len(sm.Messages) > 0 && json.Unmarshal(sm.Messages, &msgs) != nil {
+			msgs = nil
+		}
+		title := queueText(string(sm.Title), models.MaxArrQueueTitleRunes)
+		prefix := ""
+		if title != "" && title != release {
+			prefix = title + ": "
+		}
+		added := false
+		for _, m := range msgs {
+			if m := queueText(string(m), models.MaxArrQueueTextRunes); m != "" {
+				add(prefix + m)
+				added = true
+			}
+		}
+		if !added && prefix != "" {
+			add(title)
+		}
+	}
+	return out
 }

@@ -75,6 +75,17 @@ Severity key from research: C = data loss, H = wrong keeper / re-download loop.
 - **Queue check** (A4): new `QueueItemIDs(ctx) (map[int64]bool, error)` → movie/series ids with
   active queue items (`GET /api/v3/queue`, paged, `pageSize=200`, loop all pages). Groups with a
   busy *arr item are **deferred** (flag `arr_queue_busy`).
+  *Changed:* the scanner reads `Queue(ctx)` (the same walk; `QueueItemIDs` is its ids), which also
+  summarizes each busy item's entries (release title, status, tracked download state/status, the
+  *arr's status messages, the download client's error; never download ids, client/indexer names or
+  output paths; secrets masked, then capped). **Any** entry still defers, whatever its state: a
+  completed download the *arr refuses to import ("Not an upgrade for existing movie file",
+  `importPending`/`importBlocked`) can still be imported by hand and replace or delete files, so it
+  stays deferred until the entry leaves the *arr's queue. The summaries are display only
+  (`DuplicateGroup.arrItems`, the deferral reason, the group page with links to the *arr's
+  movie/series page and Activity → Queue); nothing decides on them. For Sonarr any entry of a series
+  defers every episode group of the series (unchanged; per-episode deferral would need the entries'
+  `episodeId`).
 - **Keep tag** (A9): items tagged `dupearr-keep` (configurable) in the *arr are protected.
   `TrackedFile.Info.Tags` holds tag labels (resolve ids via `GET /api/v3/tag`).
 - `qualityCutoffNotMet` on the keeper's tracked file ⇒ informational flag `arr_cutoff_unmet`

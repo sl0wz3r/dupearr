@@ -139,10 +139,12 @@ func summarize(g *models.DuplicateGroup) duplicateSummary {
 	return s
 }
 
-// duplicateDetail is GET /api/v1/duplicate/{id}: the full group plus its actions.
+// duplicateDetail is GET /api/v1/duplicate/{id}: the full group plus its actions and the links to
+// its Radarr/Sonarr items (never null).
 type duplicateDetail struct {
 	models.DuplicateGroup
-	Actions []models.Action `json:"actions"`
+	Actions  []models.Action `json:"actions"`
+	ArrLinks []arrWebLink    `json:"arrLinks"`
 }
 
 // displayTitle is a human title for history entries ("Show - S01E02 - Title" / "Title (Year)").
@@ -287,7 +289,12 @@ func (s *Server) handleDuplicate(w http.ResponseWriter, r *http.Request) {
 		s.writeErr(w, r, err)
 		return
 	}
-	s.writeJSON(w, http.StatusOK, duplicateDetail{DuplicateGroup: *g, Actions: actions})
+	links, err := s.arrWebLinks(r.Context(), g)
+	if err != nil {
+		s.writeErr(w, r, err)
+		return
+	}
+	s.writeJSON(w, http.StatusOK, duplicateDetail{DuplicateGroup: *g, Actions: actions, ArrLinks: links})
 }
 
 // ---------------------------------------------------------------------------

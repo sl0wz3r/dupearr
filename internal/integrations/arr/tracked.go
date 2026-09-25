@@ -277,6 +277,7 @@ func (c *Client) radarrTrackedFile(m *movieResource, f *fileResource, tags map[i
 		TmdbID:    m.TmdbID,
 		ImdbID:    strings.TrimSpace(m.ImdbID),
 		MediaInfo: parseMediaInfo(f.MediaInfo),
+		TitleSlug: strings.TrimSpace(m.TitleSlug),
 	}
 }
 
@@ -451,6 +452,7 @@ func (c *Client) sonarrTrackedFile(s *seriesResource, f *fileResource, eps []epi
 		Season:    season,
 		Episodes:  numbers,
 		MediaInfo: parseMediaInfo(f.MediaInfo),
+		TitleSlug: strings.TrimSpace(s.TitleSlug),
 	}
 }
 

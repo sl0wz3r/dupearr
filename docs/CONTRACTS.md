@@ -212,6 +212,23 @@ const FlagReportOnly = "report_only" // a version is report-only: the group is p
 ```
 Every new field is omitted while empty, so Plex rows and API answers keep their bytes.
 
+Added (links to Radarr/Sonarr, explained queue deferrals; migration 0005). Display only: no
+decision, status or flag reads these.
+```go
+// ArrInstance: ExternalURL string `json:"externalUrl"` ("" = URL; only for "Open in" links, never requested)
+// DuplicateGroup: ArrItems []ArrItemRef `json:"arrItems,omitempty"` (duplicate_groups.arr_items; '' = none)
+type ArrItemRef struct { InstanceID int64; InstanceName string; Kind ArrKind; ItemID int64 // movieId | seriesId
+    TitleSlug string   // the *arr web UI page slug ("" = unknown)
+    QueueCount int     // queue entries of the item when scanned (0 = none)
+    Queue []ArrQueueEntry } // at most MaxArrQueueEntries
+type ArrQueueEntry struct { Title, Status, TrackedDownloadState, TrackedDownloadStatus string
+    Label string        // the *arr's own wording, e.g. "Downloaded - Waiting to Import"
+    Messages []string; ErrorMessage string } // never download ids, client/indexer names or output paths
+func CleanArrText(s string, limit int) string        // one line, control/format characters dropped, capped with "…"
+func SanitizeArrItems(items []ArrItemRef) []ArrItemRef // the caps (MaxArrItems 20, MaxArrQueueEntries 10,
+    // MaxArrQueueMessages 5, titles 200 / messages 300 runes); applied when stored and when read
+```
+
 ## internal/mediaserver (added, issue #4 Phase 0 — types and contracts only; imports models)
 ```go
 // The listing types (fields unchanged from the Plex era; integrations/plex aliases them).
@@ -422,6 +439,7 @@ type TrackedFile struct {
     Season      int
     Episodes    []int               // episode numbers covered (multi-episode files → several)
     MediaInfo   *MediaInfo          // added: the *arr's ffprobe summary (nil when not analysed)
+    TitleSlug   string              // added: movie/series titleSlug (web UI page; Radarr: the TMDB id), "" when absent
 }
 type TrackedFilter struct { TmdbIDs map[int]bool; ImdbIDs map[string]bool; TvdbIDs map[int]bool } // nil maps = no filter
 // TrackedFiles returns every file the instance tracks (Radarr: from /movie embedded movieFile;
@@ -441,7 +459,22 @@ type ExclusionTarget struct { TmdbID int; TvdbID int; Title string; Year int }
 func (c *Client) AddExclusion(ctx context.Context, t ExclusionTarget) error
 type MediaManagement struct { RecycleBin string; RecycleBinCleanupDays int }
 func (c *Client) MediaManagement(ctx context.Context) (*MediaManagement, error)
-func (c *Client) QueueItemIDs(ctx context.Context) (map[int64]bool, error) // movie/series ids with queue entries
+func (c *Client) QueueItemIDs(ctx context.Context) (map[int64]bool, error) // movie/series ids with queue entries (Queue's ids)
+// added: the queue by movie/series id (all pages; a failed or partial walk is an error). Any entry makes
+// the item busy (D3 A4); the summaries are display only, decoded leniently (a malformed summary field
+// never fails the read), secrets masked (logging.Redact) before the texts are capped (models caps; at
+// most 2000 entries kept per call, counts exact).
+type QueueItem struct { Count int; Entries []QueueEntry }
+type QueueEntry struct { Title, Status, TrackedDownloadState, TrackedDownloadStatus string
+    Messages []string; ErrorMessage string } // statusMessages flattened ("<file>: <message>" unless titled with the release)
+func (e QueueEntry) Label() string // the *arr queue page's English status ("Downloaded - Waiting to Import", …)
+func (c *Client) Queue(ctx context.Context) (map[int64]*QueueItem, error)
+// added: links into the *arr web UI (Radarr v5/v6 and Sonarr v4 frontend routes, all under the URL base)
+func WebBase(inst models.ArrInstance) (string, bool)               // ExternalURL, else URL; http(s), host, no credentials;
+    // query/fragment/trailing slash dropped; an unusable External URL gives no links (no fallback)
+func ItemWebURL(base string, kind models.ArrKind, slug string) string // base/movie/<slug> | base/series/<slug>;
+    // "" unless slug is 1–200 of [A-Za-z0-9_~-] (the *arr serves deep links only for paths without '.')
+func QueueWebURL(base string) string                                // base/activity/queue
 
 var ErrUnauthorized = errors.New("arr: unauthorized (check API key)")
 var ErrNotFound     = errors.New("arr: not found")
@@ -664,8 +697,12 @@ type PlexClient interface {
 }
 type ArrClient interface {
     TrackedFiles(ctx context.Context, f arr.TrackedFilter) ([]arr.TrackedFile, error)
-    QueueItemIDs(ctx context.Context) (map[int64]bool, error)
+    Queue(ctx context.Context) (map[int64]*arr.QueueItem, error) // changed: was QueueItemIDs; busy = any entry
 }
+// The scan stores DuplicateGroup.ArrItems (added): the items the group's versions are tracked by and
+// the items that made one of its media-server items busy, with their slugs and — busy items only —
+// the queue summaries (secrets masked with logging.Redact). The engine words the arr_queue_busy
+// deferral from them; the flag is set exactly as before.
 // WatchClient (added, D10) is the subset of *tautulli.Client the scan reads play history with.
 type WatchClient interface {
     Info(ctx context.Context) (*tautulli.Info, error)
@@ -1180,7 +1217,8 @@ in one transaction (added, D11; Update keeps the stored links when `ServerIDs` i
 `MediaServerRepo.Create`/`Update` of an enabled, non-separate Plex server that was not one before
 sets `links_confirmed = 0` on the instances not linked to it, in the same transaction, when two or
 more Plex servers are then enabled (a confirmation only covers the servers it could choose from); and
-`GroupRepo.Upsert` stores `CrossServer` as given. Added during implementation — atomic operations so concurrent writers
+`GroupRepo.Upsert` stores `CrossServer` as given (and `ArrItems`, capped; a stored value that cannot
+be read is ignored on read, never an error — added with migration 0005). Added during implementation — atomic operations so concurrent writers
 (a scan, the executor, the API) can never overwrite each other's status changes:
 ```go
 type GroupRepo interface {

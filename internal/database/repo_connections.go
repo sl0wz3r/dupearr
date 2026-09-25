@@ -361,7 +361,7 @@ func (r libraryRepo) Update(ctx context.Context, l *models.Library) error {
 
 type arrInstanceRepo struct{ d *DB }
 
-const arrInstanceColumns = `id, name, kind, url, api_key, verify_tls, enabled, tags, links_confirmed, created_at, updated_at`
+const arrInstanceColumns = `id, name, kind, url, api_key, verify_tls, enabled, tags, links_confirmed, external_url, created_at, updated_at`
 
 func scanArrInstance(s scanner) (models.ArrInstance, error) {
 	var (
@@ -369,7 +369,7 @@ func scanArrInstance(s scanner) (models.ArrInstance, error) {
 		tags, created, updated string
 	)
 	if err := s.Scan(&a.ID, &a.Name, &a.Kind, &a.URL, &a.APIKey, &a.VerifyTLS, &a.Enabled, &tags,
-		&a.LinksConfirmed, &created, &updated); err != nil {
+		&a.LinksConfirmed, &a.ExternalURL, &created, &updated); err != nil {
 		return models.ArrInstance{}, err
 	}
 	a.ServerIDs = []int64{} // filled by loadArrLinks
@@ -486,10 +486,10 @@ func (r arrInstanceRepo) Create(ctx context.Context, a *models.ArrInstance) erro
 	var id int64
 	err = r.d.write(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `INSERT INTO arr_instances
-			(name, kind, url, api_key, verify_tls, enabled, tags, links_confirmed, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			(name, kind, url, api_key, verify_tls, enabled, tags, links_confirmed, external_url, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			a.Name, a.Kind, a.URL, a.APIKey, b2i(a.VerifyTLS), b2i(a.Enabled), tags, b2i(a.LinksConfirmed),
-			fmtTime(created), fmtTime(now))
+			a.ExternalURL, fmtTime(created), fmtTime(now))
 		if err != nil {
 			return wrap(err, "create arr instance")
 		}
@@ -516,9 +516,11 @@ func (r arrInstanceRepo) Update(ctx context.Context, a *models.ArrInstance) erro
 	now := nowUTC()
 	err = r.d.write(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE arr_instances SET
-			name = ?, kind = ?, url = ?, api_key = ?, verify_tls = ?, enabled = ?, tags = ?, links_confirmed = ?, updated_at = ?
+			name = ?, kind = ?, url = ?, api_key = ?, verify_tls = ?, enabled = ?, tags = ?, links_confirmed = ?,
+			external_url = ?, updated_at = ?
 			WHERE id = ?`,
-			a.Name, a.Kind, a.URL, a.APIKey, b2i(a.VerifyTLS), b2i(a.Enabled), tags, b2i(a.LinksConfirmed), fmtTime(now), a.ID)
+			a.Name, a.Kind, a.URL, a.APIKey, b2i(a.VerifyTLS), b2i(a.Enabled), tags, b2i(a.LinksConfirmed),
+			a.ExternalURL, fmtTime(now), a.ID)
 		if err != nil {
 			return wrap(err, "update arr instance %d", a.ID)
 		}

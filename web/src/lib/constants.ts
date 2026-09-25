@@ -380,7 +380,7 @@ export const GROUP_FLAG_DESCRIPTIONS: Record<GroupFlag, string> = {
   variant_3d: '2D and 3D versions are treated as distinct',
   language_variant: 'Versions have different audio languages and are treated as distinct',
   intentional_arr_instances: 'Versions are managed by different *arr instances (e.g. 4K + 1080p setup) — treated as intentional',
-  arr_queue_busy: 'The *arr has this title in its download/import queue; removal is deferred',
+  arr_queue_busy: 'The *arr has this title in its download/import queue; removal is deferred until the entry leaves the *arr’s queue',
   arr_cutoff_unmet: 'The keeper is below the *arr quality cutoff — the *arr may upgrade again and recreate the duplicate',
   playing: 'A version is currently playing; removal is deferred',
   sample: 'A version looks like a sample or truncated file (short duration)',

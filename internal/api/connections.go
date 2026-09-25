@@ -1040,6 +1040,20 @@ func validateArr(a *models.ArrInstance) []config.ValidationError {
 	u, uerrs := normalizeBaseURL("url", a.URL)
 	a.URL = u
 	errs = append(errs, uerrs...)
+	// The External URL only sets where the UI's "Open in Radarr/Sonarr" links go ("" = the URL):
+	// Dupearr never requests it, so it takes no part in the connection test, the API key's
+	// endpoint check or the uniqueness check.
+	if a.ExternalURL = strings.TrimSpace(a.ExternalURL); a.ExternalURL != "" {
+		ext, eerrs := normalizeBaseURL("externalUrl", a.ExternalURL)
+		a.ExternalURL = ext
+		// Nothing tests this address, so a page's address pasted from the browser would only show
+		// up as broken links.
+		if u, err := url.Parse(ext); len(eerrs) == 0 && err == nil && arr.IsWebPagePath(u.Path) {
+			eerrs = append(eerrs, invalid("externalUrl",
+				"Enter the address of the application's start page (with its URL base), not of a page in it or its API, e.g. https://radarr.example.com"))
+		}
+		errs = append(errs, eerrs...)
+	}
 	switch {
 	case a.APIKey == "":
 		errs = append(errs, invalid("apiKey", "API key is required"))

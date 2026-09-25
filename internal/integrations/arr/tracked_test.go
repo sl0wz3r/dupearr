@@ -200,10 +200,11 @@ func TestTrackedFilesRadarrWithoutFilterUsesEmbeddedFiles(t *testing.T) {
 	}
 
 	want42 := TrackedFile{
-		Path:   "/movies/Blade Runner 2049 (2017)/Blade Runner 2049 (2017) {imdb-tt1856101} [Remux-2160p].mkv",
-		Size:   61234567890,
-		TmdbID: 335984,
-		ImdbID: "tt1856101",
+		Path:      "/movies/Blade Runner 2049 (2017)/Blade Runner 2049 (2017) {imdb-tt1856101} [Remux-2160p].mkv",
+		Size:      61234567890,
+		TmdbID:    335984,
+		ImdbID:    "tt1856101",
+		TitleSlug: "335984",
 		Info: models.ArrFileInfo{
 			InstanceID: 7, InstanceName: "Test radarr", Kind: models.ArrRadarr,
 			FileID: 118, ItemID: 42, EpisodeIDs: []int64{},

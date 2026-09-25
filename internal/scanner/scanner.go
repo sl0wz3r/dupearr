@@ -95,7 +95,9 @@ type PlexClient interface {
 // ArrClient is the subset of *arr.Client the scanner uses (fakes in tests).
 type ArrClient interface {
 	TrackedFiles(ctx context.Context, f arr.TrackedFilter) ([]arr.TrackedFile, error)
-	QueueItemIDs(ctx context.Context) (map[int64]bool, error)
+	// Queue returns the download/import queue by movie/series id: an item with any entry is busy
+	// (its groups are deferred); the entries' summaries are only displayed.
+	Queue(ctx context.Context) (map[int64]*arr.QueueItem, error)
 }
 
 // WatchClient is the subset of *tautulli.Client the scanner reads play history with (fakes in

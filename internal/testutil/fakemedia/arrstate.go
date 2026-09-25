@@ -114,6 +114,9 @@ type arrQueueItem struct {
 	movieID, seriesID, episodeID int64
 	season                       int
 	title, status, state         string
+	trackedStatus                string
+	statusMessages               []QueueStatusMessage
+	errorMessage                 string
 	size, sizeLeft               int64
 	protocol, client, indexer    string
 	downloadID                   string

@@ -63,6 +63,10 @@ var upgradableMigrations = map[int64]bool{
 	// older backup starts with unconfirmed *arr links and groups without a cross-server record: the
 	// fail-closed state (the link data upgrade runs when the restored database is opened).
 	4: true,
+	// 0005_arr_links: ADD COLUMN arr_instances.external_url DEFAULT '', duplicate_groups.arr_items
+	// DEFAULT ''. An older backup gets no External URL (links use the connection URL) and groups
+	// without *arr items until their next scan; both columns are display only.
+	5: true,
 }
 
 // createReference creates path as an empty database with this build's schema.

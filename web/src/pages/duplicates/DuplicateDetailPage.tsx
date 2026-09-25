@@ -20,6 +20,7 @@ import { queryKeys } from '@/api/queryKeys';
 import type { Action, DuplicateGroup, DuplicateGroupDetail, GroupFile, Id } from '@/api/types';
 import {
   ApproveGroupDialog,
+  ArrQueueNotice,
   ComparisonTable,
   DecisionSummary,
   GroupActionsList,
@@ -325,6 +326,7 @@ export default function DuplicateDetailPage() {
           </Alert>
         )}
         <GroupHeaderCard group={group} libraryNames={libraryNames} profileName={profile.data?.name} />
+        <ArrQueueNotice group={group} arrLinks={group.arrLinks} />
         {hasJellyfinCopy(files) && (
           <Alert kind="info" title="Listed by a Jellyfin server">
             Dupearr never deletes through Jellyfin. Approve this duplicate here, on its own page: each copy to remove is
@@ -376,6 +378,7 @@ export default function DuplicateDetailPage() {
               onOverride={onOverride}
               pendingFileId={pendingOverride?.fileId ?? null}
               lockedReason={lockedReason}
+              arrLinks={group.arrLinks}
             />
           )}
         </section>
