@@ -43,7 +43,11 @@ Arr-style web UI and API on port 3873: login, API key, scheduled scans, backups,
   <Beta>true</Beta>
   <MinVer>6.12</MinVer>
   <Date>{{RELEASE_DATE}}</Date>
-  <Changes>### 0.3.0 (2026-09-25)&#xD;
+  <Changes>### 0.4.0 (2026-09-25)&#xD;
+- Open in Radarr / Open in Sonarr links on each tracked copy, straight to the movie or series page. An optional External URL per instance is used when your browser reaches the app at another address.&#xD;
+- A duplicate held back by the Radarr/Sonarr download queue now shows the queue entry, its state and the app's own message, with a link to its queue.&#xD;
+&#xD;
+### 0.3.0 (2026-09-25)&#xD;
 - Jellyfin 12.1 or later as a read-only media server, next to or instead of Plex. Dupearr never deletes anything through Jellyfin: its copies are removed through Radarr/Sonarr or the filesystem, one approved duplicate at a time, into a recycle bin, and only when every copy has a path mapping.&#xD;
 - Adding Jellyfin next to Plex counts as several servers: confirm which media servers each Radarr/Sonarr instance feeds in Settings - Applications.&#xD;
 - Setups with only Plex behave exactly as before.&#xD;

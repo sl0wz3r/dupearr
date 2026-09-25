@@ -6,6 +6,8 @@ All notable changes to Dupearr are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-25
+
 ### Added
 
 - **Links to Radarr and Sonarr.** A duplicate's page links each copy an \*arr tracks to its movie
@@ -386,7 +388,8 @@ First public version.
 - Security review report and deployment hardening guide: [docs/SECURITY.md](docs/SECURITY.md);
   vulnerability reporting: [SECURITY.md](SECURITY.md).
 
-[Unreleased]: https://github.com/sl0wz3r/dupearr/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/sl0wz3r/dupearr/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/sl0wz3r/dupearr/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/sl0wz3r/dupearr/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/sl0wz3r/dupearr/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/sl0wz3r/dupearr/compare/v0.1.0...v0.1.1
