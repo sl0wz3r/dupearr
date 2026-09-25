@@ -66,6 +66,13 @@ still needs a design.
   episode? What do its delete endpoints remove? Write it up with sources, the way
   [docs/research/plex-api.md](docs/research/plex-api.md) does for Plex, and mark anything not
   confirmed on a live server as UNVERIFIED.
+- **Research and design:** [docs/research/jellyfin-emby.md](docs/research/jellyfin-emby.md)
+  (version grouping and deletes confirmed on a live Jellyfin 12.1). Recommendation: Jellyfin first,
+  after a behaviour-neutral refactor of the media-server contract. Dupearr would never delete
+  through Jellyfin: its delete removes the whole item, so removals go through the \*arr or the
+  filesystem method, by manual approval, into a recycle bin, and only when every copy has a path
+  mapping. Emby follows with the same shape once it is decided how to rebuild its items (its
+  API-key listing has one item per version).
 
 ## Watch-history criteria (Tautulli, Plex)
 
