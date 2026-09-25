@@ -18,7 +18,7 @@
 </p>
 
 > [!IMPORTANT]
-> **Beta (0.2).** Dupearr deletes media files. It starts in its safest state: dry run and manual
+> **Beta (0.3).** Dupearr deletes media files. It starts in its safest state: dry run and manual
 > approval are on, recent files are never touched, and every run has a cap (see
 > [Safety first](#safety-first)). It is still new software, so keep backups of anything you
 > cannot replace, and read a few dry-run results before you let it remove anything.
