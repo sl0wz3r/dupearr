@@ -130,3 +130,27 @@ func BenchmarkRedactURL(b *testing.B) {
 		_ = Redact(s)
 	}
 }
+
+// TestRedactMediaBrowserAuthorization: Jellyfin's credential header ("MediaBrowser Token=\"…\"")
+// is masked in every form a log line can hold it: plain, as a Go http.Header dump, as JSON, and
+// the legacy X-Emby-Authorization; no parameter survives a quote, and redacting twice changes
+// nothing.
+func TestRedactMediaBrowserAuthorization(t *testing.T) {
+	t.Parallel()
+	const key = "0123456789abcdef0123456789abcdef"
+	for _, in := range []string{
+		`Authorization: MediaBrowser Token="` + key + `", Client="Dupearr", Device="Dupearr", DeviceId="d", Version="0.3.0"`,
+		`map[Accept:[application/json] Authorization:[MediaBrowser Token="` + key + `", Client="Dupearr"]]`,
+		`{"Authorization":"MediaBrowser Token=\"` + key + `\", Client=\"Dupearr\""}`,
+		`X-Emby-Authorization: Emby Token="` + key + `"`,
+		`authorization: mediabrowser token=` + key,
+	} {
+		got := Redact(in)
+		if strings.Contains(got, key) || !strings.Contains(got, Removed) {
+			t.Errorf("Redact(%q) = %q", in, got)
+		}
+		if again := Redact(got); again != got {
+			t.Errorf("Redact is not idempotent: %q → %q", got, again)
+		}
+	}
+}

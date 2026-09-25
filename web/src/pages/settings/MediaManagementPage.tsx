@@ -477,8 +477,8 @@ export default function MediaManagementPage() {
                 helpText={
                   <>
                     Where filesystem removals go. Use a folder on the same share as your media so moves are instant, e.g.{' '}
-                    <code>/data/.dupearr-recycle</code>, outside your Plex library folders. Leave empty to delete
-                    permanently.
+                    <code>/data/.dupearr-recycle</code>, outside your Plex and Jellyfin library folders. Leave empty to delete
+                    permanently (Jellyfin copies then need Radarr/Sonarr&apos;s own recycle bin).
                   </>
                 }
                 warning={warningLines(recycleWarnings)}

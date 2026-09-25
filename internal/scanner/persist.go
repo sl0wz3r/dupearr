@@ -326,7 +326,7 @@ func adoptable(g *models.DuplicateGroup, preds []models.DuplicateGroup) *models.
 }
 
 // sameContent reports whether a stored group describes the same content as g: same media
-// server and at least one shared media-server item.
+// server and at least one shared media-server item (or, for a non-Plex kind, a shared version).
 func sameContent(stored, g *models.DuplicateGroup) bool {
 	if stored.ServerID != 0 && g.ServerID != 0 && stored.ServerID != g.ServerID {
 		return false
@@ -339,6 +339,20 @@ func sameContent(stored, g *models.DuplicateGroup) bool {
 	for i := range stored.Files {
 		v := &stored.Files[i].Version
 		if items[refKey{server: v.ServerID, rk: strings.TrimSpace(v.RatingKey)}] {
+			return true
+		}
+	}
+	// A server whose item ids change while the content stays (Jellyfin: the row id is the primary
+	// version's, which changes when that version leaves, S9) is matched by a shared version key
+	// (research Q11). Plex keys never take part: a Plex group is matched by its items, as always.
+	keys := map[string]bool{}
+	for i := range g.Files {
+		if k, ok := models.KindOfVersionKey(g.Files[i].Version.Key); ok && !k.IsPlex() {
+			keys[g.Files[i].Version.Key] = true
+		}
+	}
+	for i := range stored.Files {
+		if keys[stored.Files[i].Version.Key] {
 			return true
 		}
 	}
@@ -538,6 +552,9 @@ func (p *pipeline) incompleteReasons(g *models.DuplicateGroup) []string {
 	for _, id := range g.LibraryIDs {
 		if other, ok := p.sharedIncomplete[id]; ok {
 			add(fmt.Sprintf("the library %q, whose folders overlap this one, could not be listed (files shared with it cannot be detected)", other))
+		}
+		if why, ok := p.shortcutProblems[id]; ok {
+			add(why + " (the file it points to cannot be protected)")
 		}
 	}
 	for i := range g.Files {

@@ -41,7 +41,8 @@ import (
 
 // readSections reads the libraries of every enabled server (its identity is confirmed first by
 // serverClient). A server that cannot be read, or a server with a movie or TV library Dupearr has
-// not synced (it would not be listed), is recorded as unread; for a separate server only such a
+// not synced (it would not be listed) or a library of another kind that may list video files
+// (Section.OtherVideo, never listed), is recorded as unread; for a separate server only such a
 // library with a mapped folder counts (only its mapped folders are compared, and unreadAffects
 // limits the effect to the groups with files under them).
 func (p *pipeline) readSections() {
@@ -74,6 +75,14 @@ func (p *pipeline) readSections() {
 			continue
 		}
 		p.sections[id] = secs
+		if srv.Kind.ReadOnly() {
+			// Paths a server rewrites (path substitutions) cannot be compared with the other
+			// servers', and an unread gate is unknown (research S12, S14): the groups it may list
+			// files of go to review (docs/DECISIONS.md D12).
+			if reason := p.gateReason(srv); reason != "" {
+				p.markUnread(id, reason)
+			}
+		}
 		known := map[string]bool{}
 		for _, l := range p.cfg.libraries {
 			if l.ServerID == id {
@@ -81,11 +90,17 @@ func (p *pipeline) readSections() {
 			}
 		}
 		for _, sec := range secs {
-			if mediaTypeOf(sec.Type) == "" || known[strings.TrimSpace(sec.Key)] {
+			if (mediaTypeOf(sec.Type) == "" && !sec.OtherVideo) || known[strings.TrimSpace(sec.Key)] {
 				continue
 			}
 			if p.cfg.separate[id] && len(p.cfg.mappedFolders(id, sec.Locations)) == 0 {
 				continue // none of its folders is mapped: never compared
+			}
+			if sec.OtherVideo {
+				// A library Dupearr never lists (Jellyfin mixed content, home videos, music videos)
+				// may list any of the files: unknown, never "not listed" (docs/DECISIONS.md D12).
+				p.markUnread(id, fmt.Sprintf("its library %q may list video files, but Dupearr only reads movie and TV libraries", sec.Title))
+				break
 			}
 			p.markUnread(id, fmt.Sprintf("its library %q is not known to Dupearr yet (sync its libraries)", sec.Title))
 			break
@@ -555,6 +570,13 @@ func (p *pipeline) listingFor(g *models.DuplicateGroup, x *xref, same bool) mode
 		RatingKey: ir.ref.RatingKey, MediaID: x.media.ID, ItemTitle: refLabel(&ir.ref), Path: x.part.File, Match: match,
 	}
 	e.VersionKey = models.VersionKey(ir.server.Kind, ir.server.ID, mediaserver.VersionIDOf(x.media))
+	// A session names a stack part's own item while that part plays (Jellyfin, research S13): the
+	// executor's playing check of this listing looks them up too. Plex parts carry none.
+	for _, part := range x.media.Parts {
+		if id := strings.TrimSpace(part.ItemID); id != "" && !slices.Contains(e.PartItemIDs, id) {
+			e.PartItemIDs = append(e.PartItemIDs, id)
+		}
+	}
 	for mi := range ir.ref.Media {
 		o := &ir.ref.Media[mi]
 		if mediaserver.VersionIDOf(o) == mediaserver.VersionIDOf(x.media) || o.Optimized || len(o.Parts) == 0 {
@@ -725,11 +747,17 @@ func (p *pipeline) recordFor(g *models.DuplicateGroup) *models.CrossServerRecord
 			if p.cfg.separate[id] && len(p.cfg.libraryFolders(p.cfg.libraries[lid], p.sections)) == 0 {
 				continue // a separate server's unmapped library is never compared
 			}
-			rec.Libraries = append(rec.Libraries, models.CrossServerLibrary{
+			lib := models.CrossServerLibrary{
 				ServerID: id, LibraryID: bySection[id][key], SectionKey: key, Type: strings.ToLower(strings.TrimSpace(sec.Type)),
 				Locations: append([]string{}, sec.Locations...), ScannedAt: sec.ScannedAt, ContentChangedAt: sec.ContentChangedAt,
 				Refreshing: sec.Refreshing,
-			})
+			}
+			if !srv.Kind.IsPlex() && (sec.ScannedAt == 0 || sec.ContentChangedAt == 0) {
+				// No scan times (Jellyfin): the listing is the change signal, re-read by the
+				// executor right before a removal. Plex records never carry one.
+				lib.Fingerprint = p.fingerprints[lid]
+			}
+			rec.Libraries = append(rec.Libraries, lib)
 		}
 	}
 	return rec

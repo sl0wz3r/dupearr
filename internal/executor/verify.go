@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,10 +44,11 @@ type verification struct {
 	wait     string // non-empty: do not act yet; the removals stay queued (minimum age)
 }
 
-// mediaRef identifies a Plex media (version) on a media server.
+// mediaRef identifies a version on a media server by its server version id
+// (models.MediaVersion.ServerVersionID: the Plex media id, a Jellyfin source id).
 type mediaRef struct {
-	serverID int64
-	mediaID  int64
+	serverID  int64
+	versionID string
 }
 
 // verify re-checks every version to remove and the kept versions against the freshly fetched
@@ -70,7 +72,7 @@ func (r *run) verify(g *models.DuplicateGroup, targets []*target, fresh map[item
 	}
 	for i := range g.Files {
 		if f := &g.Files[i]; f.Decision == models.DecisionRemove {
-			vr.removing[mediaRef{serverOf(g, &f.Version), f.Version.MediaID}] = true
+			vr.removing[mediaRef{serverOf(g, &f.Version), f.Version.ServerVersionID()}] = true
 		}
 	}
 	for _, t := range targets {
@@ -312,7 +314,7 @@ func sharedWithOtherMedia(g *models.DuplicateGroup, targets []*target, vr *verif
 		}
 		for i := range it.Versions {
 			other := &it.Versions[i]
-			if queued[mediaRef{ref.serverID, other.MediaID}] {
+			if queued[mediaRef{ref.serverID, other.ServerVersionID()}] {
 				continue
 			}
 			otherPaths := map[string]bool{}
@@ -323,6 +325,10 @@ func sharedWithOtherMedia(g *models.DuplicateGroup, targets []*target, vr *verif
 				lv := vr.losers[t.a.ID]
 				for _, p := range lv.parts {
 					if otherPaths[pathmap.Normalize(p.path)] {
+						if other.MediaID <= 0 && other.SourceID != "" {
+							return fmt.Sprintf("The file %s of the version to remove is also used by version %s of item %s, which is not being removed",
+								p.path, other.SourceID, ref.ratingKey)
+						}
 						return fmt.Sprintf("The file %s of the version to remove is also used by Plex media %d of item %s, which is not being removed",
 							p.path, other.MediaID, ref.ratingKey)
 					}
@@ -340,13 +346,13 @@ func targetMedia(g *models.DuplicateGroup, targets []*target) map[mediaRef]bool 
 	queued := make(map[mediaRef]bool, len(targets))
 	for _, t := range targets {
 		sid := serverOf(g, &t.file.Version)
-		if t.file.Version.MediaID > 0 {
-			queued[mediaRef{sid, t.file.Version.MediaID}] = true
+		if id := t.file.Version.ServerVersionID(); id != "" {
+			queued[mediaRef{sid, id}] = true
 		}
 		if d := t.file.Version.Disc; d.IsLooseClips() {
 			for _, id := range d.PlexMediaIDs {
 				if id > 0 {
-					queued[mediaRef{sid, id}] = true
+					queued[mediaRef{sid, strconv.FormatInt(id, 10)}] = true
 				}
 			}
 		}
@@ -379,7 +385,7 @@ func (vr *verification) remainsInItem(serverID int64, v *models.MediaVersion) bo
 	}
 	for i := range it.Versions {
 		o := &it.Versions[i]
-		if o.MediaID != v.MediaID && o.MediaID > 0 && !isOptimized(o) && !vr.removing[mediaRef{serverID, o.MediaID}] {
+		if id := o.ServerVersionID(); id != v.ServerVersionID() && id != "" && !isOptimized(o) && !vr.removing[mediaRef{serverID, id}] {
 			return true
 		}
 	}
@@ -410,33 +416,48 @@ func (r *run) checkVersion(g *models.DuplicateGroup, f *models.GroupFile, fresh 
 	return vv, ""
 }
 
-// checkPlexVersion confirms a stored Plex version against the fresh Plex item and the local disk.
+// checkPlexVersion confirms a stored media-server version against the fresh item and the local
+// disk: matched by its server version id (the Plex media id, a Jellyfin source id). The messages of
+// a Plex version are unchanged; a version of a read-only server (Jellyfin) is only ever confirmed on
+// disk (every part mapped, a regular file of the reviewed size: the server never reports whether
+// a file exists), and a fresh report-only reason refuses it.
 func (r *run) checkPlexVersion(g *models.DuplicateGroup, f *models.GroupFile, fresh map[itemRef]*models.MediaItem, keeper bool) (*verifiedVersion, string) {
 	stored := &f.Version
 	sid := serverOf(g, stored)
+	kind := r.servers[sid].Kind
+	label := "Plex"
+	if !kind.IsPlex() {
+		label = kind.Label()
+	}
 	item, ok := fresh[itemRef{sid, strings.TrimSpace(stored.RatingKey)}]
 	switch {
 	case !ok:
-		return nil, "it was not re-checked with Plex"
+		return nil, "it was not re-checked with " + label
 	case item == nil:
-		return nil, fmt.Sprintf("Plex item %s no longer exists", stored.RatingKey)
-	case stored.MediaID <= 0:
+		return nil, fmt.Sprintf("%s item %s no longer exists", label, stored.RatingKey)
+	case stored.ServerVersionID() == "" && kind.IsPlex():
 		return nil, "its Plex media id is unknown"
+	case stored.ServerVersionID() == "":
+		return nil, fmt.Sprintf("its %s version id is unknown", label)
 	case len(stored.Parts) == 0:
 		return nil, "it has no files"
 	}
 	var fv *models.MediaVersion
 	for i := range item.Versions {
-		if item.Versions[i].MediaID == stored.MediaID {
+		if item.Versions[i].ServerVersionID() == stored.ServerVersionID() {
 			fv = &item.Versions[i]
 			break
 		}
 	}
-	if fv == nil {
+	switch {
+	case fv == nil && kind.IsPlex():
 		return nil, fmt.Sprintf("Plex no longer lists media %d of item %s", stored.MediaID, stored.RatingKey)
-	}
-	if isOptimized(fv) {
+	case fv == nil:
+		return nil, fmt.Sprintf("%s no longer lists version %s of item %s", label, stored.ServerVersionID(), stored.RatingKey)
+	case isOptimized(fv):
 		return nil, "Plex now reports it as an optimized version"
+	case len(fv.ReportOnly) > 0:
+		return nil, fmt.Sprintf("%s now reports it report-only: %s", label, strings.Join(fv.ReportOnly, "; "))
 	}
 	if len(fv.Parts) != len(stored.Parts) {
 		return nil, fmt.Sprintf("the number of files changed (%d → %d)", len(stored.Parts), len(fv.Parts))
@@ -450,9 +471,9 @@ func (r *run) checkPlexVersion(g *models.DuplicateGroup, f *models.GroupFile, fr
 		case sp.Size != fp.Size:
 			return nil, fmt.Sprintf("the size of %s changed (%d → %d bytes)", fp.Path, sp.Size, fp.Size)
 		case fp.Exists != nil && !*fp.Exists:
-			return nil, fmt.Sprintf("Plex reports %s as missing", fp.Path)
+			return nil, fmt.Sprintf("%s reports %s as missing", label, fp.Path)
 		case keeper && fp.Accessible != nil && !*fp.Accessible:
-			return nil, fmt.Sprintf("Plex cannot access %s", fp.Path)
+			return nil, fmt.Sprintf("%s cannot access %s", label, fp.Path)
 		}
 		vp := verifiedPart{path: fp.Path, size: fp.Size}
 		if local, ok := r.mapper.ToLocal(models.PathSourceServer, sid, fp.Path); ok {
@@ -463,9 +484,13 @@ func (r *run) checkPlexVersion(g *models.DuplicateGroup, f *models.GroupFile, fr
 			case !fi.Mode().IsRegular():
 				return nil, fmt.Sprintf("%s is not a regular file", local)
 			case fi.Size() != fp.Size:
-				return nil, fmt.Sprintf("%s is %d bytes on disk but Plex reports %d", local, fi.Size(), fp.Size)
+				return nil, fmt.Sprintf("%s is %d bytes on disk but %s reports %d", local, fi.Size(), label, fp.Size)
 			}
 			vp.local, vp.fi = local, fi
+		} else if kind.ReadOnly() {
+			// The server never says whether a file exists: every part of every version (kept or
+			// removed) is confirmed on disk, or nothing is removed (docs/DECISIONS.md D12).
+			return nil, fmt.Sprintf("no path mapping covers %s, and %s never reports whether a file exists", fp.Path, label)
 		} else if keeper && fp.Exists == nil {
 			// Invariant 3 needs a keeper confirmed present: on disk (above) or by Plex's file check.
 			// An answer without "exists" (partial data) confirms nothing — the other copy may be

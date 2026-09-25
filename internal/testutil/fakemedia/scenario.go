@@ -77,6 +77,12 @@ type Scenario struct {
 	Instances   []Instance
 	// Tautulli is the fake Tautulli recording the Plex server's plays (Movie.Plays).
 	Tautulli TautulliServer
+	// Jellyfin, when set, runs a fake Jellyfin 12.1 server over the same tree (Env.Jellyfin); it
+	// resolves its items from the files on disk (jellyfinstate.go).
+	Jellyfin *JellyfinServer
+	// ExtraFiles are files of the tree no Plex item lists: sidecars, unrelated files, .strm
+	// shortcuts.
+	ExtraFiles []ExtraFile
 }
 
 // TautulliServer describes the fake Tautulli (API v2) that records the plays of the fake Plex
@@ -720,6 +726,7 @@ func (v *validator) run() {
 	v.links()
 	v.discOverlaps()
 	v.clipOverlaps()
+	v.jellyfin()
 	for _, rk := range v.retired {
 		if v.rks[rk] {
 			v.addf("retired rating key %q is used by an item", rk)

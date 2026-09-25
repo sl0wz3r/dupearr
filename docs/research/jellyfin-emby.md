@@ -2,8 +2,9 @@
 
 Status: research reference and design proposal, written 2026-09-24 for issue #4 ("Today Dupearr
 supports Plex only … How does each server model several copies of one movie or episode? What do its
-delete endpoints remove?"). Only Phase 0 (§5.2, the behaviour-neutral contract refactor) is
-implemented; nothing else here is. Scope: how Jellyfin and Emby model versions,
+delete endpoints remove?"). Phase 0 (§5.2, the behaviour-neutral contract refactor) and Phase 1
+(§5.3, Jellyfin read-only, decided in `docs/DECISIONS.md` D12) are implemented; Emby (§5.4) and the
+later phases are not. Scope: how Jellyfin and Emby model versions,
 multi-part files and external ids; what their delete endpoints remove on disk; permissions, playback
 sessions, authentication and change notifications; and a phased design in which Dupearr reads from
 Jellyfin/Emby but removes files only through Radarr/Sonarr or its own recycle bin.
@@ -834,6 +835,21 @@ type VersionDeleter interface {
 * **Contributors, no code:** the live checks of §7 for Emby and older Jellyfin versions.
 
 ### 5.3 Phase 1 (first slice): Jellyfin, manual removals through the \*arr or the recycle bin
+
+**Status: done** (issue #4 Phase 1; `docs/DECISIONS.md` D12 is authoritative where it differs from
+the proposal below). Differences: the several-servers guard of D11 is reused instead of a new
+`other_server_library` flag (S18), with a listing fingerprint as a Jellyfin library's change
+signal; `manual_only` and `report_only` are new flags; `/ScheduledTasks` is also read (the last
+completed library scan, Q12); a user token is refused by the connection test (not only by health);
+a missing source or part size makes a version report-only (a listing with one is incomplete); parts
+are read for alternates and stacked rows while listing, and for every version when a group is
+built; poster images are not proxied. Found by the review and a live run on 12.1: path
+substitutions rewrite every item, source and part path but not the library folders, so a server
+with any set is not listed at all (S12); a title merged from two copies of one library and a primary
+in another is listed as two rows linking each other, which Dupearr reads as one item; libraries of
+other kinds (mixed content, home videos, music videos) are never listed, so with several servers
+they count as unread (fail closed); scope groups never pair two items of one library (S22); the
+file-name signal of S21 also takes Jellyfin's own multi-episode forms (`S01E03x04`).
 
 #### 5.3.1 Data model and configuration
 

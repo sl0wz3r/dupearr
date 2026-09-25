@@ -29,7 +29,7 @@ export function methodInfo(method: DeletionMethod, recycleBinPath: string): { te
       };
     case 'plex':
       return {
-        text: 'Via the Plex API (permanent; requires “Allow media deletion” in Plex and the server owner’s token).',
+        text: 'Via the Plex API (permanent; requires “Allow media deletion” in Plex and the server owner’s token). Not used for Jellyfin: Dupearr never deletes through Jellyfin, its copies only go through Radarr/Sonarr or into Dupearr’s recycle bin.',
         badge: 'Permanent',
         kind: 'danger',
       };

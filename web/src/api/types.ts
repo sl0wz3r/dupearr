@@ -163,7 +163,10 @@ export type GroupFlag =
   | 'other_server_listing'
   | 'other_server_keeps'
   | 'other_server_possible'
-  | 'other_server_unread';
+  | 'other_server_unread'
+  // Jellyfin (docs/DECISIONS.md D12).
+  | 'manual_only'
+  | 'report_only';
 
 export type Decision = 'keep' | 'remove';
 
@@ -195,7 +198,8 @@ export type Direction = 'higher' | 'lower';
 export type ProtectionType = 'path_glob' | 'library' | 'arr_instance' | 'arr_tag';
 export type KeepPer = '' | 'resolution' | 'dynamic_range';
 
-export type MediaServerKind = 'plex';
+/** Plex, or Jellyfin 12.1+ (read-only: Dupearr never deletes through it; docs/DECISIONS.md D12). */
+export type MediaServerKind = 'plex' | 'jellyfin';
 export type ArrKind = 'radarr' | 'sonarr';
 export type PathSourceType = 'server' | 'arr';
 export type ExclusionKind = 'group_key' | 'path_prefix' | 'library' | 'title_regex';
@@ -313,6 +317,10 @@ export interface MediaPart {
   accessible?: boolean;
   /** Other rating keys referencing the same file (multi-episode files). */
   sharedWith?: string[];
+  /** Jellyfin: the item id of a stack part (sessions name it while it plays). */
+  itemId?: string;
+  /** Jellyfin: the .strm shortcuts that point to this file (it is protected). */
+  shortcutOf?: string[];
   /** Hardlink count when the local path could be stat'ed (absent/0 = unknown). */
   linkCount?: number;
   /** "<device>:<inode>" when stat'ed. */
@@ -425,6 +433,15 @@ export interface MediaVersion {
   /** e.g. "4K DoVi/HDR10 (HEVC Main 10)" */
   displayTitle: string;
   optimizedVersion: boolean;
+  /** Jellyfin: the media source id (the version's own item id). Absent for Plex. */
+  sourceId?: string;
+  /** Jellyfin: the last episode of a multi-episode file (IndexNumberEnd). */
+  episodeEnd?: number;
+  /**
+   * Why the version — and with it the whole group — is only reported, never acted on (a .strm
+   * shortcut, unreadable stack parts, a disc, an unmapped copy, removals disabled on the server).
+   */
+  reportOnly?: string[];
 
   parts: MediaPart[];
 
@@ -482,6 +499,8 @@ export interface OtherListing {
   /** The path as that server reports it. */
   path: string;
   match: OtherListingMatch;
+  /** Jellyfin: the item ids of the listed version's stack parts. */
+  partItemIds?: string[];
   /**
    * For a version this group removes: whether the other item keeps a version that could be proven
    * a different file (null on a kept version, or when unknown).
@@ -851,9 +870,12 @@ export interface MediaServer {
   id: Id;
   name: string;
   kind: MediaServerKind;
-  /** e.g. http://192.168.1.10:32400 */
+  /** e.g. http://plex:32400 or http://jellyfin:8096 */
   url: string;
-  /** X-Plex-Token (masked "********" in responses; send the mask back to keep it). */
+  /**
+   * The credential: Plex's X-Plex-Token or Jellyfin's API key (masked "********" in responses; send
+   * the mask back to keep it).
+   */
   token: string;
   machineIdentifier: string;
   verifyTls: boolean;
@@ -882,9 +904,15 @@ export interface MediaServerTestResult {
   mediaDeletionAllowed: boolean;
   /**
    * Whether the token belongs to the server owner (only the owner's token can delete media via
-   * Plex). null/absent = could not be determined.
+   * Plex). null/absent = could not be determined. Always null for Jellyfin.
    */
   owned?: boolean | null;
+  /** Jellyfin: the product the server reports ("Jellyfin Server"). */
+  product?: string;
+  /** Jellyfin: the credential is an API key or an administrator (a test only succeeds when it is). */
+  administrator?: boolean;
+  /** Jellyfin: why removals of the files it lists are disabled (e.g. path substitutions). */
+  removalsDisabled?: string;
 }
 
 export interface Library {

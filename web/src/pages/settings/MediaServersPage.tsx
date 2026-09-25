@@ -16,17 +16,23 @@ import {
 } from '@/components/page';
 import { ConnectionCard } from '@/components/settings/connections/ConnectionCard';
 import { LibrariesTable } from '@/components/settings/connections/LibrariesTable';
-import { MediaServerModal } from '@/components/settings/connections/MediaServerModal';
+import { AddMediaServerModal, MediaServerModal } from '@/components/settings/connections/MediaServerModal';
 import { WebhookInfo } from '@/components/settings/connections/WebhookInfo';
 import { AddCard, Alert, Badge, Button, CardGrid, LoadingIndicator } from '@/components/ui';
+import { MEDIA_SERVER_KIND_LABELS } from '@/lib/constants';
 
 /** Which modal is open: a new server, or the server being edited. */
 type ModalState = { server: MediaServer | null } | null;
 
+/** Label of a server's kind; a server stored before kinds existed is a Plex server. */
+function kindLabel(s: MediaServer): string {
+  return s.kind === 'jellyfin' ? MEDIA_SERVER_KIND_LABELS.jellyfin : MEDIA_SERVER_KIND_LABELS.plex;
+}
+
 /**
- * Settings → Media Servers at `/settings/mediaservers`: Plex server cards (+ add/edit modal with
- * "Sign in with Plex"), the libraries of every server (enable, profile, scope group, sync) and the
- * optional Plex webhook URL.
+ * Settings → Media Servers at `/settings/mediaservers`: Plex and Jellyfin server cards (+ a kind
+ * picker, then the add/edit modal of that kind), the libraries of every server (enable, profile,
+ * scope group, sync) and the optional Plex webhook URL (shown while a Plex server exists).
  */
 export default function MediaServersPage() {
   const servers = useMediaServers();
@@ -35,6 +41,7 @@ export default function MediaServersPage() {
   const [modal, setModal] = useState<ModalState>(null);
 
   const list = servers.data ?? [];
+  const hasPlex = list.some((s) => s.kind !== 'jellyfin');
   const libraryCounts = new Map<number, { total: number; enabled: number }>();
   for (const lib of libraries.data ?? []) {
     const c = libraryCounts.get(lib.serverId) ?? { total: 0, enabled: 0 };
@@ -54,7 +61,7 @@ export default function MediaServersPage() {
         </PageToolbarSection>
       </PageToolbar>
       <PageBody>
-        <PageHeader title="Media Servers" subtitle="Connect Plex and choose which libraries Dupearr scans." />
+        <PageHeader title="Media Servers" subtitle="Connect Plex or Jellyfin and choose which libraries Dupearr scans." />
 
         <SettingsSection title="Media Servers">
           {servers.isPending ? (
@@ -85,8 +92,8 @@ export default function MediaServersPage() {
                     onClick={() => setModal({ server: s })}
                     badges={
                       <>
-                        <Badge kind="accent" outline>
-                          Plex
+                        <Badge kind={s.kind === 'jellyfin' ? 'info' : 'accent'} outline>
+                          {kindLabel(s)}
                         </Badge>
                         <Badge kind="default" outline>
                           {counts
@@ -98,7 +105,8 @@ export default function MediaServersPage() {
                   >
                     {s.machineIdentifier && (
                       <div className="truncate text-xs text-muted" title={s.machineIdentifier}>
-                        Machine ID: <span className="font-mono">{s.machineIdentifier}</span>
+                        {s.kind === 'jellyfin' ? 'Server ID' : 'Machine ID'}:{' '}
+                        <span className="font-mono">{s.machineIdentifier}</span>
                       </div>
                     )}
                   </ConnectionCard>
@@ -125,14 +133,19 @@ export default function MediaServersPage() {
           </SettingsSection>
         )}
 
-        {list.length > 0 && (
+        {hasPlex && (
           <SettingsSection title="Webhook (optional)" advanced>
             <WebhookInfo sources={['plex']} />
           </SettingsSection>
         )}
       </PageBody>
 
-      {modal && <MediaServerModal server={modal.server} onClose={() => setModal(null)} />}
+      {modal &&
+        (modal.server ? (
+          <MediaServerModal server={modal.server} onClose={() => setModal(null)} />
+        ) : (
+          <AddMediaServerModal onClose={() => setModal(null)} />
+        ))}
     </PageContent>
   );
 }

@@ -58,19 +58,25 @@ func TestServerItemKeyMatchesLegacy(t *testing.T) {
 	}
 }
 
-// legacyDisambiguation is the expression DisambiguationIndex replaces.
+// legacyDisambiguation is the expression DisambiguationIndex replaces, extended by the kinds added
+// since (issue #4 Phase 1: jellyfin): the first "@plex:" or "@jellyfin:". For keys without a
+// "@jellyfin:" marker it is exactly the legacy expression, so Plex keys parse as before.
 func legacyDisambiguation(s string) (int, int) {
-	if i := strings.Index(s, "@plex:"); i >= 0 {
-		return i, len("@plex:")
+	i, n := -1, 0
+	for _, m := range []string{"@plex:", "@jellyfin:"} {
+		if j := strings.Index(s, m); j >= 0 && (i < 0 || j < i) {
+			i, n = j, len(m)
+		}
 	}
-	return -1, 0
+	return i, n
 }
 
 func TestDisambiguationIndexMatchesLegacy(t *testing.T) {
 	for _, s := range []string{
 		"", "movie:tmdb:1", "movie:tmdb:1@plex:2:30", "movie:tmdb:1@plex:2:30#ed-extended", "@plex:", "@plex",
 		"movie:tmdb:1#3d~2", "episode:tvdb:5@plex:1:9@plex:2:3", "movie:tmdb:1@jellyfin:2:x", "a@PLEX:1:2",
-		"movie:plex:abc@plex:1:2", "x@plexy:1", "@disc:1:2",
+		"movie:plex:abc@plex:1:2", "x@plexy:1", "@disc:1:2", "movie:tmdb:1@jellyfin:2:x@plex:1:2",
+		"movie:tmdb:1@plex:1:2@jellyfin:2:x", "a@JELLYFIN:1:2", "a@emby:1:2",
 	} {
 		wi, wn := legacyDisambiguation(s)
 		if i, n := DisambiguationIndex(s); i != wi || n != wn {
@@ -100,7 +106,9 @@ func TestKindOfVersionKey(t *testing.T) {
 		{"plex:1:2", MediaServerPlex, true},
 		{"plex:12:345", MediaServerPlex, true},
 		{"disc:1:abcdef", "", false},
-		{"jellyfin:1:x", "", false}, // not a kind stored keys can carry yet
+		{"jellyfin:1:x", MediaServerJellyfin, true},
+		{"Jellyfin:1:x", "", false},
+		{"emby:1:x", "", false}, // Emby is not supported (Phase 2)
 		{"plexy:1:2", "", false},
 		{"", "", false},
 	} {
@@ -119,7 +127,9 @@ func TestMediaServerKindPredicates(t *testing.T) {
 		{"", true, true, "plex"},
 		{MediaServerPlex, true, true, "plex"},
 		{"Plex", false, false, "Plex"}, // kinds are compared exactly, as before
-		{"jellyfin", false, false, "jellyfin"},
+		{"jellyfin", false, true, "jellyfin"},
+		{"emby", false, false, "emby"},
+		{"Jellyfin", false, false, "Jellyfin"},
 	} {
 		if got := tc.kind.IsPlex(); got != tc.plex {
 			t.Errorf("%q.IsPlex() = %v", tc.kind, got)
@@ -140,8 +150,23 @@ func TestMediaServerKindPredicates(t *testing.T) {
 			t.Errorf("SupportedMediaServerKinds lists %q, which Supported refuses", k)
 		}
 	}
-	if got := SupportedMediaServerKinds(); !slices.Equal(got, []string{"plex", ""}) {
-		t.Errorf("SupportedMediaServerKinds = %q, want the legacy order [plex, \"\"]", got)
+	// The legacy pair keeps its order (stored queries); kinds added later follow.
+	if got := SupportedMediaServerKinds(); !slices.Equal(got, []string{"plex", "", "jellyfin"}) {
+		t.Errorf("SupportedMediaServerKinds = %q, want [plex, \"\", jellyfin]", got)
+	}
+	for _, tc := range []struct {
+		kind     MediaServerKind
+		readOnly bool
+		label    string
+	}{
+		{"", false, "Plex"}, {MediaServerPlex, false, "Plex"}, {MediaServerJellyfin, true, "Jellyfin"}, {"emby", false, "media server"},
+	} {
+		if got := tc.kind.ReadOnly(); got != tc.readOnly {
+			t.Errorf("%q.ReadOnly() = %v", tc.kind, got)
+		}
+		if got := tc.kind.Label(); got != tc.label {
+			t.Errorf("%q.Label() = %q", tc.kind, got)
+		}
 	}
 }
 
@@ -196,11 +221,11 @@ func TestMediaVersionJSONOmitsItemKeyID(t *testing.T) {
 
 // TestKeyKindsFollowSupportedKinds: the kinds whose keys the parsers recognise come from
 // SupportedMediaServerKinds, so a kind added there also has its "@<kind>:" suffix stripped from
-// exclusions and stored keys and its version keys attributed to it. Phase 0: exactly plex.
+// exclusions and stored keys and its version keys attributed to it. Phase 1: plex and jellyfin.
 func TestKeyKindsFollowSupportedKinds(t *testing.T) {
 	kinds := keyKinds()
-	if !slices.Equal(kinds, []MediaServerKind{MediaServerPlex}) {
-		t.Fatalf("keyKinds = %q, want [plex]", kinds)
+	if !slices.Equal(kinds, []MediaServerKind{MediaServerPlex, MediaServerJellyfin}) {
+		t.Fatalf("keyKinds = %q, want [plex jellyfin]", kinds)
 	}
 	for _, s := range SupportedMediaServerKinds() {
 		k := MediaServerKind(s)
@@ -227,6 +252,45 @@ func TestServerVersionIDIsTheLegacyKeyGate(t *testing.T) {
 		}
 		if mid > 0 && VersionKey(MediaServerPlex, 2, id) != fmt.Sprintf("plex:%d:%d", 2, mid) {
 			t.Errorf("MediaID %d: key %q", mid, VersionKey(MediaServerPlex, 2, id))
+		}
+	}
+}
+
+// TestServerVersionIDOfAJellyfinVersion: a version without a Plex media id is keyed by its source id
+// (Jellyfin: "jellyfin:<server>:<sourceID>"); a Plex media id always wins.
+func TestServerVersionIDOfAJellyfinVersion(t *testing.T) {
+	v := MediaVersion{SourceID: " 0f1e2d3c4b5a69788796a5b4c3d2e1f0 "}
+	if got := v.ServerVersionID(); got != "0f1e2d3c4b5a69788796a5b4c3d2e1f0" {
+		t.Fatalf("ServerVersionID = %q", got)
+	}
+	if got := VersionKey(MediaServerJellyfin, 3, v.ServerVersionID()); got != "jellyfin:3:0f1e2d3c4b5a69788796a5b4c3d2e1f0" {
+		t.Fatalf("key = %q", got)
+	}
+	v.MediaID = 7
+	if got := v.ServerVersionID(); got != "7" {
+		t.Fatalf("with a media id: %q", got)
+	}
+	if got := (&MediaVersion{}).ServerVersionID(); got != "" {
+		t.Fatalf("no id: %q", got)
+	}
+}
+
+// TestPhase1FieldsAreOmittedForPlex: the fields issue #4 Phase 1 adds are omitted while empty
+// (always for Plex), so stored versions, listings and API answers keep their bytes.
+func TestPhase1FieldsAreOmittedForPlex(t *testing.T) {
+	for _, v := range []any{
+		MediaVersion{Key: "plex:1:2", RatingKey: "5", MediaID: 2, Parts: []MediaPart{{ID: 1, Path: "/a.mkv"}}},
+		OtherListing{ServerID: 1, VersionKey: "plex:1:2"},
+		CrossServerLibrary{ServerID: 1, SectionKey: "1"},
+	} {
+		b, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range []string{"sourceId", "episodeEnd", "reportOnly", "itemId", "partItemIds", "fingerprint"} {
+			if strings.Contains(string(b), `"`+f+`"`) {
+				t.Errorf("%T marshals %s while empty: %s", v, f, b)
+			}
 		}
 	}
 }

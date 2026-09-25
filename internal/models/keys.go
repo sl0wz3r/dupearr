@@ -89,12 +89,13 @@ func (v *MediaVersion) KeyItemID() string {
 }
 
 // ServerVersionID is the server's id of the version, the last field of its version key: the Plex
-// media id when set, else "" (a disc found on disk has none). A version gets a version key exactly
-// when it is non-empty (the scanner's decorate, the engine's fillVersionIdentity), so another
-// kind's version id is added here and nowhere else.
+// media id when set, else the source id of another kind (Jellyfin: the media source id), else ""
+// (a disc found on disk has none). A version gets a version key exactly when it is non-empty (the
+// scanner's decorate, the engine's fillVersionIdentity), so another kind's version id is added
+// here and nowhere else.
 func (v *MediaVersion) ServerVersionID() string {
 	if v.MediaID > 0 {
 		return strconv.FormatInt(v.MediaID, 10)
 	}
-	return ""
+	return strings.TrimSpace(v.SourceID)
 }

@@ -336,8 +336,8 @@ HostConfig = { bindAddress, port, urlBase, enableSsl, sslPort, sslCertPath, sslK
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/v1/mediaserver` | `MediaServer[]` (token masked) |
-| POST | `/api/v1/mediaserver` | create → 201 (tests the connection first unless `?forceSave=true`; stores machineIdentifier; queues `SyncLibraries`). 409 when the same Plex server (machineIdentifier) is already configured. `X-Dupearr-Warning` when the token is not the server owner's |
-| GET/PUT/DELETE | `/api/v1/mediaserver/{id}` | PUT → 202 (tests first unless `?forceSave=true`): absent fields keep their values; 400 on `url` when the URL now answers as another Plex server (add it as a new server instead); a URL change re-points the server (see Duplicates: approve 409); a URL/token change or re-enabling queues `SyncLibraries` |
+| POST | `/api/v1/mediaserver` | create → 201 (tests the connection first unless `?forceSave=true`; stores machineIdentifier; queues `SyncLibraries`). 409 when the same server (Plex machineIdentifier, Jellyfin server id) is already configured. `X-Dupearr-Warning` when the token is not the server owner's, or when removals from a Jellyfin server are disabled |
+| GET/PUT/DELETE | `/api/v1/mediaserver/{id}` | PUT → 202 (tests first unless `?forceSave=true`): absent fields keep their values; `kind` cannot change (400); 400 on `url` when the URL now answers as another Plex server (add it as a new server instead); a URL change re-points the server (see Duplicates: approve 409); a URL/token change or re-enabling queues `SyncLibraries` |
 
 `?forceSave=true` skips the connection **test**, not the server's **identity**: Dupearr still
 tries to read the machineIdentifier of the URL (≤ 10 s, best effort). A reachable server that is
@@ -364,7 +364,26 @@ lookup runs in parallel with the server test and is bounded to 5 s; it never fai
 servers: their paths and files are compared) or `"separate"` (another host or a friend's server:
 its raw paths and file names are never compared with another server's, only its mapped folders
 are). Trimmed and lower-cased; any other value → 400 on `storage`; absent from a PUT keeps it. It
-only matters with two or more enabled Plex servers.
+only matters with two or more enabled media servers.
+
+**Jellyfin** (DECISIONS D12). `kind` is `"plex"` (the default) or `"jellyfin"` (Jellyfin 12.1 or
+later, read-only); `"emby"` → 400 "Emby is not supported yet", anything else → 400 "Only Plex and
+Jellyfin media servers are supported". For a Jellyfin server `token` is an **API key** (masked like
+the Plex token and reused only for the same endpoint: it must be re-entered when the URL's scheme,
+host, port or path changes, or when certificate verification is turned off for an `https` URL; sent
+to Jellyfin only in the `Authorization` header) and `machineIdentifier` is Jellyfin's server id. Its test reads
+`/System/Info/Public` without the key (400 when the URL is not Jellyfin or runs a version before
+12.1.0), then `/System/Info` and `/Library/VirtualFolders` with it: 400 when the key is rejected, the
+server answers with another id, or the credential is not an API key or an administrator's (it could
+not see every playback session). 200 adds `"product":"Jellyfin Server"`, `"administrator":true`
+and, when removals from the server would be disabled (path substitutions set, configuration
+unreadable), `"removalsDisabled":"<reason>"` — the server can still be saved (`X-Dupearr-Warning`),
+but while path substitutions are set its libraries are not read (a scan reports them as failed
+listings). `mediaDeletionAllowed` is `false` and `owned` is `null`: Dupearr never deletes through
+Jellyfin. A test of a saved server without `kind` tests it as its stored
+kind. The forced save's identity probe reads only `/System/Info/Public`, without the key. A Tautulli
+connection (`serverId`) can only name a Plex server (400), and `/api/v1/mediacover` serves no
+Jellyfin poster (404).
 
 Plex sign-in (plex.tv PIN flow):
 | Method | Path | Notes |
@@ -529,7 +548,11 @@ way with the signature its scan stored.
   declare it separate storage, then re-scan the group).
 - Bulk approve never approves `review` groups (suspect merges, unanalyzed, same file, …): they are
   listed in `failed` ("needs a review … approve it on its own"), nor groups that remove a full-disc
-  backup ("removes a full-disc backup: open it and approve it on its own").
+  backup ("removes a full-disc backup: open it and approve it on its own"), nor groups with a copy
+  on a Jellyfin server ("This duplicate is on a Jellyfin server: open it and approve it on its own").
+- **Jellyfin** (DECISIONS D12): a group with a Jellyfin copy is only approved by a person (auto
+  mode never approves it), and **409** while a copy is report-only (`reportOnly`) or a part of any
+  copy has no path mapping.
 - **Full discs** (DECISIONS D9): **409** when a group removes a disc version and disc removal is
   off, no recycle bin is set, the filesystem method is not enabled, the group is a TV episode, the
   disc cannot be removed safely (unreadable, unreachable, shared with other Plex items …), or the
@@ -601,6 +624,18 @@ file — information; the executor proves it again right before the removal), `o
 (another server lists a file with the same name and size that could not be told apart: review),
 `other_server_unread` (a server that may list the group's files could not be read: review,
 "Incomplete data"). The last three are never auto-approved.
+Jellyfin (DECISIONS D12): `manual_only` (a copy is on a Jellyfin server: approved by a person, one
+group at a time; never auto-approved) and `report_only` (a copy is report-only: the group is
+protected and never acted on; `MediaVersion.reportOnly` lists the reasons — a `.strm` shortcut, stack
+parts that could not be read, a disc, a missing size, a missing path mapping, removals disabled on
+the server).
+
+**Jellyfin versions** (all fields omitted for Plex): `key` `jellyfin:<serverId>:<sourceId>`,
+`mediaId` 0, `sourceId` (Jellyfin's media source id), `ratingKey` (the row the version was listed
+under), `episodeEnd?` (the last episode of a multi-episode file), `reportOnly?: string[]`,
+`parts[].itemId?` (a stack part's own item id) and `parts[].shortcutOf?: string[]` (the `.strm`
+shortcuts Jellyfin lists that point to the file: it is protected). Jellyfin never reports whether a file exists:
+`parts[].exists` is `false` only when Dupearr found the mapped file gone from an existing folder.
 
 **Other Plex servers** (`MediaVersion.otherServers`, `DuplicateGroup.crossServer`, DECISIONS D11;
 both absent with one enabled server). `otherServers` lists the media of other servers' items that
@@ -617,7 +652,8 @@ group stored before multi-server support is never acted on until it is re-scanne
 disabled since the scan is not required: disabled servers are not protected (DECISIONS D11, M23).
 ```ts
 OtherListing = { serverId, serverName, libraryId, libraryTitle, ratingKey, mediaId,
-  versionKey /* "plex:<serverId>:<mediaId>" */, itemTitle, path /* as that server reports it */,
+  versionKey /* "plex:<serverId>:<mediaId>" or "jellyfin:<serverId>:<sourceId>" */, itemTitle,
+  path /* as that server reports it */, partItemIds? /* Jellyfin stack parts: the playing check */,
   match: "same_file"|"possibly_same",
   itemKeepsAnother: boolean|null /* a removed version: the item keeps a provably different file */,
   keptByGroup: boolean|null /* a live group of that server keeps this media */,
@@ -625,7 +661,8 @@ OtherListing = { serverId, serverName, libraryId, libraryTitle, ratingKey, media
 CrossServerRecord = { complete, servers: { serverId, machineIdentifier, separate, mapped,
     mappings? /* fingerprint of its path mappings */, unread? }[],
   libraries: { serverId, libraryId, sectionKey, type, locations, scannedAt, contentChangedAt,
-    refreshing }[] /* scannedAt/contentChangedAt: Unix seconds, 0 = not reported */ }
+    refreshing, fingerprint? /* a Jellyfin library: hash of its listing, compared after a fresh
+    listing right before a removal */ }[] /* scannedAt/contentChangedAt: Unix seconds, 0 = not reported */ }
 ```
 
 **Play history** (`MediaVersion.watch`, DECISIONS D10; absent without a Tautulli connection for

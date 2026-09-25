@@ -31,7 +31,9 @@ import {
   canUnignore,
   discMemberPath,
   groupTitle,
+  hasJellyfinCopy,
   overrideBlocker,
+  reportOnlyReasons,
   sortByRank,
   type OverrideValue,
 } from '@/components/duplicates';
@@ -249,6 +251,7 @@ export default function DuplicateDetailPage() {
   // --- Render ----------------------------------------------------------------------
 
   const removeCount = files.filter((f) => f.decision === 'remove').length;
+  const reportOnly = reportOnlyReasons(files);
   // Copies that are single files of a disc (typically loose 00800.m2ts clips Plex lists as separate
   // versions, stored before loose clip sets were recognised).
   const clipCopies = files.filter((f) => !f.version.disc && discMemberPath(f.version) !== null).length;
@@ -322,6 +325,23 @@ export default function DuplicateDetailPage() {
           </Alert>
         )}
         <GroupHeaderCard group={group} libraryNames={libraryNames} profileName={profile.data?.name} />
+        {hasJellyfinCopy(files) && (
+          <Alert kind="info" title="Listed by a Jellyfin server">
+            Dupearr never deletes through Jellyfin. Approve this duplicate here, on its own page: each copy to remove is
+            moved to a recycle bin (Radarr/Sonarr’s, or Dupearr’s), only while every copy has a path mapping, and
+            Jellyfin is then told about the removed files.
+          </Alert>
+        )}
+        {reportOnly.length > 0 && (
+          <Alert kind="warning" title="Report only">
+            Dupearr only reports this duplicate and never removes any of its copies:
+            <ul className="m-0 mt-1 pl-5">
+              {reportOnly.map((r) => (
+                <li key={r}>{r}</li>
+              ))}
+            </ul>
+          </Alert>
+        )}
         {clipCopies > 0 && (
           <Alert
             kind="warning"

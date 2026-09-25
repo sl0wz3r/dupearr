@@ -203,6 +203,9 @@ func cloneVersion(src *models.MediaVersion) *models.MediaVersion {
 		if p.SharedWith != nil {
 			p.SharedWith = append([]string{}, p.SharedWith...)
 		}
+		if p.ShortcutOf != nil {
+			p.ShortcutOf = append([]string{}, p.ShortcutOf...)
+		}
 		v.Parts[i] = p
 	}
 	v.AudioTracks = append([]models.AudioTrack{}, src.AudioTracks...)
@@ -512,7 +515,7 @@ func buildUnits(entries []*itemEntry) []*unit {
 	for _, bk := range bucketKeys {
 		for _, comp := range idComponents(buckets[bk]) {
 			for _, cluster := range splitConflicting(comp) {
-				if distinctLibraries(cluster) >= 2 {
+				if distinctLibraries(cluster) >= 2 && (!readOnlyCluster(cluster) || distinctLibraries(cluster) == len(cluster)) {
 					units = append(units, newUnit(cluster))
 					continue
 				}
@@ -598,6 +601,20 @@ func splitConflicting(comp []*itemEntry) [][]*itemEntry {
 		out = append(out, byKey[k])
 	}
 	return out
+}
+
+// readOnlyCluster reports entries of a read-only media server (Jellyfin). Such a server's items of
+// one library are separate on purpose (Jellyfin groups the copies of a title into one item itself):
+// two of them sharing an external id are copies in separate folders or a stray release, which
+// Phase 1 never groups (docs/DECISIONS.md D12, research §5.1, S22). A cross-library unit is only
+// formed when every library contributes one item; otherwise each item stays its own unit.
+func readOnlyCluster(es []*itemEntry) bool {
+	for _, e := range es {
+		if e.item.ServerKind.ReadOnly() {
+			return true
+		}
+	}
+	return false
 }
 
 func distinctLibraries(es []*itemEntry) int {
@@ -888,6 +905,14 @@ func versionFlags(mt models.MediaType, vs []*models.MediaVersion) []string {
 		}
 		if v.Disc != nil && strings.TrimSpace(v.Disc.TrackedClip) != "" {
 			flags = addFlag(flags, models.FlagDiscTracked)
+		}
+		// Read-only media servers (Jellyfin, docs/DECISIONS.md D12): a person approves each such
+		// group on its own, and a report-only reason protects the whole group.
+		if readOnlyVersion(v) {
+			flags = addFlag(flags, models.FlagManualOnly)
+		}
+		if len(v.ReportOnly) > 0 {
+			flags = addFlag(flags, models.FlagReportOnly)
 		}
 	}
 	if comp, members := sameFileComponents(vs); len(members) > 0 || len(likelySameFilePairs(vs, comp)) > 0 {

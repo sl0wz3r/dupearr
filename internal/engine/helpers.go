@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,6 +31,15 @@ var (
 	// (S01E01E02, S01E01-E02, S01E01-02, S01E01.S01E02, 1x01-1x02, 1x01-02). A resolution such as
 	// "S01E01-1080p" is not a range.
 	reMultiEpisode = regexp.MustCompile(`(?i)(?:\bs\d{1,4}[ ._-]?e\d{1,4}(?:[ ._-]*(?:s\d{1,4}[ ._-]?)?e\d{1,4}|-\d{1,4}(?:[^0-9pi]|$))|\b\d{1,2}x\d{2,3}-(?:\d{1,2}x)?\d{2,3}(?:[^0-9pi]|$))`)
+	// reJellyfinMultiEpisode adds the multi-episode forms Jellyfin's own parser accepts
+	// (Emby.Naming MultipleEpisodeExpressions: an x or e between the episode numbers, "-" or " - "
+	// before a second SxEy or NxM): S01E03x04, S01E03-x04, S01E03xE04, 1x03x04, 1x03 - 1x04,
+	// S01E03 - 1x04. Jellyfin hides such a file behind a file of its first episode as a version of
+	// that episode, with no other signal (research S21), so it applies to Jellyfin versions only;
+	// Plex's own index protects the Plex copy.
+	// Episode numbers have at most three digits, as in Jellyfin's expressions, so a resolution such
+	// as 3840x2160-10bit is no episode range.
+	reJellyfinMultiEpisode = regexp.MustCompile(`(?i)(?:\bs\d{1,4}[x.]?e\d{1,3}|\bs?\d{1,4}x\d{1,3})(?:(?:-| - )?x?e\d{1,3}|(?:-| - )?xe?\d{1,3}|(?:-| - )s?\d{1,4}(?:x|e|xe)\d{1,3}|-\d{1,3})(?:[^0-9pi]|$)`)
 )
 
 // ---------------------------------------------------------------------------
@@ -452,11 +462,19 @@ func sharedWith(v *models.MediaVersion) []string {
 //     docs/DECISIONS.md D3) — this still works when the path index is incomplete, e.g. in a
 //     targeted scan that did not list the whole section;
 //   - a file name follows a multi-episode naming style (S01E01E02, S01E01-E02, S01E01-02,
-//     S01E01.S01E02, 1x01-1x02).
+//     S01E01.S01E02, 1x01-1x02; for a Jellyfin version also Jellyfin's own forms such as
+//     S01E01x02 and S01E01-x02);
+//   - the media server lists it as a multi-episode file (EpisodeEnd: Jellyfin's IndexNumberEnd,
+//     set only on the version whose file is the row's own). A multi-episode file Jellyfin hides as
+//     a version of its first episode carries no EpisodeEnd; the file name and Sonarr's episode ids
+//     are what protect it (docs/research/jellyfin-emby.md S21).
 //
 // Empty when there is no sign of a multi-episode file.
 func multiEpisodeReasons(v *models.MediaVersion) []string {
 	var out []string
+	if v.EpisodeEnd > 0 {
+		out = append(out, fmt.Sprintf("the media server lists it as a multi-episode file (through episode %d)", v.EpisodeEnd))
+	}
 	shared := false
 	for _, p := range v.Parts {
 		shared = shared || len(p.SharedWith) > 0
@@ -478,7 +496,11 @@ func multiEpisodeReasons(v *models.MediaVersion) []string {
 		}
 	}
 	for _, p := range versionPaths(v) {
-		if np := normPath(p); np != "" && reMultiEpisode.MatchString(stripExt(path.Base(np))) {
+		np := normPath(p)
+		if np == "" {
+			continue
+		}
+		if name := stripExt(path.Base(np)); reMultiEpisode.MatchString(name) || (readOnlyVersion(v) && reJellyfinMultiEpisode.MatchString(name)) {
 			out = append(out, "file name indicates a multi-episode file")
 			break
 		}
@@ -486,8 +508,52 @@ func multiEpisodeReasons(v *models.MediaVersion) []string {
 	return out
 }
 
+// shortcutReasons explains why a version's file is in use through .strm shortcuts the media server
+// lists (MediaPart.ShortcutOf, Jellyfin: docs/DECISIONS.md D12): removing it would break them.
+// Empty for Plex.
+func shortcutReasons(v *models.MediaVersion) []string {
+	var names []string
+	for _, p := range v.Parts {
+		for _, n := range p.ShortcutOf {
+			if n = strings.TrimSpace(n); n != "" && !slices.Contains(names, n) {
+				names = append(names, n)
+			}
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	sort.Strings(names)
+	return []string{"a .strm shortcut points to this file (" + strings.Join(names, ", ") + ")"}
+}
+
 // isShared reports whether a version's file may cover several episodes (see multiEpisodeReasons).
 func isShared(v *models.MediaVersion) bool { return len(multiEpisodeReasons(v)) > 0 }
+
+// reportOnlyReasons lists, once each and in version order, why versions of a group are only
+// reported (MediaVersion.ReportOnly: a .strm shortcut, unreadable stack parts, a disc source, an
+// unmapped copy, removals disabled on the server; docs/DECISIONS.md D12). Any reason protects every
+// version of the group. Empty for Plex, whose versions never carry one.
+func reportOnlyReasons(vs []*models.MediaVersion) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, v := range vs {
+		for _, r := range v.ReportOnly {
+			if r = strings.TrimSpace(r); r != "" && !seen[r] {
+				seen[r] = true
+				out = append(out, r)
+			}
+		}
+	}
+	return out
+}
+
+// readOnlyVersion reports a version of a media server Dupearr never removes through (a Jellyfin
+// version key, models.MediaServerKind.ReadOnly).
+func readOnlyVersion(v *models.MediaVersion) bool {
+	k, ok := models.KindOfVersionKey(v.Key)
+	return ok && k.ReadOnly()
+}
 
 func isStacked(v *models.MediaVersion) bool { return len(v.Parts) > 1 }
 

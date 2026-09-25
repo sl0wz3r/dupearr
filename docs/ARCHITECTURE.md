@@ -30,10 +30,15 @@ document disagree, fix one of them in the same change.
 - Ship as a multi-arch Docker image (amd64/arm64) with an Unraid template; also docker-compose and
   native binaries.
 
-**Later (designed for, not built in v1)**: Jellyfin/Emby (the kind-neutral media-server contract,
-`internal/mediaserver`, exists and Plex implements it; no Jellyfin or Emby client yet — issue #4,
-`docs/research/jellyfin-emby.md`), Lidarr/music, multiple Plex servers cross-matching, hash-based
-duplicate detection of files outside Plex.
+**Jellyfin (added, issue #4 Phase 1 — DECISIONS D12)**: Jellyfin 12.1+ is a **read-only** media
+server (`internal/integrations/jellyfin`, behind the kind-neutral `internal/mediaserver` contract).
+Dupearr detects what Jellyfin groups into one item (and scope groups across libraries), never
+removes, merges or edits anything through Jellyfin, and removes a Jellyfin copy only through its
+*arr (with a recycle bin) or into Dupearr's recycle bin, by a person's approval of that one group,
+while every copy has a path mapping; Jellyfin is then told the removed paths.
+
+**Later (designed for, not built in v1)**: Emby (`docs/research/jellyfin-emby.md` §5.4), Lidarr/
+music, multiple Plex servers cross-matching, hash-based duplicate detection of files outside Plex.
 
 ---
 
@@ -71,6 +76,8 @@ internal/
   integrations/
     plex/               PMS client, plex.tv PIN auth + resource discovery, → models.MediaVersion
                         (implements mediaserver.Client + the Plex capabilities)
+    jellyfin/           Jellyfin 12.1+ client, read only: an allowlist of reads + the change
+                        notification (mediaserver.Client, ChangeNotifier, RemovalGate) — D12
     arr/                Radarr & Sonarr v3 clients, webhook payload types
     tautulli/           Tautulli API v2 client (read only: play history) — DECISIONS D10
   pathmap/              remote→local path translation + cross-system file matching
@@ -95,7 +102,8 @@ docs/                   this spec, API reference, research notes, user docs
 ```
 
 Dependency direction (no cycles): `models` ← `store` ← `database`; `models` ← `disc`;
-`models`, `disc` ← `mediainfo`, `engine`; `models` ← `mediaserver` ← `integrations/plex`;
+`models`, `disc` ← `mediainfo`, `engine`; `models` ← `mediaserver` ← `integrations/plex`,
+`integrations/jellyfin`;
 `models` ← `integrations/*`, `pathmap`; `scanner`/`executor`/`health` depend on store +
 `mediaserver` (their clients) + integrations + engine + pathmap + disc; `commands` depends on
 scanner/executor/health/backup via small interfaces; `api` depends on all.

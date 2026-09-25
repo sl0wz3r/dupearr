@@ -28,6 +28,7 @@ Dupearr safely can jump to the [deployment hardening guide](#deployment-hardenin
 - [10. Keeping it secure](#10-keeping-it-secure)
 - [11. Incident: loose Blu-ray clips deleted](#11-incident-loose-blu-ray-clips-deleted)
 - [12. Watch history (Tautulli, issue #5)](#12-watch-history-tautulli-issue-5)
+- [13. Jellyfin (issue #4 Phase 1)](#13-jellyfin-issue-4-phase-1)
 
 ## 1. Scope and method
 
@@ -113,6 +114,7 @@ its port forwarded to the internet.
 **Assets**
 
 - the **Plex owner token**, which controls the Plex server and the plex.tv account;
+- a **Jellyfin API key** (added, issue #4): an administrator credential with no deletion switch;
 - Radarr, Sonarr and Tautulli **API keys**, and **notification secrets** (SMTP passwords, bot tokens,
   webhook URLs);
 - the user's **media files**: Dupearr can delete them;
@@ -576,8 +578,10 @@ unless you have a reason to change them.
 
 ### 9. Backups contain every secret
 
-A backup holds `config.xml` (API key) and the database (Plex token, *arr keys, notification
-secrets, password hash). Treat backup files like passwords:
+A backup holds `config.xml` (API key) and the database (Plex token, Jellyfin API key, *arr keys,
+notification secrets, password hash). A Jellyfin API key is an administrator key that can delete
+library folders through Jellyfin ([item 11](#11-handle-a-jellyfin-api-key-with-care)). Treat backup
+files like passwords:
 
 - Downloading a backup from the web UI asks for your password (scripts send the API key): a
   stolen session or an unattended tab cannot take the secrets with it (GAP-09).
@@ -600,7 +604,8 @@ If you think Dupearr, its data folder or a backup was compromised:
    it by itself: it refuses every credential at once, restarts, and resets before it accepts
    requests again.
 2. Regenerate the webhook token and update the webhook URLs in Radarr, Sonarr and Plex.
-3. Revoke the Plex token (plex.tv) and regenerate the *arr API keys and notification secrets.
+3. Revoke the Plex token (plex.tv) and any Jellyfin API key (Jellyfin → Dashboard → API Keys), and
+   regenerate the *arr API keys and notification secrets.
 4. Check *Activity → History* (filter *Security*: sign-ins, failed sign-ins, credential, setting
    and connection changes, backup downloads — recorded whatever the log level) and *System →
    Events* for anything you did not do.
@@ -613,6 +618,21 @@ If you think Dupearr, its data folder or a backup was compromised:
   View → force update*.
 - Security fixes ship only in the latest release ([SECURITY.md](../SECURITY.md)). Watch the
   releases.
+
+### 11. Handle a Jellyfin API key with care
+
+- A Jellyfin **API key is an administrator key**, and Jellyfin has no deletion switch: it performs
+  no deletion check for API keys, and its item delete removes a movie's whole folder. Anyone who
+  reads Dupearr's database or a backup could delete library folders through Jellyfin.
+- Dupearr only reads with the key (plus the change notification after a removal) and never calls a
+  delete, merge or edit endpoint: its Jellyfin client refuses every request outside a fixed
+  allowlist before it is sent (DECISIONS D12). It needs an administrator key to see every playback
+  session, so a user's token is refused.
+- The key is stored like the Plex token: in the database, masked in the UI and API, redacted in
+  logs (`Authorization: MediaBrowser Token="…"`), included in backups. It is sent only in that
+  header, never in a URL.
+- Create a dedicated key for Dupearr (*Dashboard → API Keys*), and revoke it there if your Dupearr
+  data folder or a backup leaks.
 
 ## 9. Final verification
 
@@ -809,3 +829,40 @@ TestBoundedBody, TestClassification, TestHistoryShapesAreNeverEmpty), `fakemedia
 TestTautulliTestDoesNotReflectUpstreamBodies); `internal/backup/tautulli_test.go`;
 `internal/scanner/watch_test.go` (TestWatchFailuresMarkEveryCopyFailed); e2e
 `internal/e2e/watch_test.go`.
+
+## 13. Jellyfin (issue #4 Phase 1)
+
+Jellyfin 12.1+ as a read-only media server (DECISIONS D12) added one outbound client
+(`internal/integrations/jellyfin`) and one secret class (the Jellyfin API key, an administrator
+credential). They follow the rules above:
+
+- **No deletion path through Jellyfin.** The client implements no deleting capability, and every
+  request must match an allowlist of method, path template and query keys (reads, plus
+  `POST /Library/Media/Updated` with a body of paths) before a connection is opened; ids are
+  validated as 32 hex digits. The fake Jellyfin records any delete, merge, unlink, credential in a
+  URL, legacy header or request outside the allowlist as a violation, and performs the destructive
+  ones faithfully (a delete removes the whole folder), so a regression destroys test files.
+- **The key never travels in a URL:** only `Authorization: MediaBrowser Token="…"`; the client
+  refuses `ApiKey`/`api_key` parameters and never sends the legacy `X-Emby-Token` headers. The
+  public identity read (`/System/Info/Public`) carries no credential, and every client reads it
+  before it first sends the key (also the library sync after a forced save of an address the
+  connection test never confirmed), so an old or foreign server is refused before it receives the
+  key.
+- **Outbound hardening** like the other clients: redirects are never followed, link-local and
+  cloud-metadata addresses are refused (netguard), TLS 1.2+, bodies and JSON sizes are bounded,
+  error texts carry no response body, reads are retried once, the notification never.
+- **Secret handling** like the Plex token: masked in every API response; a masked key is only
+  reused for the same endpoint (scheme, host, port and path) and never once certificate
+  verification is turned off for an `https` URL; a stored server's kind cannot change
+  (the key would be sent to another product); log lines are redacted (a `MediaBrowser` rule that
+  consumes the whole quoted parameter list).
+- **Removals stay manual and reversible:** a Jellyfin group is never auto-approved nor approved in
+  bulk, needs a path mapping for every copy, and is removed only through an *arr with a recycle bin
+  or into Dupearr's recycle bin.
+
+Regression tests: `internal/integrations/jellyfin/allowlist_test.go`, `transport_test.go`
+(TestKeyOnlyInTheAuthorizationHeader, TestIdentityReadsThePublicInfoFirst, TestRedirectsAreNeverFollowed, TestMetadataAddressesAreRefused,
+TestBodyLimits, TestErrorsCarryNoUpstreamBody), `sessions_test.go` (TestNoDeletingCapability);
+`internal/logging/redact_test.go` (TestRedactMediaBrowserAuthorization);
+`internal/api/jellyfin_test.go`; `internal/testutil/fakemedia/jellyfin_test.go`; e2e
+`internal/e2e/jellyfin_test.go`.

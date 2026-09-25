@@ -182,8 +182,14 @@ func (c *Checker) checkArrServerLinks(_ context.Context, s *snapshot) []result {
 		return nil
 	}
 	sort.Strings(names)
+	which := "Plex servers"
+	for _, srv := range s.enabledServers() {
+		if !srv.Kind.IsPlex() {
+			which = "media servers"
+		}
+	}
 	return []result{*issue(SourceArrServerLinks, "", models.HealthWarning,
-		"Several media servers are enabled, but it is not confirmed which Plex servers these applications feed: "+
+		"Several media servers are enabled, but it is not confirmed which "+which+" these applications feed: "+
 			quoteList(names)+". Until then their files are only matched by mapped paths, and duplicates they may track go to "+
 			"review. Choose the servers and confirm them in Settings → Applications (again after adding or enabling a "+
 			"media server).")}

@@ -67,6 +67,15 @@ const (
 	// FlagOtherServerUnread: a media server that may list this group's files could not be read
 	// completely in the scan (review, "Incomplete data").
 	FlagOtherServerUnread = "other_server_unread"
+	// Read-only media servers (Jellyfin; docs/DECISIONS.md D12).
+	// FlagManualOnly: a version lies on a media server Dupearr never removes through
+	// (MediaServerKind.ReadOnly): only a person's single approval may queue its removals (never auto
+	// mode, never a bulk approval). Not a review flag.
+	FlagManualOnly = "manual_only"
+	// FlagReportOnly: a version carries MediaVersion.ReportOnly reasons (a .strm shortcut, stack
+	// parts that could not be read, a disc source, an unmapped copy, removals disabled on the
+	// server): every version of the group is protected, so nothing is removed.
+	FlagReportOnly = "report_only"
 )
 
 // Decision is what happens to a version.
@@ -150,6 +159,10 @@ type CrossServerLibrary struct {
 	ScannedAt        int64    `json:"scannedAt"`
 	ContentChangedAt int64    `json:"contentChangedAt"`
 	Refreshing       bool     `json:"refreshing"`
+	// Fingerprint is the change signal of a library whose server reports no scan times (Jellyfin):
+	// mediaserver.ListingFingerprint of the scan's listing, which the executor lists again right
+	// before a removal ("" = none; never set for Plex, whose scan times are the signal).
+	Fingerprint string `json:"fingerprint,omitempty"`
 }
 
 // HasFlag reports whether the group carries flag f.
@@ -286,6 +299,9 @@ type MediaServerKind string
 
 const (
 	MediaServerPlex MediaServerKind = "plex"
+	// MediaServerJellyfin is a Jellyfin server (12.1 or later), a read-only source: Dupearr never
+	// removes anything through it (docs/DECISIONS.md D12).
+	MediaServerJellyfin MediaServerKind = "jellyfin"
 )
 
 // IsPlex reports a Plex server: kind "plex" or "".
@@ -298,10 +314,29 @@ func (k MediaServerKind) IsPlex() bool { return k == MediaServerPlex || k == "" 
 // not sufficient: docs/CONTRACTS.md "internal/mediaserver" lists what must be in place first.
 func (k MediaServerKind) Supported() bool {
 	switch k {
-	case MediaServerPlex, "":
+	case MediaServerPlex, "", MediaServerJellyfin:
 		return true
 	}
 	return false
+}
+
+// ReadOnly reports a kind Dupearr never removes through and whose server never reports whether a
+// file exists (Jellyfin, docs/DECISIONS.md D12). Every rule for such servers hangs on this one
+// method: its versions are removed only by a person's single approval, only into a recycle bin,
+// only when every copy of the group has a path mapping (the kept copy is confirmed on disk only),
+// and its groups never take part in auto mode.
+func (k MediaServerKind) ReadOnly() bool { return k == MediaServerJellyfin }
+
+// Label names the kind in messages ("Plex", "Jellyfin"). Plex's messages are written out where
+// they are made and never built from it (their text is unchanged since before kinds existed).
+func (k MediaServerKind) Label() string {
+	switch {
+	case k.IsPlex():
+		return "Plex"
+	case k == MediaServerJellyfin:
+		return "Jellyfin"
+	}
+	return "media server"
 }
 
 // KeyPrefix is the kind's prefix in version and item keys ("plex:<serverID>:…"); "" is Plex.
@@ -313,8 +348,11 @@ func (k MediaServerKind) KeyPrefix() string {
 }
 
 // SupportedMediaServerKinds returns the stored kind values Supported accepts, for SQL filters
-// ("kind IN (…)"), in the order the queries have always listed them.
-func SupportedMediaServerKinds() []string { return []string{string(MediaServerPlex), ""} }
+// ("kind IN (…)"): the legacy pair in the order the queries have always listed them, then the kinds
+// added later.
+func SupportedMediaServerKinds() []string {
+	return []string{string(MediaServerPlex), "", string(MediaServerJellyfin)}
+}
 
 // StorageSeparate is MediaServer.Storage for a server on storage of its own (another host, a
 // friend's server): its raw paths and file names are never compared with other servers', it is
@@ -328,8 +366,8 @@ type MediaServer struct {
 	Name              string          `json:"name"`
 	Kind              MediaServerKind `json:"kind"`
 	URL               string          `json:"url"`               // e.g. http://192.168.1.10:32400
-	Token             string          `json:"token"`             // the server's credential (Plex: X-Plex-Token); masked in API responses
-	MachineIdentifier string          `json:"machineIdentifier"` // server identity (Plex: machineIdentifier)
+	Token             string          `json:"token"`             // the server's credential (Plex: X-Plex-Token; Jellyfin: API key); masked in API responses
+	MachineIdentifier string          `json:"machineIdentifier"` // server identity (Plex: machineIdentifier; Jellyfin: /System/Info Id)
 	VerifyTLS         bool            `json:"verifyTls"`
 	Enabled           bool            `json:"enabled"`
 	// Storage is "" (the server may share storage with the other servers: compare paths) or

@@ -96,8 +96,8 @@ export default function ApplicationsPage() {
                         </Badge>
                       ))}
                       {serverList.length >= 2 && !linksConfirmedFor({ ...a, serverIds: enabledLinks(a) }) && (
-                        <Badge kind="warning" outline title="Choose the Plex servers this application feeds">
-                          Plex servers not confirmed
+                        <Badge kind="warning" outline title="Choose the media servers this application feeds">
+                          Media servers not confirmed
                         </Badge>
                       )}
                     </>

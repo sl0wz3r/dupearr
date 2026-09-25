@@ -359,6 +359,8 @@ func (r *run) processGroup(groupID int64, actions []models.Action) {
 				describeVersion(&f.Version), a.Size, f.Version.TotalSize()))
 		case isShared(&f.Version):
 			problems = append(problems, fmt.Sprintf("%s is a multi-episode file shared with other episodes", describeVersion(&f.Version)))
+		case hasShortcut(&f.Version):
+			problems = append(problems, fmt.Sprintf("a .strm shortcut points to %s", describeVersion(&f.Version)))
 		case isOptimized(&f.Version):
 			problems = append(problems, fmt.Sprintf("%s is a Plex optimized version", describeVersion(&f.Version)))
 		case r.discMember(&f.Version) != "":
@@ -421,6 +423,21 @@ func (r *run) processGroup(groupID int64, actions []models.Action) {
 			return
 		case problem != "":
 			r.skipGroup(g, targets, problem, false)
+			return
+		}
+	}
+	// Read-only media servers (Jellyfin, readonly.go): stored identity, removal gate, mappings.
+	if ro, _ := readOnlyGroup(g); ro {
+		problem, rescan, wait, failure := r.readOnlyRunProblem(g)
+		switch {
+		case problem != "":
+			r.skipGroup(g, targets, "Not removed: "+problem, rescan)
+			return
+		case wait != "":
+			if ctx.Err() != nil {
+				return
+			}
+			r.deferGroup(g, wait, failure, false)
 			return
 		}
 	}
@@ -1189,17 +1206,52 @@ func serverOf(g *models.DuplicateGroup, v *models.MediaVersion) int64 {
 }
 
 // playingKeys returns the ids a session of server sid reports while it plays a version of g: the
-// rating keys of the group's items on that server (Plex sessions name the item). Kinds whose
-// sessions also name versions or parts add those here and in listingPlayingIDs, its counterpart
-// for another server's listing of a file to remove (both feed the F10 "never while playing" checks).
+// rating keys of the group's items on that server (Plex sessions name the item, and only the
+// item). A version of another kind (Jellyfin, research S13) adds its own version id and the item id
+// of every stack part: a session names the version playing (PlayState.MediaSourceId) and, while
+// part 2 or later plays, the part's own item. listingPlayingIDs is the counterpart for another
+// server's listing of a file to remove (both feed the F10 "never while playing" checks).
 func playingKeys(g *models.DuplicateGroup, sid int64) []string {
-	return involvedRatingKeys(g)[sid]
+	out := involvedRatingKeys(g)[sid]
+	for i := range g.Files {
+		v := &g.Files[i].Version
+		if serverOf(g, v) != sid {
+			continue
+		}
+		if k, ok := models.KindOfVersionKey(v.Key); !ok || k.IsPlex() {
+			continue
+		}
+		ids := []string{v.SourceID}
+		for _, p := range v.Parts {
+			ids = append(ids, p.ItemID)
+		}
+		for _, id := range ids {
+			if id = strings.TrimSpace(id); id != "" && !slices.Contains(out, id) {
+				out = append(out, id)
+			}
+		}
+	}
+	return out
 }
 
 // listingPlayingIDs returns the ids a session of another server reports while it plays the
-// version listed by e: the listing's item (Plex sessions name the item). See playingKeys.
+// version listed by e: the listing's item (Plex sessions name the item) and, for a listing of
+// another kind (Jellyfin), its version id and the item ids of its stack parts. See playingKeys.
 func listingPlayingIDs(e *models.OtherListing) []string {
-	return []string{strings.TrimSpace(e.RatingKey)}
+	out := []string{strings.TrimSpace(e.RatingKey)}
+	k, ok := models.KindOfVersionKey(e.VersionKey)
+	if !ok || k.IsPlex() {
+		return out
+	}
+	if i := strings.LastIndexByte(e.VersionKey, ':'); i >= 0 {
+		out = append(out, e.VersionKey[i+1:])
+	}
+	for _, id := range e.PartItemIDs {
+		if id = strings.TrimSpace(id); id != "" {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // involvedRatingKeys returns the sorted rating keys of every file of the group, per server.
@@ -1259,14 +1311,26 @@ func samePathList(a, b []string) bool {
 	return true
 }
 
-// isShared reports a version whose file is also referenced by other items (multi-episode file).
+// isShared reports a version whose file is also referenced by other items (multi-episode file),
+// or that the media server lists as a multi-episode file (EpisodeEnd, Jellyfin).
 func isShared(v *models.MediaVersion) bool {
 	for _, p := range v.Parts {
 		if len(p.SharedWith) > 0 {
 			return true
 		}
 	}
-	return v.Arr != nil && v.Arr.Kind == models.ArrSonarr && len(v.Arr.EpisodeIDs) > 1
+	return v.EpisodeEnd > 0 || (v.Arr != nil && v.Arr.Kind == models.ArrSonarr && len(v.Arr.EpisodeIDs) > 1)
+}
+
+// hasShortcut reports a version whose file a .strm shortcut the server lists points to (Jellyfin,
+// MediaPart.ShortcutOf): it is in use and never removed.
+func hasShortcut(v *models.MediaVersion) bool {
+	for _, p := range v.Parts {
+		if len(p.ShortcutOf) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // isOptimized reports a Plex optimized version (never a duplicate, never removed).

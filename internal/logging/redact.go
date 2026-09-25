@@ -36,8 +36,12 @@ var redactRules = []redactRule{
 	// (map[X-Plex-Token:[abc]]): X-Api-Key, X-Plex-Token, X-Gotify-Key, X-Emby-Token, … — any
 	// X- header whose name ends in key, token, secret or password.
 	{regexp.MustCompile(`(?i)(\bx-[a-z0-9\-]*(?:key|token|secret|password)"?\s*[:=]\s*"?\[?\s*)[^\s"'\],;&<>]+`), "${1}" + Removed},
+	// Jellyfin/Emby authorization, whose value is a list of quoted parameters
+	// ("MediaBrowser Token=\"…\", Client=\"…\""): everything after the scheme goes, so no
+	// parameter can survive a quote.
+	{regexp.MustCompile(`(?i)(\b(?:proxy-|x-emby-)?authorization"?\s*[:=]\s*"?\[?\s*"?(?:mediabrowser|emby)\s+)[^\r\n\]]+`), "${1}" + Removed},
 	// Authorization headers, keeping the scheme: "Authorization: Bearer (removed)".
-	{regexp.MustCompile(`(?i)(\b(?:proxy-)?authorization"?\s*[:=]\s*"?\[?\s*(?:(?:bearer|basic|token|digest|apikey)\s+)?)[^\s"'\],;<>]+`), "${1}" + Removed},
+	{regexp.MustCompile(`(?i)(\b(?:proxy-)?authorization"?\s*[:=]\s*"?\[?\s*(?:(?:bearer|basic|token|digest|apikey|mediabrowser|emby)\s+)?)[^\s"'\],;<>]+`), "${1}" + Removed},
 	// Cookies: everything up to the end of the header value.
 	{regexp.MustCompile(`(?i)(\b(?:set-)?cookie"?\s*[:=]\s*"?\[?\s*)[^\r\n"'\]]+`), "${1}" + Removed},
 	// JSON string fields whose name looks secret: "password":"…", "apiKey":"…", "authToken":"…".

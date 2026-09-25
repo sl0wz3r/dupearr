@@ -1,0 +1,15 @@
+{"Items": [
+  {"Name": "Episode 3", "Id": "20000000000000000000000000000a01", "Type": "Episode", "Path": "/media/tv/Show (2020) [tvdbid-12345]/Season 01/Show (2020) S01E03.mkv",
+   "ProviderIds": {"Tvdb": "7003"}, "IndexNumber": 3, "ParentIndexNumber": 1, "SeriesId": "20000000000000000000000000000fff", "SeriesName": "Show",
+   "LocationType": "FileSystem", "VideoType": "VideoFile", "DateCreated": "2026-09-24T12:00:06.0000000Z", "MediaSourceCount": 2,
+   "MediaSources": [
+     {"Protocol": "File", "Id": "20000000000000000000000000000a01", "Path": "/media/tv/Show (2020) [tvdbid-12345]/Season 01/Show (2020) S01E03.mkv", "Type": "Default", "Container": "mkv", "Size": 100000, "Name": "Show (2020) S01E03", "IsRemote": false},
+     {"Protocol": "File", "Id": "20000000000000000000000000000a02", "Path": "/media/tv/Show (2020) [tvdbid-12345]/Season 01/Show (2020) S01E03-E04.mkv", "Type": "Default", "Container": "mkv", "Size": 200000, "Name": "E04", "IsRemote": false}
+   ]},
+  {"Name": "Episode 3-4", "Id": "20000000000000000000000000000b01", "Type": "Episode", "Path": "/media/tv/Show (2020) [tvdbid-12345]/Season 02/Show (2020) S02E03-E04.mkv",
+   "ProviderIds": {"Tvdb": "7203"}, "IndexNumber": 3, "IndexNumberEnd": 4, "ParentIndexNumber": 2, "SeriesId": "20000000000000000000000000000fff", "SeriesName": "Show",
+   "LocationType": "FileSystem", "VideoType": "VideoFile", "DateCreated": "2026-09-24T12:00:07.0000000Z",
+   "MediaSources": [
+     {"Protocol": "File", "Id": "20000000000000000000000000000b01", "Path": "/media/tv/Show (2020) [tvdbid-12345]/Season 02/Show (2020) S02E03-E04.mkv", "Type": "Default", "Container": "mkv", "Size": 200000, "Name": "Show (2020) S02E03-E04", "IsRemote": false}
+   ]}
+], "TotalRecordCount": 2, "StartIndex": 0}

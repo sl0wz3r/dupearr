@@ -23,7 +23,7 @@ your setup and use case to its issue (label `roadmap`), or to open a thread in D
 | Item | Stage | How you can help |
 |---|---|---|
 | [Dashboard widgets (Homepage, Homarr)](#dashboard-widgets-homepage-homarr) | Up next | `help wanted`: native widgets upstream (the `customapi` example and the stable stats contract are done) |
-| [Jellyfin and Emby](#jellyfin-and-emby) | Planned | `help wanted`: research and design first |
+| [Jellyfin and Emby](#jellyfin-and-emby) | Partly done | `help wanted`: confirm Jellyfin on real libraries; Emby (live checks first) |
 | [Watch-history criteria (Tautulli, Plex)](#watch-history-criteria-tautulli-plex) | Partly done | `help wanted`: Plex as a source (live verification first), progress, per-user filters |
 | [Several Plex servers](#several-plex-servers) | Partly done | `safety`: live checks of device and inode numbers (Phase 0), then cross-server groups |
 | [Lidarr and music libraries](#lidarr-and-music-libraries) | Exploring | Design discussion |
@@ -56,10 +56,13 @@ still needs a design.
 
 ## Jellyfin and Emby
 
-- **Today:** Plex only. `models.MediaServerKind` has one value (`plex`). The scanner, the executor
-  and the health checks reach media servers through the kind-neutral contract of
-  `internal/mediaserver` (`MediaServerFactory` in [docs/CONTRACTS.md](docs/CONTRACTS.md)); Plex is
-  its only implementation. This refactor (Phase 0) changed no behaviour.
+- **Today:** Plex, and **Jellyfin 12.1+ read-only** (Phase 1, [DECISIONS D12](docs/DECISIONS.md)).
+  The scanner, the executor and the health checks reach media servers through the kind-neutral
+  contract of `internal/mediaserver` (Phase 0). Dupearr detects what Jellyfin groups into one item
+  (and scope groups across libraries), never calls a Jellyfin delete, merge or edit, and removes a
+  Jellyfin copy only through the \*arr or into a recycle bin, by a person's approval of that one
+  duplicate, while every copy has a path mapping; Jellyfin is then told the removed paths.
+  [Configuration](docs/user/configuration.md#jellyfin) · [safety](docs/user/safety.md#jellyfin).
 - **Goal:** Jellyfin and Emby behind the same media-server layer. Dupearr would collect their
   versions and ids (TMDB/IMDb/TVDB), group and decide exactly as it does for Plex, and remove files
   through the \*arr or Dupearr's recycle bin.
@@ -74,6 +77,10 @@ still needs a design.
   filesystem method, by manual approval, into a recycle bin, and only when every copy has a path
   mapping. Emby follows with the same shape once it is decided how to rebuild its items (its
   API-key listing has one item per version).
+- **Next:** reports from real Jellyfin libraries (stacks, multi-episode files, `.strm`, merged
+  versions, the `.ignore` of a recycle bin inside a library), then auto approval of Jellyfin groups,
+  Jellyfin webhooks and posters (each its own decision); Emby (Phase 2 of the research, after its
+  open questions are confirmed live).
 
 ## Watch-history criteria (Tautulli, Plex)
 
@@ -122,8 +129,8 @@ still needs a design.
 
 ## Lidarr and music libraries
 
-- **Today:** only Plex *movie* and *show* libraries are scanned, with Radarr and Sonarr. Music and
-  photo libraries are ignored.
+- **Today:** only *movie* and *show* libraries (Plex, Jellyfin *Movies* and *Shows*) are scanned,
+  with Radarr and Sonarr. Music and photo libraries are ignored.
 - **Goal:** Lidarr and music libraries. Albums and tracks need their own grouping rules (editions,
   remasters, formats), so this starts with a design. Notes on Lidarr's API are in
   [docs/research/arr-api.md](docs/research/arr-api.md) (section 7).

@@ -231,7 +231,7 @@ export function LibrariesTable({ server, profiles }: LibrariesTableProps) {
                 compact
                 icon={Folder}
                 title="No libraries yet"
-                description="Sync to load the movie and TV libraries from Plex."
+                description="Sync to load the movie and TV libraries from the media server."
                 action={
                   <Button size="sm" icon={RefreshCw} onClick={runSync} loading={sync.isPending}>
                     Sync

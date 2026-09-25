@@ -38,6 +38,10 @@ var autoBlockingFlags = map[string]bool{
 	models.FlagOtherServerPossible: true,
 	models.FlagOtherServerKeeps:    true,
 	models.FlagOtherServerUnread:   true,
+	// docs/DECISIONS.md D12: Jellyfin copies are only removed by a person's single approval, and a
+	// report-only group is never acted on.
+	models.FlagManualOnly: true,
+	models.FlagReportOnly: true,
 }
 
 // BlocksAutoApproval reports whether a group flag keeps the group out of automatic approval (a

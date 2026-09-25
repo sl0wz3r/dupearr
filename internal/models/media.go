@@ -116,6 +116,12 @@ type MediaPart struct {
 	// SharedWith lists other media-server item ids (rating keys) that reference this same file,
 	// e.g. the other episode(s) of a multi-episode file.
 	SharedWith []string `json:"sharedWith,omitempty"`
+	// ItemID is the server's own item id of this part when it has one (Jellyfin: the item of a
+	// stack part, which a session names while that part plays); "" for Plex.
+	ItemID string `json:"itemId,omitempty"`
+	// ShortcutOf names the local .strm shortcuts the server lists that point to this file (Jellyfin,
+	// docs/DECISIONS.md D12): the file is in use through them and is never removed. Empty for Plex.
+	ShortcutOf []string `json:"shortcutOf,omitempty"`
 	// LinkCount is the hardlink count when LocalPath could be stat'ed (0 = unknown).
 	LinkCount int `json:"linkCount,omitempty"`
 	// Inode is "<device>:<inode>" when LocalPath could be stat'ed (TEXT: values can exceed int64).
@@ -311,6 +317,18 @@ type MediaVersion struct {
 	// ItemKeyID is the item's stable key id (MediaItem.KeyID) when its client sets one; "" (never
 	// for Plex) = the rating key. See KeyItemID.
 	ItemKeyID string `json:"itemKeyId,omitempty"`
+	// SourceID is the server's version id when it is not a Plex media id (Jellyfin: the media
+	// source id, the id of that version's own item); "" for Plex. See ServerVersionID.
+	SourceID string `json:"sourceId,omitempty"`
+	// EpisodeEnd is the last episode a multi-episode file covers as the media server reports it
+	// (Jellyfin: the row's IndexNumberEnd, set only on the version whose file is the row's own);
+	// 0 when not reported. Any value marks the version multi-episode (never removed).
+	EpisodeEnd int `json:"episodeEnd,omitempty"`
+	// ReportOnly lists why the version (and with it its whole group) is only reported, never acted
+	// on: a .strm shortcut in the title, stack parts that could not be read, a disc source, a copy
+	// without a path mapping, removals disabled on its server (docs/DECISIONS.md D12). Never set for
+	// Plex.
+	ReportOnly []string `json:"reportOnly,omitempty"`
 
 	Parts []MediaPart `json:"parts"`
 
@@ -370,6 +388,9 @@ type OtherListing struct {
 	ItemTitle    string `json:"itemTitle"`
 	Path         string `json:"path"` // as that server reports it
 	Match        string `json:"match"`
+	// PartItemIDs are the server's item ids of the listed version's parts when it has them
+	// (Jellyfin stack parts, which a session names while they play); nil for Plex.
+	PartItemIDs []string `json:"partItemIds,omitempty"`
 	// ItemKeepsAnother reports, for a version this group removes, whether the other item keeps a
 	// version that could be proven a different file (nil on a kept version, or when unknown).
 	ItemKeepsAnother *bool `json:"itemKeepsAnother"`

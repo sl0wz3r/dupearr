@@ -191,19 +191,49 @@ smaller id arrives, and either changes the group's signature anyway (`adoptable`
 key when the base key and content still match). Prerequisite: `sameContent`, `adoptable` and
 `inherit` must also accept a shared non-Plex version key; until then `KeyID` stays empty.
 
+Changed (issue #4 Phase 1, D12): Jellyfin is a supported kind, and the prerequisite above is met
+(`sameContent` also matches a shared non-Plex version key; the Jellyfin client sets `KeyID`).
+```go
+const MediaServerJellyfin MediaServerKind = "jellyfin"
+func (k MediaServerKind) Supported() bool // IsPlex() or "jellyfin" ("emby", "Jellyfin" are not)
+func (k MediaServerKind) ReadOnly() bool  // "jellyfin": never removed through, manual approval only, recycle bin only
+func (k MediaServerKind) Label() string   // "Plex" (also ""), "Jellyfin", else "media server"
+func SupportedMediaServerKinds() []string // ["plex", "", "jellyfin"]; keys "jellyfin:…" and "@jellyfin:" are recognised
+// ServerVersionID: the Plex media id when > 0, else the trimmed SourceID ("" for Plex).
+const FlagManualOnly = "manual_only" // a version of a read-only server: approved by a person, one group at a time (auto-blocking)
+const FlagReportOnly = "report_only" // a version is report-only: the group is protected with the reasons
+// MediaPart:    ItemID string `json:"itemId,omitempty"` (Jellyfin: the part's own item id; the playing check)
+//               ShortcutOf []string `json:"shortcutOf,omitempty"` (Jellyfin: .strm shortcuts pointing to the file; protected)
+// MediaVersion: SourceID string `json:"sourceId,omitempty"` (Jellyfin: the media source id; MediaID stays 0)
+//               EpisodeEnd int `json:"episodeEnd,omitempty"` (Jellyfin IndexNumberEnd, only on the row's own source)
+//               ReportOnly []string `json:"reportOnly,omitempty"` (why the version, and its group, is never acted on)
+// OtherListing: PartItemIDs []string `json:"partItemIds,omitempty"` (another server's stack-part item ids)
+// CrossServerLibrary: Fingerprint string `json:"fingerprint,omitempty"` (a library without scan times: its listing's hash)
+```
+Every new field is omitted while empty, so Plex rows and API answers keep their bytes.
+
 ## internal/mediaserver (added, issue #4 Phase 0 — types and contracts only; imports models)
 ```go
 // The listing types (fields unchanged from the Plex era; integrations/plex aliases them).
 type Identity struct { MachineIdentifier, Version, FriendlyName string } // MachineIdentifier: the server's stable identity
 type Section  struct { Key, Type, Title, UUID string; Locations []string // Type "movie" | "show"
-    Refreshing bool; ScannedAt, ContentChangedAt int64 }                 // 0/false when the server does not report them (D11 then refuses: see below)
+    Refreshing bool; ScannedAt, ContentChangedAt int64                   // 0/false when the server does not report them (D11 then refuses: see below)
+    OtherVideo bool } // added (Phase 1): Type "" but may list video files (Jellyfin mixed content, home or music videos);
+                      // never listed, so with several servers its server is unread for the groups it may concern and the executor refuses
 type ItemRef  struct { RatingKey string /* the server's item id */; MediaType models.MediaType; Title string; Year int
     ShowTitle string; Season, Episode int; GUID string; ExternalIDs map[string]string; MediaCount int
     Media []MediaRef; AddedAt time.Time }
 type MediaRef struct { ID int64; Optimized bool; Width, Height int; DurationMs int64; Parts []PartRef
     VersionID string } // VersionID: the server's version id when it is not a Plex media id ("" for Plex)
-type PartRef  struct { ID int64; File string; Size int64 }
+type PartRef  struct { ID int64; File string; Size int64
+    ItemID string } // added (Phase 1): the part's own item id where the server has one (Jellyfin stack parts)
 func VersionIDOf(m *MediaRef) string // VersionID, else strconv.FormatInt(ID)
+// ItemRef.Shortcuts []PartRef (added, Phase 1): .strm shortcuts the row lists (never versions; the
+// scanner protects the file each one points to).
+// ListingFingerprint (added, Phase 1): SHA-256 over the sorted lines of every row id, version id,
+// part path, size and part item id (shortcuts included). The D11 change signal of a library whose
+// server reports no scan times: recorded by the scan, compared after a fresh listing by the executor.
+func ListingFingerprint(refs []ItemRef) string
 
 // Client is read-only: no call deletes, changes or notifies anything.
 type Client interface {
@@ -224,7 +254,11 @@ type VersionDeleter interface {                    // Plex
 }
 type ItemRefresher  interface { RefreshItem(ctx context.Context, itemID string) error }        // Plex
 type FolderScanner  interface { ScanPath(ctx context.Context, sectionKey, dir string) error }  // Plex
-type ChangeNotifier interface { NotifyChanged(ctx context.Context, libraryKey string, paths []string) error } // defined for Jellyfin/Emby (Phase 1); nothing calls it yet
+type ChangeNotifier interface { NotifyChanged(ctx context.Context, libraryKey string, paths []string) error } // Jellyfin: the executor reports removed paths (UpdateType "Deleted")
+// RemovalGate (added, Phase 1): whether files the server lists may be removed at all ("" = yes, a
+// reason = no: its versions are report-only; an error = unknown, never "yes"). Jellyfin: no path
+// substitutions and the credential proven an API key or an administrator.
+type RemovalGate interface { RemovalProblem(ctx context.Context) (string, error) }
 
 var ErrNotFound = errors.New("media server: not found") // matched by every client's "no longer has it"
 ```
@@ -233,7 +267,9 @@ Other servers' listings (scanner `otherListings`) are told apart by server, medi
 playing checks look up the ids of `playingKeys` (the group's own servers) and `listingPlayingIDs`
 (another server's listing); for Plex both are the items' rating keys.
 
-Phase 1 prerequisites (found in Phase 0; each fails closed today, research `jellyfin-emby.md` §5.2):
+Phase 1 prerequisites (found in Phase 0, research `jellyfin-emby.md` §5.2; **all met in Phase 1**:
+the executor matches by version key, a Jellyfin library records a listing fingerprint, the session
+checks add source and part item ids, and `sameContent` matches shared non-Plex version keys):
 flipping `Supported()` alone is not enough. (1) The executor matches versions by the Plex media id
 (`executor/verify.go` `checkPlexVersion`, `sharedWithOtherMedia`, `targetMedia`, `remainsInItem`;
 `executor/crossserver.go` `listingProblem` against `OtherListing.MediaID`, 0 for a non-Plex
@@ -316,6 +352,54 @@ func (c *Client) Ownership(ctx context.Context, machineID string) (owned, known 
 // Webhook payload (Plex Pass webhooks, multipart field "payload").
 type WebhookPayload struct { Event string; Server struct{ UUID, Title string }; Metadata struct{ RatingKey, Type, Title, GrandparentTitle, LibrarySectionID string /* … */ } }
 func ParseWebhook(r *http.Request) (*WebhookPayload, error)
+```
+
+## internal/integrations/jellyfin (added, issue #4 Phase 1, D12 — read only)
+```go
+const MinVersion = "12.1.0"; const ProductName = "Jellyfin Server"
+type Options struct {
+    DeviceID   string        // the install's stable id (Authorization header DeviceId)
+    Version    string        // "" = Dupearr's version
+    VerifyTLS  bool
+    Timeout    time.Duration // default 30s
+    HTTPClient *http.Client  // optional (tests); copied, redirects never followed
+}
+type Client struct{ /* unexported */ }
+func New(baseURL, apiKey string, opts Options) *Client
+// Implements mediaserver.Client, ChangeNotifier and RemovalGate (compile-time assertions) and no
+// deleting capability. Every request passes an allowlist of method + path templates and query keys
+// (GET /System/Info/Public, /System/Info, /System/Configuration, /Library/VirtualFolders, /Items,
+// /Videos/{id}/AdditionalParts, /Sessions, /ScheduledTasks; POST /Library/Media/Updated) before a
+// connection is opened; the key travels only in `Authorization: MediaBrowser Token="…"`. GETs are
+// retried once on 502/503/504 or a transport error; the POST never is. Bodies are bounded.
+func (c *Client) PublicInfo(ctx context.Context) (*mediaserver.Identity, error) // no credential; ErrWrongApp, ErrTooOld
+// Identity: /System/Info (Id, Version, ServerName); a client's first call reads PublicInfo first,
+// so the key is only sent to a server that says it is Jellyfin ≥ 12.1.
+func (c *Client) Identity(ctx context.Context) (*mediaserver.Identity, error)
+// Sections: every virtual folder (read fresh on every call); movies/tvshows typed, other kinds that
+// may hold video OtherVideo; 401/403 = ErrForbidden.
+func (c *Client) Sections(ctx context.Context) ([]mediaserver.Section, error)
+// AllItems: complete or an error (ErrIncomplete; ErrPathSubstitutions while Jellyfin rewrites the
+// paths it reports); versions are the rows' file sources inside the library, keyed by source id,
+// with parts from AdditionalParts for alternates and stacked rows; rows of one library merged into
+// one title are one ref led by the smallest row id; a file version without a size, or a row whose
+// own file lies outside the library's folders, is incomplete.
+func (c *Client) AllItems(ctx context.Context, sectionKey string, mt models.MediaType) ([]mediaserver.ItemRef, error)
+// Item: one row (ErrNotFound when gone; ErrPathSubstitutions as above); every version's parts read,
+// ReportOnly reasons instead of failing (.strm in the title, unreadable parts, a missing size, a
+// disc), EpisodeEnd, KeyID.
+func (c *Client) Item(ctx context.Context, itemID string) (*models.MediaItem, error)
+func (c *Client) ActiveSessions(ctx context.Context) (map[string]bool, error) // item ids and media source ids, paused included
+func (c *Client) NotifyChanged(ctx context.Context, libraryKey string, paths []string) error // "Deleted"
+func (c *Client) NotifyCreated(ctx context.Context, libraryKey string, paths []string) error // "Created" (restore)
+func (c *Client) RemovalProblem(ctx context.Context) (string, error)
+type Status struct { Version string; Untested, Administrator bool; AdminErr error; PathSubstitutions bool
+    SubstErr error; LastLibraryScan time.Time } // what the health checks read
+func (c *Client) Status(ctx context.Context) (*Status, error)
+func UntestedVersion(raw string) bool
+var ErrUnauthorized, ErrForbidden, ErrInvalidArgument, ErrRedirect, ErrRefused, ErrWrongApp, ErrTooOld, ErrIncomplete, ErrPathSubstitutions error
+var ErrNotFound error // matches mediaserver.ErrNotFound
+type StatusError struct { Method, Path string; StatusCode int } // never carries the upstream body
 ```
 
 ## internal/integrations/arr
@@ -664,6 +748,15 @@ func GroupUsesLibrary(g *models.DuplicateGroup, id int64) bool // added (match h
 // MediaVersion.OtherServers and DuplicateGroup.CrossServer, counts ScanStats.SeparateNameMatches
 // (full scans) and marks OtherListing.KeptByGroup after the resolution; with one server none of it
 // runs and nothing changes.
+// Read-only servers (added, issue #4 Phase 1, D12): for a Jellyfin version the scan confirms files
+// through the path mappings only (an unmapped part makes the version report-only; a mapped file
+// missing from an existing folder is exists=false, so a group resolves by the local files), reads
+// the server's RemovalGate once per run (a reason or an error makes its versions report-only),
+// reads each listed .strm through the mappings and records it on its target's parts
+// (MediaPart.ShortcutOf; unreadable: the library's shared-file index is incomplete), records a
+// listing fingerprint for each Jellyfin library in the cross-server record, counts a server with a
+// Section.OtherVideo library as unread (several servers), and never searches Jellyfin items for
+// full-disc backups.
 // Matcher (exported for tests): matches versions to *arr files.
 type Matcher struct{ /* unexported */ }
 func NewMatcher(m *pathmap.Mapper) *Matcher // one-server policy: every instance feeds the only server
@@ -770,6 +863,20 @@ file and keep another version proven a different file on disk (`fileid.Compare`)
 and `keptInRun` also check every listing's version key; an *arr file is never confirmed by raw path
 for an unlinked or separate server, nor for an unmapped part when the *arr's path maps. The
 re-scans of the groups a run skips are queued once per server at the end of the run.
+Read-only servers (added, issue #4 Phase 1, D12): `ApproveReviewed` refuses (ErrNotApprovable) a
+group with a Jellyfin version unless a person approves it, and while any version is report-only or
+any part of any copy is unmapped; `func ReadOnlyGroup(g *models.DuplicateGroup) bool` lets the API
+refuse such a group in a bulk approval. Versions are matched by `ServerVersionID` / version key,
+never by media id alone. Before re-verification a run re-checks the mappings, the stored identity
+(none: never acted on) and the server's RemovalGate; the playing check adds source ids and part item
+ids. With several servers the D11 re-check also re-reads another Jellyfin server's RemovalGate before
+its libraries, sessions and items are trusted (a reason: review; an error: defer), refuses a removal
+a Section.OtherVideo library may concern, and never counts a report-only version as another
+server's remaining copy; a version whose file a .strm points to (ShortcutOf) is never removed.
+Method selection: the *arr only with its recycle bin (a permanent *arr delete is refused, never
+replaced), the filesystem method only into Dupearr's recycle bin, never "plex". After the removals
+of a group, one ChangeNotifier call per server and library with the removed paths (after an identity
+check); a restore sends NotifyCreated. The recycle bin gets an empty `.ignore` next to `.plexignore`.
 
 ## internal/fileid (added, D11 — read only)
 ```go
@@ -846,6 +953,16 @@ checks consider the enabled servers of a supported kind (`MediaServerKind.Suppor
 Plex-only checks (PlexMediaDeletionCheck, PlexOwnerCheck, the Tautulli and play-history checks)
 the enabled Plex servers (`IsPlex`); in Phase 0 both are the same servers, and sources and
 messages are unchanged.
+Jellyfin (added, issue #4 Phase 1, D12): `const SourceJellyfinServer = "JellyfinServerCheck"` and
+`type JellyfinStatus interface { Status(context.Context) (*jellyfin.Status, error) }` (a capability
+of the factory's clients): per enabled Jellyfin server an error below 12.1, a notice for a newer
+untested version, a warning for a credential that is not an API key or an administrator and an
+error for path substitutions (both disable removals), and one notice when no recycle bin exists
+anywhere. PathMappingCheck requires a mapping for every Jellyfin library folder whatever the
+deletion methods; RecycleBinCheck requires an empty `.ignore` in a bin inside a Jellyfin library
+folder (not below a hidden folder: Jellyfin never indexes those) and a library scan after it
+appeared. The connectivity message names the kind ("a different
+Jellyfin server (server id …)"); the several-servers checks say "media servers".
 
 ## internal/backup
 ```go
@@ -983,9 +1100,10 @@ type Deps struct {
     Backups   *backup.Service
     Notifier  *notifications.Service
     PlexOpts  plex.Options
-    PlexFactory func(s models.MediaServer) *plex.Client // the Plex-only routes: connection test (Plex kinds only; others are refused "Only Plex media servers are supported" first), identity probe and poster proxy (Plex kinds only: another kind gets no probe and a 404 poster, never a Plex request)
+    PlexFactory func(s models.MediaServer) *plex.Client // the Plex-only routes: connection test (Plex kinds; "jellyfin" uses JellyfinFactory; "emby" is refused "Emby is not supported yet", other kinds "Only Plex and Jellyfin media servers are supported"), identity probe and poster proxy (Plex kinds only: another kind gets no probe and a 404 poster, never a Plex request)
     ArrFactory  func(a models.ArrInstance) *arr.Client
     TautulliFactory func(t models.TautulliInstance) *tautulli.Client // added (D10): connection tests
+    JellyfinFactory func(s models.MediaServer) *jellyfin.Client // added (issue #4 Phase 1): Jellyfin connection tests and the forced save's /System/Info/Public probe; nil = Jellyfin cannot be tested
     WebFS     fs.FS            // embedded SPA (web/dist); may lack index.html in dev
     StartTime time.Time
     Restart   func()           // graceful restart (re-exec)
@@ -1019,7 +1137,8 @@ take it; an in-place restart hands the lock over). The Docker entrypoint also lo
 config → logging → backup.ApplyPendingRestore → database.Open(dataDir/dupearr.db) (+migrations,
 seed default profile templates + settings) → events → notifications → factories (the concrete Plex
 factory for the API; the kind-neutral `mediaserver.Factory` for scanner, executor and health: a
-`*plex.Client` for kind "plex" or "", a nil interface for any other kind) → scanner
+`*plex.Client` for kind "plex" or "", a `*jellyfin.Client` for "jellyfin" (DeviceID = the install's
+Plex client identifier), a nil interface for any other kind) → scanner
 (AutoApprove → executor.ApproveReviewed) → executor → health → backup → commands (register
 handlers + tasks) → auth → api → `executor.RecoverInterrupted` (before any command runs) →
 commands start → http.Server(s) (HTTP + optional HTTPS) → graceful shutdown on SIGINT/SIGTERM

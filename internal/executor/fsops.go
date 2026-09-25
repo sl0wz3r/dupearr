@@ -21,6 +21,16 @@ import (
 // even when the bin lies inside a library folder (docs/DECISIONS.md D6).
 const plexignoreContent = "# Dupearr recycle bin: keeps Plex from importing removed files.\n*\n"
 
+// ignoreName is Jellyfin's per-folder ignore file: an empty one hides the folder and everything
+// below it (docs/research/jellyfin-emby.md §3.6, S25), so Jellyfin never lists a removed copy in
+// the bin as a new version. It is written before the marker, so a .ignore newer than the marker
+// was added to an existing bin (the health check then asks for one Jellyfin library scan).
+const ignoreName = ".ignore"
+
+// binIgnoreFile reports the ignore files Dupearr writes into its bin (a bin holding only these is
+// still new).
+func binIgnoreFile(name string) bool { return name == ".plexignore" || name == ignoreName }
+
 // binMarkerName is the file that marks a folder as Dupearr's recycle bin. Dupearr only adopts a
 // new or empty folder as its bin (and then writes the marker), and CleanRecycleBin only empties a
 // folder that carries it: a misconfigured path (a library folder, a folder of home videos named
@@ -292,7 +302,8 @@ func hasBinMarker(bin string) (bool, error) {
 }
 
 // checkBinAdoptable verifies (read-only) that Dupearr may use bin as its recycle bin: it carries
-// the marker, or it does not exist yet, or it is empty (a ".plexignore" alone is fine).
+// the marker, or it does not exist yet, or it is empty (its ".plexignore" and ".ignore" alone are
+// fine).
 func checkBinAdoptable(bin string) error {
 	marked, err := hasBinMarker(bin)
 	if err != nil {
@@ -309,7 +320,7 @@ func checkBinAdoptable(bin string) error {
 		return fmt.Errorf("read %s: %w", bin, err)
 	}
 	for _, e := range entries {
-		if e.Name() == ".plexignore" {
+		if binIgnoreFile(e.Name()) {
 			continue
 		}
 		return foreignBinContent(bin, e.Name())
@@ -342,10 +353,10 @@ func prepareBin(bin string) error {
 // openBin creates the resolved (symlink-free) recycle bin bin on first use (os.MkdirAll with
 // binDirPerm: it need not exist when the setting is saved), opens it through an os.Root without
 // following symbolic links, re-checks through that root that Dupearr may use it (see
-// checkBinAdoptable) and writes its .plexignore and its .dupearr-recycle-bin marker through the
-// root too. Only a folder carrying that marker is ever emptied by CleanRecycleBin; checking and
-// writing through the opened folder means a folder renamed into the bin's place after the checks
-// is neither marked nor used. Idempotent.
+// checkBinAdoptable) and writes its .plexignore, its empty .ignore (Jellyfin) and its
+// .dupearr-recycle-bin marker through the root too. Only a folder carrying that marker is ever
+// emptied by CleanRecycleBin; checking and writing through the opened folder means a folder
+// renamed into the bin's place after the checks is neither marked nor used. Idempotent.
 func openBin(bin string) (*os.Root, error) {
 	if err := os.MkdirAll(bin, binDirPerm); err != nil {
 		return nil, fmt.Errorf("could not create the recycle bin %s: %w", bin, err)
@@ -363,6 +374,9 @@ func openBin(bin string) (*os.Root, error) {
 	}
 	if err := writeNewFileIn(rt, ".plexignore", plexignoreContent); err != nil {
 		return fail(fmt.Errorf("recycle bin %s: write .plexignore: %w", bin, err))
+	}
+	if err := writeNewFileIn(rt, ignoreName, ""); err != nil {
+		return fail(fmt.Errorf("recycle bin %s: write %s: %w", bin, ignoreName, err))
 	}
 	if err := writeNewFileIn(rt, binMarkerName, binMarkerContent); err != nil {
 		return fail(fmt.Errorf("recycle bin %s: write %s: %w", bin, binMarkerName, err))
@@ -399,7 +413,7 @@ func checkRootAdoptable(rt *os.Root, bin string) error {
 		return fmt.Errorf("read %s: %w", bin, err)
 	}
 	for _, e := range entries {
-		if e.Name() == ".plexignore" {
+		if binIgnoreFile(e.Name()) {
 			continue
 		}
 		return foreignBinContent(bin, e.Name())

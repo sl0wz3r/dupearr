@@ -2,10 +2,10 @@ import { ExternalLink } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 import type { DuplicateGroup, Id } from '@/api/types';
-import { GroupFlagBadge, GroupStatusBadge, RelativeTime } from '@/components/ui';
+import { Badge, GroupFlagBadge, GroupStatusBadge, RelativeTime } from '@/components/ui';
 import { GROUP_FLAG_DESCRIPTIONS, MEDIA_TYPE_LABELS, labelOf } from '@/lib/constants';
 import { episodeCode, formatNumber } from '@/lib/format';
-import { externalIdLinks } from './duplicateUtils';
+import { externalIdLinks, hasJellyfinCopy } from './duplicateUtils';
 import { PosterImage } from './PosterImage';
 
 function Meta({ label, children }: { label: string; children: ReactNode }) {
@@ -71,6 +71,11 @@ export function GroupHeaderCard({ group, libraryNames, profileName }: GroupHeade
 
         <div className="flex flex-wrap items-center gap-2">
           <GroupStatusBadge status={group.status} size="md" />
+          {hasJellyfinCopy(group.files) && (
+            <Badge kind="info" outline title="A copy is listed by a Jellyfin server (read-only)">
+              Jellyfin
+            </Badge>
+          )}
           {group.statusReason && <span className="text-sm text-fg">{group.statusReason}</span>}
         </div>
 

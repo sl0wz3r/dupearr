@@ -11,13 +11,13 @@ import (
 	"github.com/sl0wz3r/dupearr/internal/models"
 )
 
-// TestMediaServerKindValidationMessageUnchanged: the kind check now asks
-// models.MediaServerKind.Supported, and the API answers exactly as before: another kind is a 400
-// with the unchanged validation body on create, update and test, and a body without a kind is
-// stored as "plex".
+// TestMediaServerKindValidationMessageUnchanged: the kind check asks
+// models.MediaServerKind.Supported: since issue #4 Phase 1 jellyfin is a kind (it gets its own
+// connection test), Emby is refused as not supported yet and any other kind with the list of the
+// supported ones, on create and test; a body without a kind is stored as "plex", and the kind of a
+// stored server cannot be changed.
 func TestMediaServerKindValidationMessageUnchanged(t *testing.T) {
 	ts := newTestServer(t)
-	const want = `[{"propertyName":"kind","errorMessage":"Only Plex media servers are supported"}]`
 	body := func(kind string) map[string]any {
 		b := map[string]any{"name": "Other", "url": ts.plex.srv.URL, "token": fakePlexToken, "enabled": true}
 		if kind != "" {
@@ -25,7 +25,10 @@ func TestMediaServerKindValidationMessageUnchanged(t *testing.T) {
 		}
 		return b
 	}
-	for _, kind := range []string{"jellyfin", "emby", "Plex"} {
+	for kind, want := range map[string]string{
+		"emby": `[{"propertyName":"kind","errorMessage":"Emby is not supported yet"}]`,
+		"Plex": `[{"propertyName":"kind","errorMessage":"Only Plex and Jellyfin media servers are supported"}]`,
+	} {
 		for _, target := range []string{"/api/v1/mediaserver", "/api/v1/mediaserver/test"} {
 			rr := ts.do(http.MethodPost, target, body(kind))
 			if rr.Code != http.StatusBadRequest || strings.TrimSpace(rr.Body.String()) != want {
@@ -33,6 +36,13 @@ func TestMediaServerKindValidationMessageUnchanged(t *testing.T) {
 			}
 		}
 	}
+	// A Plex server's URL is not a Jellyfin server: the Jellyfin test refuses it (no key is sent).
+	for _, target := range []string{"/api/v1/mediaserver", "/api/v1/mediaserver/test"} {
+		if rr := ts.do(http.MethodPost, target, body("jellyfin")); rr.Code != http.StatusBadRequest && rr.Code != http.StatusBadGateway {
+			t.Errorf("POST %s kind jellyfin at a Plex URL: %d %s", target, rr.Code, rr.Body.String())
+		}
+	}
+	const want = `[{"propertyName":"kind","errorMessage":"The kind of a media server cannot be changed; add a new media server instead"}]`
 
 	var ms models.MediaServer
 	expect(t, ts.do(http.MethodPost, "/api/v1/mediaserver", body("")), http.StatusCreated, &ms)
@@ -64,7 +74,7 @@ func TestNonPlexServerGetsNoPlexRequests(t *testing.T) {
 		calls.Add(1)
 		return orig(s)
 	}
-	other := models.MediaServer{Name: "Other", Kind: "jellyfin", URL: ts.plex.srv.URL, Token: fakePlexToken, Enabled: true}
+	other := models.MediaServer{Name: "Other", Kind: "emby", URL: ts.plex.srv.URL, Token: fakePlexToken, Enabled: true}
 	if err := ts.db.MediaServers().Create(ctx, &other); err != nil {
 		t.Fatal(err)
 	}

@@ -661,7 +661,7 @@ describe('several Plex servers (docs/DECISIONS.md D11)', () => {
     const user = userEvent.setup();
     mocks.servers.list = [server(1, 'Plex')];
     render(<ArrInstanceModal instance={radarr} onClose={vi.fn()} />);
-    expect(screen.queryByRole('group', { name: 'Plex servers it feeds' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Media servers it feeds' })).not.toBeInTheDocument();
     mocks.results.updateArr = { ...radarr };
     await user.click(screen.getByRole('button', { name: 'Save' }));
     const sent = (mocks.calls.updateArr?.[0] as { instance: Record<string, unknown> }).instance;
@@ -674,7 +674,7 @@ describe('several Plex servers (docs/DECISIONS.md D11)', () => {
     mocks.servers.list = [server(1, 'Plex A'), server(2, 'Plex B', 'separate')];
     render(<ArrInstanceModal instance={radarr} onClose={vi.fn()} />);
     await settle();
-    const group = screen.getByRole('group', { name: 'Plex servers it feeds' });
+    const group = screen.getByRole('group', { name: 'Media servers it feeds' });
     expect(within(group).getByText('Separate storage: never matched by path or name')).toBeInTheDocument();
     expect(screen.getByText(/Not confirmed yet/)).toBeInTheDocument();
     const confirm = screen.getByLabelText(/Radarr feeds exactly the servers ticked above/);
@@ -710,7 +710,7 @@ describe('several Plex servers (docs/DECISIONS.md D11)', () => {
     await settle();
     const confirm = screen.getByLabelText(/Radarr feeds exactly the servers ticked above/);
     expect(confirm).toBeChecked();
-    await user.click(within(screen.getByRole('group', { name: 'Plex servers it feeds' })).getByLabelText('Plex A'));
+    await user.click(within(screen.getByRole('group', { name: 'Media servers it feeds' })).getByLabelText('Plex A'));
     expect(confirm).not.toBeChecked();
     mocks.results.updateArr = { ...radarr };
     await user.click(screen.getByRole('button', { name: 'Save' }));

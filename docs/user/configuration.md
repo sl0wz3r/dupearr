@@ -6,6 +6,7 @@ Settings pages have a **Show Advanced** toggle for the less common options, and 
 have a **Test** button.
 
 - [Plex (media servers)](#plex-media-servers)
+- [Jellyfin](#jellyfin)
 - [Libraries and scope groups](#libraries-and-scope-groups)
 - [Radarr and Sonarr (applications)](#radarr-and-sonarr-applications)
 - [Tautulli (watch history)](#tautulli-watch-history)
@@ -82,6 +83,73 @@ servers, Health reports a disabled server that indexes the same folders as an en
 one of **two** servers turns Dupearr back into a one-server installation: nothing protects the
 disabled server's files then, and no health check mentions it.
 
+## Jellyfin
+
+*Settings → Media Servers → + → Jellyfin* (Jellyfin **12.1 or later**; Emby is not supported yet).
+
+Dupearr **only reads** from Jellyfin. It never deletes, merges or edits anything through Jellyfin:
+Jellyfin's delete removes a movie's whole folder (every version, subtitles, sometimes another
+movie) and cannot remove a single version. A Jellyfin copy is removed only through Radarr/Sonarr or
+into Dupearr's recycle bin (see [Safety](safety.md#jellyfin)).
+
+| Field | Notes |
+|---|---|
+| URL | The address Dupearr reaches Jellyfin at, with its port (default 8096) and any base URL, e.g. `http://jellyfin:8096` when both share a Docker network. |
+| API Key | Create one in Jellyfin → *Dashboard → API Keys* and give it a name such as "Dupearr". It is an **administrator** key: Dupearr needs that to see every playback session. A user's token is refused. The key is stored like the Plex token (masked, redacted in logs, in backups) and sent only in a request header. |
+| Verify TLS | Turn off only for self-signed `https://` URLs you trust. |
+| Storage | As for Plex, shown once you have more than one media server. |
+
+**Test** shows the product, version and server id, and confirms the key is an administrator's. It
+warns when removals from the server would be disabled (path substitutions, below); you can still
+save it, but Dupearr then does not read its libraries until the cause is fixed.
+
+What to set up for removals:
+
+- **A path mapping for every Jellyfin library folder** (*Settings → Media Management → Path
+  Mappings*, source = the Jellyfin server). Jellyfin never reports whether a file exists, so Dupearr
+  checks every copy on disk itself; a duplicate with a copy Dupearr cannot see is only reported.
+- **A recycle bin**: Radarr's or Sonarr's own (their *Recycling Bin* setting) for files they track,
+  or Dupearr's (*Settings → Media Management → Recycle bin path*) for the others. Jellyfin copies are
+  never deleted permanently; without a bin the removal is refused. Dupearr writes an empty `.ignore`
+  file into its bin so Jellyfin does not index it. A bin below a hidden folder (such as
+  `<library>/.dupearr-recycle`) is never indexed by Jellyfin anyway. When the bin lies elsewhere
+  inside a Jellyfin library folder and the `.ignore` is new, run **Scan All Libraries** in Jellyfin
+  once (Health reminds you until Jellyfin reports a scan).
+- **No path substitutions** in Jellyfin's configuration: Jellyfin then reports rewritten paths for
+  every file (but not for its library folders), so Dupearr's mappings could point at the wrong file.
+  While any are set, Dupearr does not read that server's libraries (the scan reports an error for
+  them and leaves its duplicates as they were), removes nothing it lists, and Health shows an error.
+- **Movies and Shows libraries only.** Dupearr reads Jellyfin libraries of the *Movies* and *Shows*
+  content types. With a second media server (Plex, or another Jellyfin), a Jellyfin library of
+  another kind that may hold videos (*Mixed Movies and Shows*, *Home Videos and Photos*, *Music
+  Videos*) could list any of the files it compares, so every duplicate of the other servers that
+  removes something goes to review ("could not read the media server …") until that library is
+  gone. Recreate it as a Movies or Shows library, or declare the Jellyfin server
+  [separate storage](#several-plex-servers) if it really does not read the same files.
+
+What Dupearr detects on Jellyfin: the copies Jellyfin itself groups into one movie or episode
+(several files in one movie folder named like the folder, e.g. `Movie (2020) - 1080p.mkv` and
+`Movie (2020) - 2160p.mkv`; versions merged in Jellyfin; several files of one episode in a season
+folder), and copies in libraries that share a [scope group](#libraries-and-scope-groups), one movie
+or episode per library. Copies in **separate folders of one library**, or a stray release lying in
+another movie's folder, are separate movies in Jellyfin and are not detected; when such a title is
+also in another library of the scope group, none of its copies is paired across the libraries
+either. Always shown but **only reported** (never removed): a title with a `.strm` shortcut, a
+stacked copy (`-cd1`, `-part1` …) whose parts could not be read, a disc folder or image, and a copy
+without a path mapping. A file a `.strm` shortcut points to is never removed.
+
+Approving: open the duplicate and approve it on its own page. Bulk approval and auto mode never
+take a Jellyfin duplicate. After a removal Dupearr tells Jellyfin which files went, and after a
+restore which came back; Jellyfin may still list a removed copy for a minute or two, which does not
+matter to Dupearr (it decides by the files on disk). Plex and Jellyfin over the same files count as
+[several servers](#several-plex-servers): a file the other server lists is only removed when that
+server keeps a copy Dupearr can prove is a different file.
+
+**Adding a Jellyfin server next to Plex** (or any second media server) makes the server links of
+every Radarr/Sonarr instance unconfirmed: until you choose the servers each one feeds and tick the
+confirmation (*Settings → Applications → (instance) → Media servers it feeds*), the duplicates it
+may track go to review.
+
 ## Libraries and scope groups
 
 After adding a server, *Settings → Media Servers → (server) → Libraries* lists its movie and TV
@@ -108,7 +176,7 @@ also lists is protected ([Several Plex servers](#several-plex-servers)).
 | URL | Including the \*arr's URL base if it has one: `http://radarr:7878` or `https://proxy.example/radarr`. A missing URL base shows up as a redirect error on **Test**. |
 | API key | Radarr/Sonarr → *Settings → General → Security → API Key*. Sent only in the `X-Api-Key` header. |
 | Verify TLS | As for Plex. |
-| Plex servers it feeds | Shown once there are two or more media servers. Tick the servers that see the same files as this instance (the same disks or share), never a server on another host that only holds copies of them, then tick the confirmation below the list. |
+| Media servers it feeds | Shown once there are two or more media servers (Plex or Jellyfin). Tick the servers that see the same files as this instance (the same disks or share), never a server on another host that only holds copies of them, then tick the confirmation below the list. |
 
 Add **every** instance, including a separate 4K instance: Dupearr matches each Plex copy to the
 instance that tracks it (by path, then name + size), which unlocks quality/source/custom-format
@@ -125,13 +193,13 @@ Recommendations:
 - **Separate 4K instance?** By default versions tracked by *different* instances are treated as an
   intentional pair and the group is *protected*
   ([setting](#media-management-settings): *Different \*arr instances are intentional*).
-- **Several Plex servers?** Choose the servers each instance feeds, tick the confirmation and save
+- **Several media servers?** Choose the servers each instance feeds, tick the confirmation and save
   (saving without the tick, for instance after changing only the API key, confirms nothing). Until
   you confirm, the instance is only matched to files through path mappings, duplicates it may track
   go to review, and Health warns. With one server there is nothing to choose: the instance is
   linked to it (an upgrade from an earlier version links the existing instances the same way).
-  **Adding or enabling another Plex server** makes the links of every instance not linked to it
-  unconfirmed again: check them after each new server.
+  **Adding or enabling another media server** (Plex or Jellyfin) makes the links of every instance
+  not linked to it unconfirmed again: check them after each new server.
 - **How links are used.** A Radarr/Sonarr whose paths are mapped is only ever matched by those
   mapped paths to a server without a mapping for them, whatever the links say. With **neither**
   side mapped, raw paths (and names and sizes) are matched only for the servers you confirmed:
@@ -181,7 +249,7 @@ Path mappings translate each app's paths into **Dupearr's own view** so it can:
    checks of kept copies. These only work for files covered by a **Plex** mapping whose local
    folder exists: Dupearr never deletes outside mapped folders.
 
-*Settings → Media Management → Path Mappings → +*: pick the source (a Plex server or an \*arr
+*Settings → Media Management → Path Mappings → +*: pick the source (a media server or an \*arr
 instance), the **remote path** (as that app shows it) and the **local path** (as Dupearr sees it).
 The longest matching prefix wins, whole path segments only (`/data/movies` never matches
 `/data/movies2`). Windows paths and UNC shares are matched case-insensitively. Dupearr warns if a
@@ -192,6 +260,10 @@ filesystem method, the recycle bin and hardlink detection add one Plex mapping t
 folder to itself (remote `/data/media` → local `/data/media`). If you only delete through the
 \*arrs and Plex, remove `filesystem` from the deletion methods instead; the health check warns
 while the filesystem method is enabled and a library folder is not mapped.
+**A Jellyfin server always needs a mapping** for each of its library folders, whatever the
+deletion methods (even the identity mapping above): Jellyfin never reports whether a file exists,
+so a duplicate with an unmapped Jellyfin copy is only reported, and the health check says which
+folders lack one.
 
 ### Examples
 
@@ -256,17 +328,17 @@ guards interact.
 | Setting | Default | Meaning |
 |---|---|---|
 | Dry run | **on** | Simulate removals; nothing is deleted or moved. |
-| Mode | manual | `manual`: you approve groups. `auto`: *pending* groups whose decision stayed identical for *Stable scans required* full scans are approved automatically, unless a flag asks for a human look (review reasons, sample, stacked, multi-episode, too new, \*arr busy, playing, keeper not tracked by the \*arr, full-disc backup). A disc is never removed by auto mode. |
+| Mode | manual | `manual`: you approve groups. `auto`: *pending* groups whose decision stayed identical for *Stable scans required* full scans are approved automatically, unless a flag asks for a human look (review reasons, sample, stacked, multi-episode, too new, \*arr busy, playing, keeper not tracked by the \*arr, full-disc backup, a copy on Jellyfin). A disc or a Jellyfin copy is never removed by auto mode. |
 | Stable scans required | 2 | Auto mode approves a group only after this many consecutive **full** scans with the same decision (webhook re-checks do not count). 1–100. |
 | Scan interval | 360 min | Scheduled full scan (0 = off, otherwise at least 15). Keep it on even with webhooks: the \*arrs drop webhooks while they are failing. |
 | Minimum age | 168 h | Never remove a copy added less than this long ago (the newer of the Plex and \*arr dates, or of Plex's date and the file's change time for a copy no \*arr dates; an unknown date also waits); the group is *deferred*. 0 = off. |
 | Max deletions per run | 25 | Stop processing the queue after this many removals per run (at least 1: cannot be switched off). |
 | Max GB per run | 500 | Stop after this much data per run (decimal GB, at least 1). |
-| Deletion methods | `arr`, `plex`, `filesystem` | Allowed methods, in order of preference. Remove one to never use it. |
+| Deletion methods | `arr`, `plex`, `filesystem` | Allowed methods, in order of preference. Remove one to never use it. `plex` never applies to Jellyfin copies, and for them `arr` and `filesystem` only move files into a recycle bin. |
 | Rescan \*arr after delete | on | Let the \*arr adopt the kept copy (when it is in the same folder). |
 | Unmonitor when the keeper is elsewhere | on | When the kept copy is in another instance/library, unmonitor the item in the instance that lost its copy so it does not download it again. |
 | Add import-list exclusion | off | Additionally exclude that item from the instance's import lists. |
-| Recycle bin path | *(empty)* | Folder for filesystem removals (on the same disk/share as the media, e.g. `/data/.dupearr-recycle`). Empty = filesystem removals are **permanent**. It must not be or contain a mapped media folder, a library folder or Dupearr's data folder, and may only lie inside a library folder below a hidden folder (`.dupearr-recycle`). Dupearr creates it on first use, with a `.plexignore` and a `.dupearr-recycle-bin` marker, and only adopts a new or empty folder. |
+| Recycle bin path | *(empty)* | Folder for filesystem removals (on the same disk/share as the media, e.g. `/data/.dupearr-recycle`). Empty = filesystem removals are **permanent**. It must not be or contain a mapped media folder, a library folder or Dupearr's data folder, and may only lie inside a library folder below a hidden folder (`.dupearr-recycle`). Dupearr creates it on first use, with a `.plexignore`, an empty `.ignore` (Jellyfin) and a `.dupearr-recycle-bin` marker, and only adopts a new or empty folder. |
 | Recycle bin cleanup | 7 days | Delete the dated recycle-bin folders older than this (daily *Clean Recycle Bin* task). 0 = keep forever (empty the bin yourself). |
 | Refresh Plex after delete | on | Refresh the Plex item so the removed version disappears. |
 | Clean up stale Plex entries | on | If Plex still lists a removed file as missing, delete that one entry (never one that shares a path with a kept copy). |

@@ -9,9 +9,11 @@ import {
   FileQuestionMark,
   FileExclamationPoint,
   FileX,
+  FileText,
   Glasses,
   History,
   Hourglass,
+  Hand,
   Languages,
   Layers,
   Library,
@@ -64,6 +66,8 @@ export const GROUP_FLAG_ICONS: Record<GroupFlag, LucideIcon> = {
   other_server_keeps: ServerCog,
   other_server_possible: ServerCrash,
   other_server_unread: ServerOff,
+  manual_only: Hand,
+  report_only: FileText,
 };
 
 const KIND_TEXT: Record<StatusKind, string> = {

@@ -52,10 +52,13 @@ func (s *Server) validateTautulli(ctx context.Context, t *models.TautulliInstanc
 	}
 	if t.ServerID <= 0 {
 		errs = append(errs, invalid("serverId", "Choose the Plex server this Tautulli monitors"))
-	} else if _, err := s.d.Store.MediaServers().Get(ctx, t.ServerID); errors.Is(err, store.ErrNotFound) {
+	} else if ms, err := s.d.Store.MediaServers().Get(ctx, t.ServerID); errors.Is(err, store.ErrNotFound) {
 		errs = append(errs, invalid("serverId", "Media server %d does not exist", t.ServerID))
 	} else if err != nil {
 		return nil, err
+	} else if !ms.Kind.IsPlex() {
+		// Tautulli records the plays of a Plex server only (docs/DECISIONS.md D10).
+		errs = append(errs, invalid("serverId", "Tautulli monitors Plex servers only; %s is a %s server", ms.Name, ms.Kind.Label()))
 	}
 	return errs, nil
 }

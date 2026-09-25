@@ -34,6 +34,12 @@
 //
 //	go run ./tools/fakemedia -plex2-port 32401 -plex2-mode subset
 //
+// A fake Jellyfin 12.1 (read-only in Dupearr, docs/DECISIONS.md D12) is served over the same tree
+// with -jellyfin-port; it resolves its items from the files on disk the way Jellyfin does, so it
+// groups the scenario's files its own way. Deleting anything through it is reported on shutdown:
+//
+//	go run ./tools/fakemedia -jellyfin-port 8096
+//
 // Run with -h for all flags and -list for the available scenarios.
 package main
 
@@ -100,6 +106,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		verbose       = fs.Bool("v", false, "log every request to stderr (secrets redacted)")
 		plex2Port     = fs.Int("plex2-port", -1, "serve a second fake Plex Media Server on this `port` (-1 = none)")
 		plex2Mode     = fs.String("plex2-mode", "shared", "what the second server lists: `shared|subset|mirror`")
+		jellyfinPort  = fs.Int("jellyfin-port", -1, "serve a fake Jellyfin 12.1 over the scenario's tree on this `port` (-1 = none)")
 	)
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -137,6 +144,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if *plex2Port < -1 || *plex2Port > 65535 {
 		return fmt.Errorf("%w: invalid plex2 port %d", errUsage, *plex2Port)
 	}
+	if *jellyfinPort < -1 || *jellyfinPort > 65535 {
+		return fmt.Errorf("%w: invalid jellyfin port %d", errUsage, *jellyfinPort)
+	}
 	sc.Server.AllowMediaDeletion = *mediaDeletion
 	sc.Server.AutoEmptyTrash = *autoEmpty
 
@@ -156,6 +166,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			return fmt.Errorf("%w: invalid %s port %d", errUsage, p.server, p.port)
 		}
 		addrs[p.server] = net.JoinHostPort(*host, strconv.Itoa(p.port))
+	}
+	if *jellyfinPort >= 0 {
+		sc.WithJellyfin()
+		addrs[fakemedia.ServerJellyfin] = net.JoinHostPort(*host, strconv.Itoa(*jellyfinPort))
 	}
 
 	opts := fakemedia.Options{Dir: *dataDir, Scenario: sc, Addrs: addrs, LenientAccept: *lenient, DiscImageScanner: *discScanner}

@@ -33,9 +33,13 @@ type world struct {
 	arrs     map[string]*arrState
 	arrOrder []string
 	tautulli *tautulliState
+	// jellyfin is the fake Jellyfin server over the same tree (nil when the scenario has none).
+	jellyfin *jellyfinState
 
 	fileSpecs map[string]*Version // media-root relative path → first version declaring it
 	partSpecs map[string]Part     // media-root relative path → part declaration
+	// extraFiles are files no Plex item lists (Scenario.ExtraFiles).
+	extraFiles []ExtraFile
 
 	discs      []*discPlan            // full-disc backups (movies first, scenario order)
 	discFiles  map[string]bool        // media-root relative paths written by the disc planner
@@ -408,6 +412,12 @@ func buildWorld(sc *Scenario, root string, now func() time.Time, discScanner boo
 	w.buildTautulli(sc, playsOf)
 	if err := w.buildArrs(sc); err != nil {
 		return nil, err
+	}
+	if err := w.buildJellyfin(sc); err != nil {
+		return nil, err
+	}
+	for _, f := range sc.ExtraFiles {
+		w.extraFiles = append(w.extraFiles, f)
 	}
 	w.moviePlans, w.movieClips = nil, nil
 	return w, nil
@@ -950,6 +960,30 @@ func (w *world) materialize() error {
 			if err := createSparse(lp, sp.Size); err != nil {
 				return fmt.Errorf("create %s: %w", rel, err)
 			}
+		}
+	}
+	if w.jellyfin != nil {
+		for _, l := range w.jellyfin.libs {
+			for _, d := range l.dirs {
+				if err := os.MkdirAll(w.local(d), 0o755); err != nil {
+					return fmt.Errorf("create library dir: %w", err)
+				}
+			}
+		}
+	}
+	for _, f := range w.extraFiles {
+		lp := w.local(f.File)
+		if err := os.MkdirAll(filepath.Dir(lp), 0o755); err != nil {
+			return fmt.Errorf("create dir for %s: %w", f.File, err)
+		}
+		if f.Content != "" {
+			if err := os.WriteFile(lp, []byte(f.Content), 0o644); err != nil {
+				return fmt.Errorf("create %s: %w", f.File, err)
+			}
+			continue
+		}
+		if err := createSparse(lp, f.Size); err != nil {
+			return fmt.Errorf("create %s: %w", f.File, err)
 		}
 	}
 	// Movie folders of *arr movies without files still exist on disk (like Radarr's).

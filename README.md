@@ -115,6 +115,11 @@ same ones the [demo](#try-it-without-touching-your-library) uses). No real media
 - **Duplicate detection in Plex** — movies and episodes with several versions in one item (what
   Plex's own "Duplicates" filter shows) and, opt-in per library group, the same title across
   libraries (e.g. *Movies* + *Movies 4K*), matched by TMDB/IMDb/TVDB ids.
+- **Jellyfin 12.1+, read-only** — the copies Jellyfin groups into one movie or episode (and scope
+  groups across libraries). Dupearr never deletes through Jellyfin: a Jellyfin copy is removed only
+  through Radarr/Sonarr or into Dupearr's recycle bin, after you approve that one duplicate, and
+  Jellyfin is told which files went. Details: [configuration](docs/user/configuration.md#jellyfin) ·
+  [safety](docs/user/safety.md#jellyfin).
 - **Knows what not to call a duplicate** — Plex *Optimized Versions* are never touched; different
   editions (Director's Cut, Extended, IMAX…), 3D releases and different-language copies are kept
   apart by default; multi-episode files are handled per episode; a 4K and a 1080p copy managed by
@@ -312,10 +317,12 @@ Open `http://<host>:3873/`.
    `http://tower:3873/`), not through a public domain name, and it asks for the **setup code**
    Dupearr prints in its log at startup (`docker logs dupearr`, line *First-run setup is pending
    … setupCode=XXXXX-XXXXX-XXXXX-XXXXX*; a new code at every start).
-2. **Add Plex** — *Settings → Media Servers → +*. Use **Sign in with Plex** to pick the server
-   and connection, or enter the URL and token by hand. **Test** reports whether the token is the
-   server **owner's** and whether **Allow media deletion** is on (both are only needed for the
-   Plex deletion method).
+2. **Add Plex or Jellyfin** — *Settings → Media Servers → +*. For Plex, use **Sign in with Plex**
+   to pick the server and connection, or enter the URL and token by hand; **Test** reports whether
+   the token is the server **owner's** and whether **Allow media deletion** is on (both are only
+   needed for the Plex deletion method). For Jellyfin (12.1 or later), enter its URL and an API
+   key from Jellyfin → *Dashboard → API Keys*; Dupearr only reads from Jellyfin
+   ([details](docs/user/configuration.md#jellyfin)).
 3. **Enable libraries** — choose which movie and TV libraries to scan. Libraries that should be
    compared *with each other* (e.g. *Movies* and *Movies 4K*) get the same **scope group**; each
    library can use its own profile.
@@ -327,7 +334,9 @@ Open `http://<host>:3873/`.
    bin and hardlink detection, which only work inside folders covered by a Plex mapping. With the
    TRaSH `/data` layout everywhere, add one mapping for your Plex server that maps the folder to
    itself (remote `/data/media` → local `/data/media`); matching needs nothing else. Not using the
-   filesystem method? Remove it from *Deletion Methods* instead. See
+   filesystem method? Remove it from *Deletion Methods* instead. A **Jellyfin** server always
+   needs a mapping for every library folder, whatever the deletion methods: Jellyfin never reports
+   whether a file exists, so a duplicate with an unmapped copy is only reported. See
    [path mappings](docs/user/configuration.md#path-mappings).
 6. **Review the profile** — *Settings → Profiles*. The default is *Keep Highest Quality*; start
    from a template or build your own chain.
@@ -425,6 +434,13 @@ processed right away and every 5 minutes; for each action Dupearr:
    records the result in *History*, sends notifications and marks the group **resolved** (or
    **failed**).
 
+**Jellyfin copies** are never deleted through Jellyfin (its delete removes a movie's whole
+folder). They are removed only by a person's approval of that one duplicate, through Radarr/Sonarr
+with its recycle bin or by the filesystem method into Dupearr's recycle bin; a permanent \*arr
+delete or a missing Dupearr recycle bin means the removal is refused. Afterwards Dupearr tells
+Jellyfin which files went instead of refreshing an item. See
+[Safety](docs/user/safety.md#jellyfin).
+
 With **dry run** on, steps 1–2 run and are recorded as *dry run* results; nothing is changed.
 Removing a hardlinked copy (e.g. a file still seeding in `/data/torrents`) frees no space; such
 copies are flagged and count as 0 bytes reclaimable.
@@ -467,7 +483,8 @@ media at all; then remove `filesystem` from the deletion methods so the health c
 about missing mappings.
 
 **Jellyfin / Emby / music?**
-Not yet — see [Known limitations & roadmap](#known-limitations--roadmap).
+Jellyfin 12.1+ is supported read-only ([configuration](docs/user/configuration.md#jellyfin)); Emby
+and music not yet — see [Known limitations & roadmap](#known-limitations--roadmap).
 
 **Can I use the API?**
 Yes: `http://<host>:3873/api/v1/…` with the `X-Api-Key` header. See [docs/API.md](docs/API.md).
@@ -516,8 +533,8 @@ it plugs in, and where help is welcome.
 
 | Area | Today | Roadmap |
 |---|---|---|
-| Media servers | **Plex only.** Duplicates are what Plex has matched: two versions of one item, or (opt-in) the same TMDB/IMDb/TVDB id in libraries of one scope group. | **Jellyfin / Emby** support behind the same media-server layer. |
-| Music, books | Only Plex *movie* and *show* libraries are scanned, with **Radarr** and **Sonarr**; music and photo libraries are ignored. | **Lidarr** and music libraries (albums/tracks need their own grouping rules). |
+| Media servers | **Plex**, and **Jellyfin 12.1+ read-only**. Duplicates are what the server has matched: two versions of one item, or (opt-in) the same TMDB/IMDb/TVDB id in libraries of one scope group. Jellyfin copies in separate folders of one library are separate movies there and are not detected; Jellyfin duplicates are approved one at a time (never in bulk or by auto mode) and removed only into a recycle bin. | **Emby** behind the same media-server layer ([research](docs/research/jellyfin-emby.md)); Jellyfin auto approval and webhooks once Phase 1 has been confirmed on real libraries. |
+| Music, books | Only *movie* and *show* libraries (Plex, Jellyfin *Movies* and *Shows*) are scanned, with **Radarr** and **Sonarr**; music and photo libraries are ignored. | **Lidarr** and music libraries (albums/tracks need their own grouping rules). |
 | Several Plex servers | Each server is scanned and grouped on its own; the same title on two servers is **not** a duplicate. With two or more enabled servers, removals **are** checked against the other servers: a file another server's item lists is only removed while that item keeps a file proven to be a different one, a file another server's group keeps goes to review, a server that could not be read is never taken as "does not list it", a Radarr/Sonarr whose paths are mapped is never matched by raw path to a server without path mappings, and with neither side mapped raw paths are only matched for the Plex servers you confirmed the instance feeds ([Safety](docs/user/safety.md#several-plex-servers)). This fails closed: an unmapped second server, or an Unraid user share, keeps the files it also lists protected. A disabled server is not protected. | Cross-server groups ("keep one copy across all my servers"), after live checks of file identities on the mounts people use ([research](docs/research/multi-server.md)). |
 | Files Plex does not know | No content hashing: a copy Plex has not matched (wrong match, unscanned folder, a file outside every library) is invisible, and identical files are only detected through Plex and the \*arrs (same path/name + size, hardlinks). | Optional **hash-based** detection of identical files on disk, outside Plex. |
 | Full-disc backups | Found only in a movie's own folder (or, in a shared folder, as an image named after the movie), read from the disc's metadata on every scan. Disc images (`.iso`) have unknown quality and go to review; discs in TV libraries and AVCHD/BDAV/HD DVD folders are only protected, never removed. | Reading the video attributes inside disc images; season discs in TV libraries. |

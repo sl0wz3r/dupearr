@@ -116,6 +116,17 @@ func (r *run) selectMethod(g *models.DuplicateGroup, t *target, vr *verification
 		default:
 			why = "unknown deletion method"
 		}
+		// A copy on a read-only server (Jellyfin) is only removed into a recycle bin
+		// (docs/DECISIONS.md D12): a permanent choice is refused, and for the *arr method nothing
+		// else is tried (its file is only ever removed through it).
+		if kind := r.servers[serverOf(g, v)].Kind; kind.ReadOnly() || readOnlyVersion(v) {
+			if k, ok := models.KindOfVersionKey(v.Key); ok && k.ReadOnly() {
+				kind = k
+			}
+			if w, s := readOnlyMethodRule(kind.Label(), c); w != "" {
+				c, why, stop = nil, w, s
+			}
+		}
 		if c != nil {
 			return c, reasons
 		}
@@ -192,7 +203,10 @@ func (r *run) plexChoice(v *models.MediaVersion, vr *verification) (*methodChoic
 	// Structurally unavailable for a server that cannot delete one version (docs/research/
 	// jellyfin-emby.md §5.1): never another server call instead. Every Plex client can.
 	c, ok := sc.(versionDeleter)
-	if !ok {
+	switch {
+	case !ok && srv.Kind.ReadOnly():
+		return nil, "Dupearr never deletes through " + srv.Kind.Label()
+	case !ok:
 		return nil, fmt.Sprintf("%s cannot delete single versions", srv.Name)
 	}
 	switch {

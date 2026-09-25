@@ -101,6 +101,10 @@ Plex only deletes with *Allow media deletion* on (Plex → Settings → Library,
 **server owner's** token. **Test** on the media server shows both. Until then Dupearr uses the next
 method in your list.
 
+**Why can't I bulk-approve Jellyfin duplicates?**
+Jellyfin copies are only removed after you look at that one duplicate: open it and approve it on
+its page. Auto mode never approves them either. See [Safety](safety.md#jellyfin).
+
 **Does it need Plex Pass?**
 No. Plex Pass is only needed for Plex's own webhooks; Radarr/Sonarr webhooks and scheduled scans
 work without it.
@@ -136,9 +140,11 @@ Yes: `http://<host>:3873/api/v1/…` with the `X-Api-Key` header (*Settings → 
 See [docs/API.md](../API.md).
 
 **Jellyfin, Emby or music?**
-Not yet. Plex, Radarr and Sonarr come first; Jellyfin/Emby, Lidarr, hash-based detection outside
-Plex and cross-server groups are on the roadmap — see
-[Known limitations & roadmap](../../README.md#known-limitations--roadmap).
+Jellyfin 12.1 or later: yes, read-only ([configuration](configuration.md#jellyfin)). Dupearr finds
+the copies Jellyfin groups into one movie or episode and removes a copy only through Radarr/Sonarr
+or into its recycle bin, after you approve that duplicate on its own page; it never deletes through
+Jellyfin. Emby, Lidarr, hash-based detection outside the media server and cross-server groups are
+on the roadmap — see [Known limitations & roadmap](../../README.md#known-limitations--roadmap).
 
 **Can Dupearr keep the copy people actually watch?**
 Yes, with [Tautulli](configuration.md#tautulli-watch-history) (2.18.0 or later): add the *Played*

@@ -10,6 +10,7 @@ import type {
   DuplicateGroupSummary,
   DuplicateGroupSummaryFile,
   GroupFile,
+  GroupFlag,
   GroupStatus,
   Id,
   MediaPart,
@@ -84,19 +85,35 @@ export function canApprove(status: GroupStatus, removeCount: number): boolean {
 }
 
 /**
+ * docs/DECISIONS.md D12: a group with a copy on a read-only media server (Jellyfin) is flagged
+ * `manual_only` — it is approved one at a time from its detail page, never from the list (the
+ * server refuses such a group in a bulk approval with 409).
+ */
+export function isManualOnly(flags: readonly GroupFlag[] | null | undefined): boolean {
+  return (flags ?? []).includes('manual_only');
+}
+
+/**
  * Approve from the list (row action or bulk). `review` groups are excluded: the list shows no
  * paths or comparison, so suspect matches must be approved from their detail page. So are groups
  * that remove a full disc (`files`, when given): a disc removal is only approved from the detail
- * page, where the disc folder that moves to the recycle bin is shown — and groups that would remove a
+ * page, where the disc folder that moves to the recycle bin is shown — groups that would remove a
  * single file of a disc (a loose `00174.m2ts` clip, reported by the server as `discClip`), which is
- * never approved at all.
+ * never approved at all — and manual-only groups (`flags`, when given; see {@link isManualOnly}).
  */
 export function canApproveFromList(
   status: GroupStatus,
   removeCount: number,
   files?: readonly Pick<DuplicateGroupSummaryFile, 'decision' | 'disc' | 'discClip'>[] | null,
+  flags?: readonly GroupFlag[] | null,
 ): boolean {
-  return BULK_APPROVABLE_STATUSES.has(status) && removeCount > 0 && !removesDisc(files) && !removesDiscClip(files);
+  return (
+    BULK_APPROVABLE_STATUSES.has(status) &&
+    removeCount > 0 &&
+    !removesDisc(files) &&
+    !removesDiscClip(files) &&
+    !isManualOnly(flags)
+  );
 }
 
 export function canIgnore(status: GroupStatus): boolean {
@@ -130,6 +147,11 @@ export interface BulkSummary {
    * clip such as `00174.m2ts` (approve only). Never approvable: they need a re-scan.
    */
   clipSkipped: number;
+  /**
+   * Of `skipped`: otherwise approvable groups with a copy on a read-only media server (Jellyfin),
+   * approved one at a time from their detail page (approve only).
+   */
+  manualSkipped: number;
   /** Files that will be removed (approve) / files in the eligible groups (ignore/unignore). */
   files: number;
   /** Reclaimable bytes of the eligible groups. */
@@ -139,7 +161,7 @@ export interface BulkSummary {
 function isEligible(action: BulkDuplicateAction, g: DuplicateGroupSummary): boolean {
   switch (action) {
     case 'approve':
-      return canApproveFromList(g.status, g.removeCount, g.files);
+      return canApproveFromList(g.status, g.removeCount, g.files, g.flags);
     case 'ignore':
       return canIgnore(g.status);
     case 'unignore':
@@ -166,12 +188,16 @@ export function summarizeBulk(action: BulkDuplicateAction, groups: readonly Dupl
     action === 'approve'
       ? skipped.filter((g) => otherwiseApprovable(g) && removesDisc(g.files) && !removesDiscClip(g.files)).length
       : 0;
+  const manualSkipped =
+    action === 'approve'
+      ? skipped.filter((g) => canApproveFromList(g.status, g.removeCount, g.files) && isManualOnly(g.flags)).length
+      : 0;
   const files = eligible.reduce(
     (sum, g) => sum + Math.max(0, action === 'approve' ? g.removeCount || 0 : g.fileCount || 0),
     0,
   );
   const bytes = eligible.reduce((sum, g) => sum + Math.max(0, g.reclaimableBytes || 0), 0);
-  return { action, eligible, skipped, reviewSkipped, discSkipped, clipSkipped, files, bytes };
+  return { action, eligible, skipped, reviewSkipped, discSkipped, clipSkipped, manualSkipped, files, bytes };
 }
 
 /**
@@ -327,9 +353,34 @@ export function maxLinkCount(v: MediaVersion | null | undefined): number {
   return parts(v).reduce((max, p) => Math.max(max, p.linkCount ?? 0), 0);
 }
 
-/** True when Plex reports any part as missing (`exists === false`; absent = unknown). */
+/**
+ * True when any part is missing (`exists === false`; absent = unknown): Plex reports it, and for a
+ * Jellyfin copy Dupearr found its mapped file gone from disk (Jellyfin never reports it).
+ */
 export function hasMissingPart(v: MediaVersion | null | undefined): boolean {
   return parts(v).some((p) => p.exists === false);
+}
+
+/**
+ * docs/DECISIONS.md D12: a copy listed by a Jellyfin server ("jellyfin:<serverId>:<sourceId>").
+ * Dupearr only reads from Jellyfin: such a copy is removed through Radarr/Sonarr or into Dupearr's
+ * recycle bin, only into a recycle bin, and never through Jellyfin.
+ */
+export function isJellyfinVersion(v: Pick<MediaVersion, 'key'> | null | undefined): boolean {
+  return (v?.key ?? '').startsWith('jellyfin:');
+}
+
+/** True when any copy of the group is listed by a Jellyfin server. */
+export function hasJellyfinCopy(files: readonly Pick<GroupFile, 'version'>[] | null | undefined): boolean {
+  return (files ?? []).some((f) => isJellyfinVersion(f.version));
+}
+
+/**
+ * Why the group is only reported, never acted on: the report-only reasons of its copies (a .strm
+ * shortcut, unreadable stack parts, an unmapped copy …), each once.
+ */
+export function reportOnlyReasons(files: readonly Pick<GroupFile, 'version'>[] | null | undefined): string[] {
+  return [...new Set((files ?? []).flatMap((f) => f.version?.reportOnly ?? []))];
 }
 
 /** Paths of the parts (server-side). */

@@ -19,7 +19,8 @@ import (
 	"time"
 )
 
-// Server names in the request log / Options.Addrs besides the *arr instance names.
+// Server names in the request log / Options.Addrs besides the *arr instance names (ServerJellyfin
+// and ServerTautulli are declared with their servers).
 const ServerPlex = "plex"
 
 const (
@@ -93,6 +94,14 @@ type Env struct {
 	// Tautulli records the fake Plex server's plays (Movie.Plays); TautulliAPIKey is its key.
 	Tautulli       *Server
 	TautulliAPIKey string
+
+	// Jellyfin is the fake Jellyfin server over the same tree (nil unless Scenario.Jellyfin is set);
+	// JellyfinAPIKey is its API key, JellyfinServerID its server id and JellyfinUserToken the token
+	// of a user who is not an administrator.
+	Jellyfin          *Server
+	JellyfinAPIKey    string
+	JellyfinServerID  string
+	JellyfinUserToken string
 
 	// Radarr, Radarr4K and Sonarr are the servers of the standard instance names (nil when the
 	// scenario has no such instance); Instances holds every *arr server by instance name.
@@ -214,6 +223,15 @@ func New(opts Options) (*Env, error) {
 		return fail(err)
 	}
 	e.Tautulli, e.TautulliAPIKey = ts, w.tautulli.apiKey
+	if j := w.jellyfin; j != nil {
+		w.jfResolveAll()
+		j.lastScan = w.start
+		js, err := e.listen(opts.Addrs[ServerJellyfin], ServerJellyfin, "jellyfin", j.name, j.apiKey, "", e.jellyfinHandler())
+		if err != nil {
+			return fail(err)
+		}
+		e.Jellyfin, e.JellyfinAPIKey, e.JellyfinServerID, e.JellyfinUserToken = js, j.apiKey, j.serverID, j.userToken
+	}
 	for _, name := range w.arrOrder {
 		a := w.arrs[name]
 		s, err := e.listen(opts.Addrs[name], name, a.kind, a.instanceName, a.apiKey, a.urlBase, e.arrHandler(a))
@@ -238,6 +256,9 @@ func newShared(opts Options, sc *Scenario, now func() time.Time) (*Env, error) {
 	base := opts.ShareMedia
 	if len(sc.Instances) > 0 {
 		return nil, errors.New("fakemedia: a server sharing another Env's media has no *arr instances")
+	}
+	if sc.Jellyfin != nil {
+		return nil, errors.New("fakemedia: a server sharing another Env's media serves Plex only (declare Jellyfin on the first Env)")
 	}
 	if sc.Server.MachineIdentifier == base.MachineIdentifier || sc.Server.Token == base.PlexToken {
 		return nil, errors.New("fakemedia: a second server needs its own machine identifier and token")
@@ -352,6 +373,8 @@ func (e *Env) Server(name string) *Server {
 		return e.Plex
 	case ServerTautulli:
 		return e.Tautulli
+	case ServerJellyfin:
+		return e.Jellyfin
 	}
 	return e.Instances[name]
 }
@@ -970,6 +993,9 @@ func (e *Env) PathMappings() []Mapping {
 	for _, name := range e.w.arrOrder {
 		out = append(out, Mapping{Server: name, Remote: RemoteMediaRoot, Local: e.MediaRoot})
 	}
+	if j := e.w.jellyfin; j != nil {
+		out = append(out, Mapping{Server: ServerJellyfin, Remote: j.mediaRoot, Local: e.MediaRoot})
+	}
 	return out
 }
 
@@ -1165,6 +1191,16 @@ func (e *Env) Describe(out io.Writer) {
 	}
 	if t := e.w.tautulli; e.Tautulli != nil {
 		fmt.Fprintf(out, "Tautulli  %-28s apiKey=%s version=%s plays=%d\n", e.Tautulli.URL, t.apiKey, t.version, len(t.rows))
+	}
+	if j := e.w.jellyfin; j != nil && e.Jellyfin != nil {
+		fmt.Fprintf(out, "Jellyfin  %-28s apiKey=%s serverId=%s version=%s\n", e.Jellyfin.URL, j.apiKey, j.serverID, j.version)
+		for _, l := range j.libs {
+			locs := make([]string, 0, len(l.dirs))
+			for _, d := range l.dirs {
+				locs = append(locs, j.remote(d))
+			}
+			fmt.Fprintf(out, "          library %q (%s) %s\n", l.name, l.collection, strings.Join(locs, ", "))
+		}
 	}
 	names := append([]string(nil), e.w.arrOrder...)
 	sort.Strings(names)

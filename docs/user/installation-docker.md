@@ -97,6 +97,9 @@ reverse proxy on the same Docker network, drop `-p` entirely.
   `/data/media`): Dupearr only touches files inside mapped folders. Mount it read-write if you want
   filesystem removals or a recycle bin; \*arr and Plex deletions happen inside those apps and do
   not need it (remove `filesystem` from the deletion methods if you do not mount `/data`).
+  **With Jellyfin** mount it in every case, with a path mapping for each Jellyfin library folder:
+  Jellyfin never reports whether a file exists, so Dupearr checks every Jellyfin copy on disk and
+  only reports duplicates it cannot see.
 - **`PUID`/`PGID`** must be allowed to delete your media. The process runs with exactly that group
   (supplementary groups are not kept), so if your media is writable only through a shared group,
   use that group's id as `PGID`.

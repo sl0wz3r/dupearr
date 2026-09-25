@@ -325,6 +325,16 @@ func TestCrossServerOtherServerProblems(t *testing.T) {
 			}
 		}, "not accessible", true},
 		{"survivor size differs", func(m *multiEnv) { m.plexB.sizes[m.remote(xRel)] = 1 }, "bytes on disk", true},
+		{"survivor report-only", func(m *multiEnv) {
+			// A version whose stack parts could not be read (Jellyfin) is never the remaining copy.
+			m.plexB.onItem = func(it *models.MediaItem) {
+				for i := range it.Versions {
+					if it.Versions[i].MediaID == 9002 {
+						it.Versions[i].ReportOnly = []string{"its stack parts could not be read from Jellyfin"}
+					}
+				}
+			}
+		}, "cannot count as a copy", true},
 		{"survivor unmapped", func(m *multiEnv) {
 			// B's other version lies outside B's mappings (the mappings themselves are unchanged:
 			// a change since the scan is refused before, see TestCrossServerRecordRequired).

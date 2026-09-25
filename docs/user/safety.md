@@ -97,7 +97,8 @@ multi-episode file, unavailable version, the keeper is not tracked by the \*arr 
 removed copy, **full disc** (the group holds a Blu-ray/DVD backup) and **\*arr tracks a clip of a
 disc**. With several Plex servers, **also on another server** marks a copy that another
 server's item lists while that item keeps a different file; the removal re-checks it (see
-[Several Plex servers](#several-plex-servers)).
+[Several Plex servers](#several-plex-servers)). A copy on Jellyfin adds **manual approval only**,
+and **report only** marks a duplicate that is shown but never acted on (see [Jellyfin](#jellyfin)).
 
 ## Minimum age, caps and circuit breakers
 
@@ -249,6 +250,48 @@ A duplicate group scanned before this check existed is never acted on until it h
   removes all cross-server protection). A server declared **separate storage** is only protected
   where its folders are mapped ([Configuration](configuration.md#several-plex-servers)).
 
+Plex and Jellyfin servers over the same files follow the same rules: each counts as another server
+for the other, and a Jellyfin library, which reports no scan times, is listed again right before a
+removal — if it changed since the scan, the group goes to review. Dupearr only reads Jellyfin's
+Movies and Shows libraries: a Jellyfin library of another kind that may hold videos (mixed movies
+and shows, home videos, music videos) could list any file, so the other servers' duplicates it may
+concern go to review and nothing they would remove is removed. Right before relying on a Jellyfin
+server's answers, Dupearr also re-checks that its key is still an administrator's and that no path
+substitutions are set.
+
+## Jellyfin
+
+Dupearr **only reads** from Jellyfin 12.1+ ([Configuration](configuration.md#jellyfin)). Jellyfin's
+own delete removes the movie's whole folder (every version, subtitles, NFO files, sometimes another
+movie that shares the folder) and cannot remove a single version, so Dupearr never calls it — nor
+any merge, unlink or edit. Its Jellyfin client can only send a fixed list of read requests plus the
+notification that tells Jellyfin a file was removed or restored; every other request is refused
+before it leaves Dupearr. For a duplicate with a copy on Jellyfin:
+
+- **You approve it on its own page.** Auto mode and bulk approval never take it.
+- **It is removed only into a recycle bin**: through Radarr/Sonarr when they track the file and
+  have their Recycling Bin set (a permanent \*arr delete is refused, never replaced by another
+  method), otherwise by the filesystem method into Dupearr's recycle bin (none set = refused).
+- **Every copy must be visible on disk** through a path mapping, because Jellyfin never reports
+  whether a file exists and keeps listing a removed file for a while. The kept copy — every part of
+  it — is checked on disk right before the removal, and a duplicate is marked done by the files on
+  disk, not by what Jellyfin lists.
+- **Only reported, never acted on**: a title with a `.strm` shortcut (the file it points to is also
+  protected), a stacked copy whose parts could not be read, a disc folder or image, a copy without a
+  path mapping, and every duplicate of a server whose removals are disabled — a key that is not an
+  administrator's (Dupearr could not see every playback session). While **path substitutions** are
+  set in Jellyfin, it reports rewritten paths, so Dupearr does not read that server's libraries at
+  all and removes nothing it lists.
+- **Only what Jellyfin groups**: copies in one Jellyfin movie or episode, and copies in libraries of
+  one scope group, one per library. Two separate Jellyfin movies of one library are never paired,
+  even when they share an id (a stray release matched to the wrong film would otherwise be one).
+- **Right before a removal** Dupearr confirms the server still has the same server id, re-checks
+  those conditions, and defers the duplicate while any copy — an alternate version, or the second
+  part of a stacked file — is playing or paused on any user's session. A multi-episode file
+  (`S01E03-E04.mkv`, also Jellyfin's `S01E03x04.mkv` form) is never removed.
+- Afterwards Jellyfin is told the exact removed paths (and, after a restore, the restored ones). The
+  recycle bin gets an empty `.ignore` so Jellyfin does not index it.
+
 ## Full-disc backups
 
 A Blu-ray/DVD backup (`BDMV/`, `VIDEO_TS/`, a "Disc N" set, an `.iso`) is hundreds of files that
@@ -306,6 +349,8 @@ Removing "the duplicates" would destroy the backup. Dupearr therefore:
 ## Things Dupearr never does
 
 - delete a whole Plex item, season, show or library, merge/split items, or empty the Plex trash;
+- delete, merge, unlink or edit anything through Jellyfin, or remove a Jellyfin copy permanently or
+  without your approval of that one duplicate;
 - remove a file another Plex server lists unless that server's item keeps a file proven to be a
   different one, or count a server it could not read as not listing a file;
 - use the \*arrs' bulk delete endpoints (only one file at a time, by id);

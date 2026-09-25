@@ -23,6 +23,7 @@ import (
 	"github.com/sl0wz3r/dupearr/internal/executor"
 	"github.com/sl0wz3r/dupearr/internal/health"
 	"github.com/sl0wz3r/dupearr/internal/integrations/arr"
+	"github.com/sl0wz3r/dupearr/internal/integrations/jellyfin"
 	"github.com/sl0wz3r/dupearr/internal/integrations/plex"
 	"github.com/sl0wz3r/dupearr/internal/integrations/tautulli"
 	"github.com/sl0wz3r/dupearr/internal/logging"
@@ -66,6 +67,7 @@ type app struct {
 	notifier        *notifications.Service
 	plexOpts        plex.Options
 	plexFactory     func(models.MediaServer) *plex.Client
+	jellyfinFactory func(models.MediaServer) *jellyfin.Client
 	serverFactory   mediaserver.Factory // scanner, executor, health (mediaServerFactory)
 	arrFactory      func(models.ArrInstance) *arr.Client
 	tautulliFactory func(models.TautulliInstance) *tautulli.Client
@@ -185,7 +187,13 @@ func (a *app) wire(ctx context.Context) error {
 		o.VerifyTLS = s.VerifyTLS
 		return plex.New(s.URL, s.Token, o)
 	}
-	a.serverFactory = mediaServerFactory(a.plexFactory)
+	a.jellyfinFactory = func(s models.MediaServer) *jellyfin.Client {
+		// The install's stable id names this Dupearr in Jellyfin's device list.
+		return jellyfin.New(s.URL, s.Token, jellyfin.Options{
+			DeviceID: clientID, Version: version.Version, VerifyTLS: s.VerifyTLS, Timeout: httpClientTimeout,
+		})
+	}
+	a.serverFactory = mediaServerFactory(a.plexFactory, a.jellyfinFactory)
 	a.arrFactory = func(inst models.ArrInstance) *arr.Client {
 		return arr.New(inst, arr.Options{VerifyTLS: inst.VerifyTLS, Timeout: httpClientTimeout})
 	}
@@ -291,6 +299,7 @@ func (a *app) wire(ctx context.Context) error {
 		Notifier:        a.notifier,
 		PlexOpts:        a.plexOpts,
 		PlexFactory:     a.plexFactory,
+		JellyfinFactory: a.jellyfinFactory,
 		ArrFactory:      a.arrFactory,
 		TautulliFactory: a.tautulliFactory,
 		WebFS:           web.FS(),
@@ -347,15 +356,19 @@ func component(l *slog.Logger, name string) *slog.Logger {
 }
 
 // mediaServerFactory returns the production media server factory: a Plex client for a Plex server
-// (kind "plex" or ""), and a nil interface (never a typed nil) for any other kind, which the
-// scanner, the executor and the health checks treat as "no client" and skip. The API keeps the
-// concrete Plex factory for the Plex-only routes (connection test, plex.tv, posters).
-func mediaServerFactory(plexFactory func(models.MediaServer) *plex.Client) mediaserver.Factory {
+// (kind "plex" or ""), a Jellyfin client (read-only, docs/DECISIONS.md D12) for a Jellyfin server,
+// and a nil interface (never a typed nil) for any other kind (Emby), which the scanner, the
+// executor and the health checks treat as "no client" and skip. The API keeps the concrete
+// factories for the kind-specific routes (connection tests, plex.tv, posters).
+func mediaServerFactory(plexFactory func(models.MediaServer) *plex.Client, jellyfinFactory func(models.MediaServer) *jellyfin.Client) mediaserver.Factory {
 	return func(s models.MediaServer) mediaserver.Client {
-		if !s.Kind.IsPlex() {
-			return nil
+		switch {
+		case s.Kind.IsPlex():
+			return plexFactory(s)
+		case s.Kind == models.MediaServerJellyfin && jellyfinFactory != nil:
+			return jellyfinFactory(s)
 		}
-		return plexFactory(s)
+		return nil
 	}
 }
 

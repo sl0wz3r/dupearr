@@ -15,6 +15,7 @@ reproduce, and attach the log to your issue: API keys, tokens and passwords are 
 - [Plex](#plex)
 - [Radarr and Sonarr](#radarr-and-sonarr)
 - [Several Plex servers](#several-plex-servers)
+- [Jellyfin](#jellyfin)
 - [Tautulli (play history)](#tautulli-play-history)
 - [Permissions (PUID/PGID)](#permissions-puidpgid)
 - [Path mapping mistakes](#path-mapping-mistakes)
@@ -205,7 +206,7 @@ These only appear with two or more enabled Plex servers
 |---|---|
 | A copy is kept with "the only copy of "…" on Plex B (…)" | Another server's item lists that file and keeps no other version Dupearr can prove to be a different file. The hint says what would help, usually a path mapping for the other server (*Settings → Media Management*). Files on an Unraid user share (`/mnt/user`) stay protected this way for now: Dupearr cannot yet prove there that two paths are different files. A manual *remove* override is ignored for such a copy ("Override ignored — removing it would leave … without a copy"). |
 | Review reason "could not read the media server "…" (…); it may list these files" / flag *Media server not read* | That server was unreachable (or one of its libraries could not be listed) during the scan. Approving is refused until a new scan has read it. Fix the connection (or disable the server, or declare it *separate storage* if it really has storage of its own), then re-scan the group: the setting alone does not change what the last scan recorded. |
-| Approving says "Dupearr could not tell whether Radarr/Sonarr tracks a file" | A copy belongs to a server without a path mapping, or to an \*arr instance whose Plex servers are not confirmed (after adding or enabling a Plex server, every instance not linked to it needs confirming again). Add the mapping, or choose the servers in *Settings → Applications → (instance) → Plex servers it feeds* and tick the confirmation, then re-scan. |
+| Approving says "Dupearr could not tell whether Radarr/Sonarr tracks a file" | A copy belongs to a server without a path mapping, or to an \*arr instance whose media servers are not confirmed (after adding or enabling a Plex or Jellyfin server, every instance not linked to it needs confirming again). Add the mapping, or choose the servers in *Settings → Applications → (instance) → Media servers it feeds* and tick the confirmation, then re-scan. |
 | Flag *Kept by another server* | Another server's duplicate group keeps a file this group removes (their profiles disagree). Change one of the two decisions, then approve. |
 | Flag *Maybe on another server* | Another server lists a file with the same name and size, and Dupearr could not tell whether it is the same file. Path mappings for both servers let it compare the files on disk. |
 | A removal is skipped: "… scanned the library "…" since the scan; it may list these files now" | The other server scanned (or is scanning) a library after this group's scan, so it may list the file now. The group goes to review and is re-scanned automatically; approve it again after that scan. Frequent Plex library scans make this happen more often. |
@@ -214,6 +215,26 @@ These only appear with two or more enabled Plex servers
 | Health *ArrServerLinksCheck* | Choose the Plex servers each Radarr/Sonarr instance feeds (*Settings → Applications*) and save. |
 | Health *MultiServerMappingCheck* | A server that shares storage with the others has library folders without a path mapping: add the mappings, or declare the server *separate storage* if it is on another host. |
 | Health *SeparateServerCheck* | A server declared *separate storage* lists files with the same name and size as another server's. If it reads the same share, set its storage back to the same storage as the other servers: declared separate, its files are not protected. |
+
+## Jellyfin
+
+Dupearr only reads from Jellyfin ([Configuration](configuration.md#jellyfin),
+[Safety](safety.md#jellyfin)).
+
+| Symptom | Cause and fix |
+|---|---|
+| **Test**: "rejected the API key" | The key is wrong or was revoked. Create a new one in Jellyfin → *Dashboard → API Keys*. |
+| **Test**: "not an API key or an administrator's" | A user's token was entered. Dupearr needs an API key (or an administrator's token) to see every playback session; create an API key. |
+| **Test**: "version 12.1.0 or later is required" | Update Jellyfin. Older versions group versions differently and are not supported. |
+| **Test**: "not Jellyfin" / redirect error | The URL reaches another application, or a reverse proxy redirects (Dupearr never follows redirects). Use Jellyfin's own address with its port (`http://jellyfin:8096`) and any base URL. A redirect to the same address usually means Jellyfin runs with a *Base URL* (*Dashboard → Networking*): add it to the URL, e.g. `http://jellyfin:8096/jellyfin`. |
+| **Test**, Health or a scan: "path substitutions are set" | Jellyfin rewrites the paths it reports, so Dupearr cannot tell which file is meant. Remove the path substitutions from Jellyfin's configuration, then re-scan. Until then Dupearr does not read that server's libraries: its duplicates stay as they were and none of its copies is removed. |
+| A duplicate is **Report only** | The reasons are listed on its page: a copy without a path mapping (add one for that Jellyfin library folder), a `.strm` shortcut in the title, a stacked copy whose parts could not be read, a disc, or removals disabled on the server. Fix what can be fixed, then re-scan. |
+| Bulk approval skips a duplicate "on a Jellyfin server" | By design: open it and approve it on its own page. Auto mode never approves it either. |
+| A removal fails: "only removed into a recycle bin" | Radarr/Sonarr has no Recycling Bin set (a Jellyfin copy is never deleted permanently), or Dupearr's *Recycle bin path* is empty. Set one, then approve again. |
+| Jellyfin still shows the removed copy | Jellyfin notices a removal a little later (Dupearr tells it right away). If it persists, run a library scan in Jellyfin. Dupearr decides by the files on disk, so this does not affect it. |
+| Health: "Run "Scan All Libraries"" | Dupearr added an `.ignore` file to a recycle bin inside a Jellyfin library folder, and Jellyfin may only honour it after a library scan. Run *Scan All Libraries* once (*Dashboard → Libraries*). A bin below a hidden folder (`<library>/.dupearr-recycle`) never needs this. |
+| Two copies in separate folders are not detected | Jellyfin treats them as two movies. Dupearr only groups what Jellyfin groups into one movie or episode (and copies in libraries that share a scope group, one per library). Put the copies in one folder named like the movie, or merge them in Jellyfin. |
+| With Plex and Jellyfin, every duplicate is in review: "could not read the media server … may list video files" | The Jellyfin server has a library of another kind (mixed movies and shows, home videos, music videos) that Dupearr does not read, so it cannot rule out that it lists the files. Recreate it as a Movies or Shows library, or declare the Jellyfin server *separate storage* if it does not read the same files. |
 
 ## Tautulli (play history)
 

@@ -204,8 +204,60 @@ describe('MediaServersPage', () => {
     mocks.servers = [];
     renderPage(<MediaServersPage />);
     await user.click(screen.getByRole('button', { name: 'Add media server' }));
+    // Issue #4: pick the kind first.
+    await user.click(within(screen.getByRole('dialog', { name: 'Add Media Server' })).getByRole('button', { name: 'Add Plex' }));
     expect(screen.getByRole('dialog', { name: 'Add Media Server — Plex' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /sign in with plex/i })).toBeInTheDocument();
+  });
+
+  it('adds a Jellyfin server from the picker and goes back to it', async () => {
+    const user = userEvent.setup();
+    mocks.servers = [];
+    renderPage(<MediaServersPage />);
+    await user.click(screen.getByRole('button', { name: 'Add media server' }));
+    // The card's read-only note is announced with it.
+    expect(screen.getByRole('button', { name: 'Add Jellyfin' })).toHaveAccessibleDescription(/Read-only/);
+    await user.click(screen.getByRole('button', { name: 'Add Jellyfin' }));
+    const dialog = screen.getByRole('dialog', { name: 'Add Media Server — Jellyfin' });
+    expect(within(dialog).getByLabelText('Name')).toHaveValue('Jellyfin');
+    expect(within(dialog).getByLabelText('URL')).toHaveAttribute('placeholder', 'http://jellyfin:8096');
+    expect(within(dialog).getByText(/never deletes anything through Jellyfin/)).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: /sign in with plex/i })).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Back' }));
+    expect(screen.getByRole('dialog', { name: 'Add Media Server' })).toBeInTheDocument();
+  });
+
+  it('shows the Plex webhook section only with a Plex server', () => {
+    window.localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify({ showAdvanced: true }));
+    try {
+      const jelly = { ...SERVER, id: 2, name: 'Jelly', kind: 'jellyfin' as const, url: 'http://jellyfin:8096', machineIdentifier: 'jf-server-1' };
+      mocks.servers = [jelly];
+      const { unmount } = renderPage(<MediaServersPage />);
+      expect(screen.queryByRole('heading', { name: 'Webhook (optional)' })).not.toBeInTheDocument();
+      unmount();
+      mocks.servers = [SERVER, jelly];
+      renderPage(<MediaServersPage />);
+      expect(screen.getByRole('heading', { name: 'Webhook (optional)' })).toBeInTheDocument();
+    } finally {
+      window.localStorage.removeItem(PREFERENCES_STORAGE_KEY);
+    }
+  });
+
+  it('labels a Jellyfin server card with its kind and server id', async () => {
+    const user = userEvent.setup();
+    mocks.servers = [
+      SERVER,
+      { ...SERVER, id: 2, name: 'Jelly', kind: 'jellyfin', url: 'http://jellyfin:8096', machineIdentifier: 'jf-server-1' },
+    ];
+    renderPage(<MediaServersPage />);
+    expect(screen.getByText('Connect Plex or Jellyfin and choose which libraries Dupearr scans.')).toBeInTheDocument();
+    expect(screen.getByText('Jellyfin', { selector: 'span' })).toBeInTheDocument();
+    expect(screen.getByText('jf-server-1').parentElement).toHaveTextContent('Server ID: jf-server-1');
+    expect(screen.getByText('machine-1').parentElement).toHaveTextContent('Machine ID: machine-1');
+    // Editing opens the Jellyfin form, whatever was added last.
+    await user.click(screen.getByRole('button', { name: /Jelly\b/ }));
+    expect(screen.getByRole('dialog', { name: 'Edit Media Server — Jelly' })).toBeInTheDocument();
+    expect(screen.getByLabelText('API Key')).toBeInTheDocument();
   });
 });
 
@@ -241,7 +293,7 @@ describe('ApplicationsPage', () => {
   });
 
   // docs/DECISIONS.md D11: with several media servers, unconfirmed *arr links are pointed out.
-  it('marks instances whose Plex servers are not confirmed, only with two servers', () => {
+  it('marks instances whose media servers are not confirmed, only with two servers', () => {
     const radarr = (linksConfirmed: boolean, serverIds: number[] = []): ArrInstance => ({
       id: 1,
       name: 'Radarr',
@@ -260,20 +312,20 @@ describe('ApplicationsPage', () => {
     mocks.servers = [SERVER];
     mocks.arr = [radarr(false)];
     const { unmount } = renderPage(<ApplicationsPage />);
-    expect(screen.queryByText('Plex servers not confirmed')).not.toBeInTheDocument();
+    expect(screen.queryByText('Media servers not confirmed')).not.toBeInTheDocument();
     unmount();
     mocks.servers = [SERVER, { ...SERVER, id: 2, name: 'Plex B', machineIdentifier: 'machine-2' }];
     const second = renderPage(<ApplicationsPage />);
-    expect(screen.getByText('Plex servers not confirmed')).toBeInTheDocument();
+    expect(screen.getByText('Media servers not confirmed')).toBeInTheDocument();
     second.unmount();
     // Confirmed without any (enabled) server is not a confirmation.
     mocks.arr = [radarr(true)];
     const third = renderPage(<ApplicationsPage />);
-    expect(screen.getByText('Plex servers not confirmed')).toBeInTheDocument();
+    expect(screen.getByText('Media servers not confirmed')).toBeInTheDocument();
     third.unmount();
     mocks.arr = [radarr(true, [1])];
     renderPage(<ApplicationsPage />);
-    expect(screen.queryByText('Plex servers not confirmed')).not.toBeInTheDocument();
+    expect(screen.queryByText('Media servers not confirmed')).not.toBeInTheDocument();
   });
 
   // docs/DECISIONS.md D10: Tautulli connections (play history) under "Watch history".

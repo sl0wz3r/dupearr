@@ -350,8 +350,32 @@ func (p *pipeline) withDiscCandidates(targets []refKey) []refKey {
 
 // attachDiscs turns the fetched items' Plex versions that are discs into disc versions, adds the
 // discs found in the movies' folders as versions (settings.DetectDiscs) and notes the TV episodes
-// whose folder holds a disc. Call after decorate (local paths known), before enrich.
+// whose folder holds a disc. Call after decorate (local paths known), before enrich. Items of a
+// read-only server (Jellyfin) take no part: a disc there is only reported (docs/DECISIONS.md D12,
+// research S20), and its versions are never merged with discs found on disk.
 func (p *pipeline) attachDiscs(items []models.MediaItem) {
+	var idx []int
+	for i := range items {
+		if !items[i].ServerKind.ReadOnly() {
+			idx = append(idx, i)
+		}
+	}
+	if len(idx) == len(items) {
+		p.attachPlexDiscs(items)
+		return
+	}
+	sub := make([]models.MediaItem, len(idx))
+	for j, i := range idx {
+		sub[j] = items[i]
+	}
+	p.attachPlexDiscs(sub)
+	for j, i := range idx {
+		items[i] = sub[j]
+	}
+}
+
+// attachPlexDiscs is attachDiscs for the items of servers that take part.
+func (p *pipeline) attachPlexDiscs(items []models.MediaItem) {
 	detect := p.cfg.settings.DetectDiscs
 	plan := &discPlan{}
 	if detect {

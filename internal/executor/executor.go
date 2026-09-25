@@ -268,6 +268,17 @@ func (s *Service) ApproveReviewed(ctx context.Context, groupID int64, trigger, s
 	if problem := discRemovalProblem(g, settings, manual); problem != "" {
 		return nil, fmt.Errorf("approve group %d (%s): %w: %s", g.ID, displayTitle(g), ErrNotApprovable, problem)
 	}
+	// Read-only media servers (Jellyfin, docs/DECISIONS.md D12): a person's approval, a path
+	// mapping for every copy, nothing report-only.
+	if ro, _ := readOnlyGroup(g); ro {
+		mappings, err := s.d.Store.PathMappings().List(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("approve group %d: load path mappings: %w", g.ID, err)
+		}
+		if problem := readOnlyApprovalProblem(g, mappings, manual); problem != "" {
+			return nil, fmt.Errorf("approve group %d (%s): %w: %s", g.ID, displayTitle(g), ErrNotApprovable, problem)
+		}
+	}
 
 	var targets []*models.GroupFile
 	for i := range g.Files {

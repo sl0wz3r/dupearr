@@ -1,6 +1,6 @@
 import { clsx } from 'clsx';
 import { ExternalLink, type LucideIcon } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 import { Badge, Card } from '@/components/ui';
 import { safeExternalUrl } from './connectionUtils';
 
@@ -66,6 +66,9 @@ export interface ProviderCardProps {
  */
 export function ProviderCard({ name, description, icon: Icon, infoUrl, onSelect, className }: ProviderCardProps) {
   const href = safeExternalUrl(infoUrl);
+  // The aria-label replaces the name computed from the button's content, so the description (which
+  // may carry what choosing the provider means, e.g. Jellyfin's read-only rules) is linked instead.
+  const descriptionId = useId();
   return (
     <div
       className={clsx(
@@ -78,11 +81,16 @@ export function ProviderCard({ name, description, icon: Icon, infoUrl, onSelect,
         onClick={onSelect}
         className="flex flex-1 items-start gap-3 rounded p-4 text-left focus-visible:outline-2 focus-visible:outline-accent"
         aria-label={`Add ${name}`}
+        aria-describedby={description ? descriptionId : undefined}
       >
         {Icon && <Icon aria-hidden width={28} height={28} className="mt-0.5 shrink-0 text-accent-soft" />}
         <span className="min-w-0">
           <span className="block text-base font-semibold text-fg-strong">{name}</span>
-          {description && <span className="mt-0.5 block text-sm text-muted">{description}</span>}
+          {description && (
+            <span id={descriptionId} className="mt-0.5 block text-sm text-muted">
+              {description}
+            </span>
+          )}
         </span>
       </button>
       {href && (

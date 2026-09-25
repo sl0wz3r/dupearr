@@ -143,7 +143,8 @@ func TestSyncRefusesUnsupportedKindSameMessage(t *testing.T) {
 	deps.MediaServerFactory = func(models.MediaServer) mediaserver.Client { asked.Add(1); return nil }
 	deps.PlexFactory = func(models.MediaServer) PlexClient { asked.Add(1); return nil }
 	h.svc = New(deps)
-	for _, kind := range []models.MediaServerKind{"jellyfin", "Plex"} {
+	// jellyfin is supported since issue #4 Phase 1; emby (Phase 2) and a mis-cased kind are not.
+	for _, kind := range []models.MediaServerKind{"emby", "Plex"} {
 		srv := models.MediaServer{Name: "Other " + string(kind), Kind: kind, URL: "http://other:8096", Token: "t", Enabled: true}
 		if err := h.db.MediaServers().Create(h.ctx, &srv); err != nil {
 			t.Fatal(err)

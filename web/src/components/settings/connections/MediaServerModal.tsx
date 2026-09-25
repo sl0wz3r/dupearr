@@ -1,5 +1,5 @@
 import { clsx } from 'clsx';
-import { ExternalLink } from 'lucide-react';
+import { ArrowLeft, ExternalLink, Server } from 'lucide-react';
 import { useId, useState } from 'react';
 import { errorMessage } from '@/api/client';
 import {
@@ -9,8 +9,17 @@ import {
   useTestMediaServer,
   useUpdateMediaServer,
 } from '@/api/hooks/useMediaServers';
-import type { Id, MediaServer, MediaServerInput, MediaServerStorage, MediaServerTestResult } from '@/api/types';
-import { Alert, Badge, ConfirmDialog, FormGroup, Select, Switch, TextInput, useToast } from '@/components/ui';
+import type {
+  Id,
+  MediaServer,
+  MediaServerInput,
+  MediaServerKind,
+  MediaServerStorage,
+  MediaServerTestResult,
+} from '@/api/types';
+import { Alert, Badge, Button, ConfirmDialog, FormGroup, Select, Switch, TextInput, useToast } from '@/components/ui';
+import { MEDIA_SERVER_KIND_LABELS, labelOf } from '@/lib/constants';
+import { ProviderCard } from './ConnectionCard';
 import { ConnectionModal, DetailList, SaveErrorAlert, TestResult } from './ConnectionModal';
 import {
   addressChanged,
@@ -25,6 +34,8 @@ import {
   validateHttpUrl,
   type FieldErrors,
 } from './connectionUtils';
+import { JellyfinServerForm } from './JellyfinServerForm';
+import { FIELDS, STORAGE_OPTIONS, showStorageField } from './mediaServerShared';
 import { PlexSignIn } from './PlexSignIn';
 import type { PlexServerSelection } from './plexSignInMachine';
 import { SecretInput } from './SecretInput';
@@ -41,21 +52,7 @@ export interface MediaServerFormValues {
   storage?: MediaServerStorage;
 }
 
-const FIELDS = ['name', 'url', 'token', 'verifyTls', 'enabled', 'storage'] as const;
-
-const STORAGE_OPTIONS: readonly { value: MediaServerStorage; label: string }[] = [
-  { value: '', label: 'Same storage as the other servers (compare paths)' },
-  { value: 'separate', label: "Separate storage (another host, a friend's server)" },
-];
-
-/**
- * The Storage setting only matters with several media servers: shown when another server exists
- * (or this one is already declared separate, so it can be undone).
- */
-export function showStorageField(server: MediaServer | null, servers: readonly MediaServer[] | undefined): boolean {
-  if (server?.storage === 'separate') return true;
-  return (servers ?? []).some((s) => s.id !== server?.id);
-}
+export { showStorageField };
 
 const PLEX_TOKEN_HELP_URL = 'https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/';
 
@@ -128,11 +125,67 @@ export function mediaServerPayload(values: MediaServerFormValues, id?: Id, withS
 export interface MediaServerModalProps {
   /** Server to edit; null = add a new one. */
   server: MediaServer | null;
+  /** Kind of a new server (default Plex); an existing server keeps its own. */
+  kind?: MediaServerKind;
   onClose: () => void;
+  /** Back to the server picker (new servers only). */
+  onBack?: () => void;
+}
+
+/**
+ * Add/edit a media server: a Jellyfin server gets {@link JellyfinServerForm}, anything else the Plex
+ * form ("Sign in with Plex" or manual URL + token, Test, Save (anyway), Delete).
+ */
+export function MediaServerModal({ server, kind, onClose, onBack }: MediaServerModalProps) {
+  if ((server?.kind ?? kind) === 'jellyfin') {
+    return <JellyfinServerForm server={server} onClose={onClose} onBack={onBack} />;
+  }
+  return <PlexServerForm server={server} onClose={onClose} onBack={onBack} />;
+}
+
+/** The kinds a new media server can be (docs/DECISIONS.md D12: Jellyfin is read-only). */
+const SERVER_PROVIDERS: readonly { kind: MediaServerKind; description: string; infoUrl: string }[] = [
+  {
+    kind: 'plex',
+    description: 'Removes through Radarr/Sonarr, Plex or the recycle bin',
+    infoUrl: 'https://www.plex.tv/',
+  },
+  {
+    kind: 'jellyfin',
+    description: 'Version 12.1 or later. Read-only: removals only through Radarr/Sonarr or the recycle bin, by manual approval',
+    infoUrl: 'https://jellyfin.org/',
+  },
+];
+
+/** "Add Media Server": pick Plex or Jellyfin, then its form. */
+export function AddMediaServerModal({ onClose }: { onClose: () => void }) {
+  const [kind, setKind] = useState<MediaServerKind | null>(null);
+  if (!kind) {
+    return (
+      <ConnectionModal open onClose={onClose} title="Add Media Server" size="md">
+        <p className="mt-0 mb-3 text-sm text-muted">
+          Dupearr reads the libraries of your media server to find the copies of a title.
+        </p>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {SERVER_PROVIDERS.map((p) => (
+            <ProviderCard
+              key={p.kind}
+              name={labelOf(MEDIA_SERVER_KIND_LABELS, p.kind)}
+              description={p.description}
+              icon={Server}
+              infoUrl={p.infoUrl}
+              onSelect={() => setKind(p.kind)}
+            />
+          ))}
+        </div>
+      </ConnectionModal>
+    );
+  }
+  return <MediaServerModal server={null} kind={kind} onClose={onClose} onBack={() => setKind(null)} />;
 }
 
 /** Add/edit a Plex server: "Sign in with Plex" or manual URL + token, Test, Save (anyway), Delete. */
-export function MediaServerModal({ server, onClose }: MediaServerModalProps) {
+function PlexServerForm({ server, onClose, onBack }: Omit<MediaServerModalProps, 'kind'>) {
   const idPrefix = useId();
   const toast = useToast();
   const [values, setValues] = useState<MediaServerFormValues>(() => mediaServerFormValues(server));
@@ -261,6 +314,13 @@ export function MediaServerModal({ server, onClose }: MediaServerModalProps) {
           <>
             Delete <strong>{server?.name}</strong>? Dupearr stops scanning this server. No media files are touched.
           </>
+        }
+        footerStart={
+          onBack ? (
+            <Button icon={ArrowLeft} onClick={onBack} disabled={saving}>
+              Back
+            </Button>
+          ) : undefined
         }
       >
         <section className="mb-4 rounded border border-border bg-card-alt p-4">

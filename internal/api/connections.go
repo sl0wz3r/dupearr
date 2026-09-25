@@ -18,9 +18,11 @@ import (
 
 	"github.com/sl0wz3r/dupearr/internal/config"
 	"github.com/sl0wz3r/dupearr/internal/integrations/arr"
+	"github.com/sl0wz3r/dupearr/internal/integrations/jellyfin"
 	"github.com/sl0wz3r/dupearr/internal/integrations/plex"
 	"github.com/sl0wz3r/dupearr/internal/integrations/upstreamerr"
 	"github.com/sl0wz3r/dupearr/internal/logging"
+	"github.com/sl0wz3r/dupearr/internal/mediaserver"
 	"github.com/sl0wz3r/dupearr/internal/models"
 	"github.com/sl0wz3r/dupearr/internal/pathmap"
 	"github.com/sl0wz3r/dupearr/internal/store"
@@ -135,6 +137,15 @@ func restoreSecret(prop string, value *string, next secretEndpoint, stored *stri
 	return nil
 }
 
+// serverSecret names a media server's credential in a restoreSecret error: a Jellyfin server's is
+// an API key (the property stays "token").
+func serverSecret(kind models.MediaServerKind, e *config.ValidationError) *config.ValidationError {
+	if e != nil && kind == models.MediaServerJellyfin {
+		e.ErrorMessage = strings.Replace(e.ErrorMessage, "the token", "the API key", 1)
+	}
+	return e
+}
+
 func secretLabel(prop string) string {
 	if prop == "apiKey" {
 		return "API key"
@@ -159,13 +170,15 @@ func upstreamError(app string, err error) error {
 		return err
 	case errors.Is(err, context.DeadlineExceeded):
 		return errStatus(http.StatusBadGateway, "%s did not respond in time", app)
-	case errors.Is(err, plex.ErrUnauthorized), errors.Is(err, arr.ErrUnauthorized):
+	case errors.Is(err, plex.ErrUnauthorized), errors.Is(err, arr.ErrUnauthorized), errors.Is(err, jellyfin.ErrUnauthorized):
 		return errBadRequest("%s rejected the credentials: %s", app, msg)
 	case errors.Is(err, plex.ErrForbidden),
 		errors.Is(err, plex.ErrInvalidArgument), errors.Is(err, arr.ErrInvalidArgument),
-		errors.Is(err, arr.ErrWrongApp), errors.Is(err, arr.ErrRedirect), errors.Is(err, plex.ErrRedirect):
+		errors.Is(err, arr.ErrWrongApp), errors.Is(err, arr.ErrRedirect), errors.Is(err, plex.ErrRedirect),
+		errors.Is(err, jellyfin.ErrForbidden), errors.Is(err, jellyfin.ErrInvalidArgument), errors.Is(err, jellyfin.ErrWrongApp),
+		errors.Is(err, jellyfin.ErrTooOld), errors.Is(err, jellyfin.ErrRedirect), errors.Is(err, jellyfin.ErrRefused):
 		return errBadRequest("%s", msg)
-	case errors.Is(err, plex.ErrNotFound), errors.Is(err, arr.ErrNotFound):
+	case errors.Is(err, plex.ErrNotFound), errors.Is(err, arr.ErrNotFound), errors.Is(err, jellyfin.ErrNotFound):
 		return errBadRequest("%s: not found at this URL (%s)", app, msg)
 	}
 	return errStatus(http.StatusBadGateway, "Unable to connect to %s: %s", app, msg)
@@ -190,19 +203,28 @@ func validateServer(ms *models.MediaServer) []config.ValidationError {
 		ms.Kind = models.MediaServerPlex
 	}
 	errs := validateName("name", ms.Name)
-	if !ms.Kind.Supported() {
-		errs = append(errs, invalid("kind", "Only Plex media servers are supported"))
+	switch {
+	case ms.Kind.Supported():
+	case strings.EqualFold(string(ms.Kind), "emby"):
+		errs = append(errs, invalid("kind", "Emby is not supported yet"))
+	default:
+		errs = append(errs, invalid("kind", "Only Plex and Jellyfin media servers are supported"))
 	}
 	u, uerrs := normalizeBaseURL("url", ms.URL)
 	ms.URL = u
 	errs = append(errs, uerrs...)
+	// The credential is a Plex token or a Jellyfin API key (the "token" property either way).
+	label, what := "Token", "the token"
+	if ms.Kind == models.MediaServerJellyfin {
+		label, what = "API key", "the API key"
+	}
 	switch {
 	case ms.Token == "":
-		errs = append(errs, invalid("token", "Token is required"))
+		errs = append(errs, invalid("token", "%s is required", label))
 	case ms.Token == maskedSecret:
-		errs = append(errs, invalid("token", "Enter the token"))
+		errs = append(errs, invalid("token", "Enter %s", what))
 	case strings.ContainsAny(ms.Token, " \t\r\n"):
-		errs = append(errs, invalid("token", "Token must not contain whitespace"))
+		errs = append(errs, invalid("token", "%s must not contain whitespace", label))
 	}
 	// docs/DECISIONS.md D11: "" = may share storage with the other servers (paths are compared),
 	// "separate" = another host or a friend's server (only its mapped folders are compared).
@@ -220,22 +242,94 @@ type mediaServerTestResult struct {
 	MediaDeletionAllowed bool   `json:"mediaDeletionAllowed"`
 	// Owned tells whether the token belongs to the server's owner (Plex only accepts deletions
 	// made with the owner's token), per plex.tv; null when unknown (plex.tv unreachable, or the
-	// token is not listed there for this server).
+	// token is not listed there for this server). Always null for Jellyfin.
 	Owned *bool `json:"owned"`
+	// Jellyfin (docs/DECISIONS.md D12): the product the server reports, whether the credential is
+	// an API key or an administrator (a test only succeeds when it is), and why removals of files
+	// it lists are disabled ("" when they are not).
+	Product          string `json:"product,omitempty"`
+	Administrator    bool   `json:"administrator,omitempty"`
+	RemovalsDisabled string `json:"removalsDisabled,omitempty"`
 }
 
 // plexTVOwnerTimeout bounds the plex.tv ownership lookup of a connection test: plex.tv is often
 // unreachable in LAN-only setups, and the answer is optional.
 const plexTVOwnerTimeout = 5 * time.Second
 
-// testServer runs the connection test of ms's kind. Only Plex has one (validateServer refuses
-// every other kind before a test).
+// testServer runs the connection test of ms's kind (validateServer refuses every other kind before
+// a test).
 func (s *Server) testServer(ctx context.Context, ms models.MediaServer) (*mediaServerTestResult, error) {
-	if !ms.Kind.IsPlex() {
-		return nil, errValidation(invalid("kind", "Only Plex media servers are supported"))
+	switch {
+	case ms.Kind.IsPlex():
+		return s.testPlex(ctx, ms)
+	case ms.Kind == models.MediaServerJellyfin:
+		return s.testJellyfin(ctx, ms)
 	}
-	return s.testPlex(ctx, ms)
+	return nil, errValidation(invalid("kind", "Only Plex and Jellyfin media servers are supported"))
 }
+
+// testJellyfin connects to a Jellyfin server (docs/DECISIONS.md D12, research §5.3.6). The key is
+// only sent once the URL is known to be Jellyfin 12.1 or later: GET /System/Info/Public (no
+// credential) must identify "Jellyfin Server" ≥ 12.1; GET /System/Info with the key must answer
+// with the same server id; GET /Library/VirtualFolders must answer (only an API key or an
+// administrator may, research S14: anything less cannot see every playback session); the removal
+// gate says whether removals of its files are disabled (path substitutions).
+func (s *Server) testJellyfin(ctx context.Context, ms models.MediaServer) (*mediaServerTestResult, error) {
+	if s.d.JellyfinFactory == nil {
+		return nil, errUnavailable("Jellyfin")
+	}
+	ctx, cancel := context.WithTimeout(ctx, upstreamTimeout)
+	defer cancel()
+	c := s.d.JellyfinFactory(ms)
+	pub, err := c.PublicInfo(ctx)
+	if err != nil {
+		return nil, upstreamError("Jellyfin", err)
+	}
+	id, err := c.Identity(ctx)
+	switch {
+	case errors.Is(err, jellyfin.ErrUnauthorized):
+		return nil, errBadRequest("Jellyfin rejected the API key")
+	case err != nil:
+		return nil, upstreamError("Jellyfin", err)
+	case id.MachineIdentifier != pub.MachineIdentifier:
+		return nil, errBadRequest("The server answers with another server id with the API key than without it (%s, %s); check the URL and any reverse proxy in front of Jellyfin",
+			pub.MachineIdentifier, id.MachineIdentifier)
+	}
+	if _, err := c.Sections(ctx); err != nil {
+		if errors.Is(err, jellyfin.ErrForbidden) {
+			return nil, errBadRequest("This credential is not an API key or an administrator's, so Dupearr could not see every playback session. " +
+				"Create an API key in Jellyfin → Dashboard → API Keys (or use an administrator's token)")
+		}
+		return nil, upstreamError("Jellyfin", err)
+	}
+	res := &mediaServerTestResult{
+		Version:           id.Version,
+		MachineIdentifier: id.MachineIdentifier,
+		FriendlyName:      id.FriendlyName,
+		Product:           jellyfin.ProductName,
+		Administrator:     true,
+	}
+	switch why, err := c.RemovalProblem(ctx); {
+	case err != nil:
+		s.log.Debug("Could not read whether removals from a Jellyfin server are safe", "server", ms.Name, "error", err)
+		res.RemovalsDisabled = "Dupearr could not read Jellyfin's configuration; removals stay disabled until it can"
+	case why != "":
+		res.RemovalsDisabled = why
+	}
+	return res, nil
+}
+
+// warnRemovalsDisabled sets X-Dupearr-Warning when a Jellyfin test found removals disabled.
+func (s *Server) warnRemovalsDisabled(w http.ResponseWriter, ms models.MediaServer, res *mediaServerTestResult) {
+	if res == nil || res.RemovalsDisabled == "" {
+		return
+	}
+	s.log.Warn("Removals from this media server are disabled", "server", ms.Name, "reason", res.RemovalsDisabled)
+	w.Header().Set("X-Dupearr-Warning", sanitizeHeader("Removals from this server are disabled: "+res.RemovalsDisabled))
+}
+
+// serverLabel names a media server's kind in API messages ("Plex", "Jellyfin").
+func serverLabel(ms models.MediaServer) string { return ms.Kind.Label() }
 
 // testPlex connects to a Plex server: identity plus the allowMediaDeletion setting, and — in
 // parallel, best effort — whether plex.tv lists the token as the server owner's.
@@ -340,9 +434,9 @@ func (s *Server) loadServer(r *http.Request) (*models.MediaServer, error) {
 	return ms, notFoundAs(err, "Media server")
 }
 
-// ensureUniqueServer refuses a second connection to the same Plex server (it would be scanned and
-// acted on twice).
-func (s *Server) ensureUniqueServer(ctx context.Context, machineID string, selfID int64) error {
+// ensureUniqueServer refuses a second connection to the same server (it would be scanned and
+// acted on twice). kind names it in the message ("This Plex server …", "This Jellyfin server …").
+func (s *Server) ensureUniqueServer(ctx context.Context, kind models.MediaServerKind, machineID string, selfID int64) error {
 	if machineID == "" {
 		return nil
 	}
@@ -352,7 +446,7 @@ func (s *Server) ensureUniqueServer(ctx context.Context, machineID string, selfI
 	}
 	for _, other := range list {
 		if other.ID != selfID && strings.EqualFold(other.MachineIdentifier, machineID) {
-			return errConflict("This Plex server is already configured as %q", other.Name)
+			return errConflict("This %s server is already configured as %q", kind.Label(), other.Name)
 		}
 	}
 	return nil
@@ -363,15 +457,25 @@ func (s *Server) ensureUniqueServer(ctx context.Context, machineID string, selfI
 const identityProbeTimeout = 10 * time.Second
 
 // probeIdentity reads the machine identifier of the server a forced save points at, best effort:
-// "" when it cannot be reached (the save goes ahead; scans, syncs and tests fill it in later). Only
-// a Plex server is asked: the probe is a Plex request carrying the credential as X-Plex-Token.
+// "" when it cannot be reached (the save goes ahead; scans, syncs and tests fill it in later). A
+// Plex server is asked with a Plex request carrying the credential as X-Plex-Token; a Jellyfin
+// server only through its public identity (/System/Info/Public, no credential: the URL is not
+// known to be Jellyfin yet). Any other kind is not asked.
 func (s *Server) probeIdentity(ctx context.Context, ms models.MediaServer) (id, name string) {
-	if s.d.PlexFactory == nil || !ms.Kind.IsPlex() {
-		return "", ""
-	}
 	ctx, cancel := context.WithTimeout(ctx, identityProbeTimeout)
 	defer cancel()
-	ident, err := s.d.PlexFactory(ms).Identity(ctx)
+	var (
+		ident *mediaserver.Identity
+		err   error
+	)
+	switch {
+	case ms.Kind.IsPlex() && s.d.PlexFactory != nil:
+		ident, err = s.d.PlexFactory(ms).Identity(ctx)
+	case ms.Kind == models.MediaServerJellyfin && s.d.JellyfinFactory != nil:
+		ident, err = s.d.JellyfinFactory(ms).PublicInfo(ctx)
+	default:
+		return "", ""
+	}
 	if err != nil || ident == nil {
 		s.log.Debug("Forced save: the server's identity could not be read", "server", ms.Name, "error", err)
 		return "", ""
@@ -379,14 +483,14 @@ func (s *Server) probeIdentity(ctx context.Context, ms models.MediaServer) (id, 
 	return strings.TrimSpace(ident.MachineIdentifier), ident.FriendlyName
 }
 
-// errOtherPlexServer is the 409 of a forced save whose URL answers as another Plex server than the
-// stored one: every stored rating key and media id belongs to the stored server.
-func errOtherPlexServer(name string) error {
+// errOtherPlexServer is the 409 of a forced save whose URL answers as another server than the
+// stored one: every stored rating key and media id belongs to the stored server. kind names it.
+func errOtherPlexServer(kind models.MediaServerKind, name string) error {
 	if name == "" {
 		name = "unnamed"
 	}
-	return errConflict("This URL points to a different Plex server (%s) than the one this media server was set up with; "+
-		"add it as a new media server instead (saving without a test does not change that)", name)
+	return errConflict("This URL points to a different %s server (%s) than the one this media server was set up with; "+
+		"add it as a new media server instead (saving without a test does not change that)", kind.Label(), name)
 }
 
 // adoptServerIdentity stores the identity a successful connection test of a saved media server
@@ -404,7 +508,7 @@ func (s *Server) adoptServerIdentity(ctx context.Context, tested models.MediaSer
 	if err != nil || strings.TrimSpace(cur.MachineIdentifier) != "" || cur.URL != tested.URL || cur.Token != tested.Token {
 		return
 	}
-	if err := s.ensureUniqueServer(ctx, mid, cur.ID); err != nil {
+	if err := s.ensureUniqueServer(ctx, cur.Kind, mid, cur.ID); err != nil {
 		s.log.Warn("Not storing the media server's identity: another media server has it", "server", cur.Name, "error", err)
 		return
 	}
@@ -443,7 +547,7 @@ func (s *Server) handleMediaServerCreate(w http.ResponseWriter, r *http.Request)
 	} else {
 		ms.MachineIdentifier, _ = s.probeIdentity(ctx, ms)
 	}
-	if err := s.ensureUniqueServer(ctx, ms.MachineIdentifier, 0); err != nil {
+	if err := s.ensureUniqueServer(ctx, ms.Kind, ms.MachineIdentifier, 0); err != nil {
 		s.writeErr(w, r, err)
 		return
 	}
@@ -455,6 +559,7 @@ func (s *Server) handleMediaServerCreate(w http.ResponseWriter, r *http.Request)
 	s.syncLibrariesLater(ctx, ms.ID)
 	s.checkHealthLater(ctx, "media server added")
 	s.warnNotOwner(w, ms, tested)
+	s.warnRemovalsDisabled(w, ms, tested)
 	s.writeJSON(w, http.StatusCreated, maskServer(ms))
 }
 
@@ -485,7 +590,13 @@ func (s *Server) handleMediaServerUpdate(w http.ResponseWriter, r *http.Request)
 	if u, errs := normalizeBaseURL("url", in.URL); len(errs) == 0 {
 		in.URL = u
 	}
-	if e := restoreSecret("token", &in.Token, secretEndpoint{in.URL, in.VerifyTLS}, &stored.Token, secretEndpoint{stored.URL, stored.VerifyTLS}); e != nil {
+	// Stored rating keys, version keys and groups belong to the stored kind: another kind is another
+	// server (docs/DECISIONS.md D12).
+	if in.Kind != stored.Kind && !(in.Kind.IsPlex() && stored.Kind.IsPlex()) {
+		s.writeErr(w, r, errValidation(invalid("kind", "The kind of a media server cannot be changed; add a new media server instead")))
+		return
+	}
+	if e := serverSecret(in.Kind, restoreSecret("token", &in.Token, secretEndpoint{in.URL, in.VerifyTLS}, &stored.Token, secretEndpoint{stored.URL, stored.VerifyTLS})); e != nil {
 		s.writeErr(w, r, errValidation(*e))
 		return
 	}
@@ -503,11 +614,11 @@ func (s *Server) handleMediaServerUpdate(w http.ResponseWriter, r *http.Request)
 		tested = res
 		if stored.MachineIdentifier != "" && !strings.EqualFold(res.MachineIdentifier, stored.MachineIdentifier) {
 			s.writeErr(w, r, errValidation(invalid("url",
-				"This URL points to a different Plex server (%s); add it as a new media server instead", res.FriendlyName)))
+				"This URL points to a different %s server (%s); add it as a new media server instead", in.Kind.Label(), res.FriendlyName)))
 			return
 		}
 		in.MachineIdentifier = res.MachineIdentifier
-		if err := s.ensureUniqueServer(ctx, in.MachineIdentifier, in.ID); err != nil {
+		if err := s.ensureUniqueServer(ctx, in.Kind, in.MachineIdentifier, in.ID); err != nil {
 			s.writeErr(w, r, err)
 			return
 		}
@@ -515,11 +626,11 @@ func (s *Server) handleMediaServerUpdate(w http.ResponseWriter, r *http.Request)
 		// A forced save skips the test, not the identity: a reachable server that is not the stored
 		// one is refused; a missing identity (force-saved while unreachable) is filled in.
 		if stored.MachineIdentifier != "" && !strings.EqualFold(mid, stored.MachineIdentifier) {
-			s.writeErr(w, r, errOtherPlexServer(name))
+			s.writeErr(w, r, errOtherPlexServer(in.Kind, name))
 			return
 		}
 		if stored.MachineIdentifier == "" {
-			if err := s.ensureUniqueServer(ctx, mid, in.ID); err != nil {
+			if err := s.ensureUniqueServer(ctx, in.Kind, mid, in.ID); err != nil {
 				s.writeErr(w, r, err)
 				return
 			}
@@ -552,6 +663,7 @@ func (s *Server) handleMediaServerUpdate(w http.ResponseWriter, r *http.Request)
 	}
 	s.checkHealthLater(ctx, "media server updated")
 	s.warnNotOwner(w, *saved, tested)
+	s.warnRemovalsDisabled(w, *saved, tested)
 	s.writeJSON(w, http.StatusAccepted, maskServer(*saved))
 }
 
@@ -574,7 +686,7 @@ func (s *Server) handleMediaServerDelete(w http.ResponseWriter, r *http.Request)
 // the stored server.
 func (s *Server) handleMediaServerTest(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	in := models.MediaServer{Kind: models.MediaServerPlex, VerifyTLS: true}
+	in := models.MediaServer{VerifyTLS: true}
 	if err := decodeJSON(r, &in); err != nil {
 		s.writeErr(w, r, err)
 		return
@@ -593,13 +705,25 @@ func (s *Server) handleMediaServerTest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// A body without a kind tests a saved server as its own kind (else Plex, as always).
+	if in.Kind == "" && stored != nil {
+		in.Kind = stored.Kind
+	}
+	if in.Kind == "" {
+		in.Kind = models.MediaServerPlex
+	}
+	// A stored credential is only ever sent the way its own kind sends it.
+	if in.Token == maskedSecret && stored != nil && in.Kind != stored.Kind && !(in.Kind.IsPlex() && stored.Kind.IsPlex()) {
+		s.writeErr(w, r, errValidation(invalid("token", "Re-enter the credential: the kind of media server changed")))
+		return
+	}
 	if in.Token == maskedSecret {
 		var token *string
 		var prev secretEndpoint
 		if stored != nil {
 			token, prev = &stored.Token, secretEndpoint{stored.URL, stored.VerifyTLS}
 		}
-		if e := restoreSecret("token", &in.Token, secretEndpoint{in.URL, in.VerifyTLS}, token, prev); e != nil {
+		if e := serverSecret(in.Kind, restoreSecret("token", &in.Token, secretEndpoint{in.URL, in.VerifyTLS}, token, prev)); e != nil {
 			s.writeErr(w, r, errValidation(*e))
 			return
 		}
@@ -652,7 +776,7 @@ func (s *Server) handleServerLibrariesSync(w http.ResponseWriter, r *http.Reques
 	ctx, cancel := context.WithTimeout(r.Context(), syncTimeout)
 	defer cancel()
 	if err := s.scanner.SyncLibraries(ctx, ms.ID); err != nil {
-		s.writeErr(w, r, upstreamError("Plex", err))
+		s.writeErr(w, r, upstreamError(serverLabel(*ms), err))
 		return
 	}
 	list, err := s.d.Store.Libraries().ListByServer(r.Context(), ms.ID)

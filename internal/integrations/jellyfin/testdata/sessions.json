@@ -1,0 +1,5 @@
+[
+  {"Id": "s1", "UserName": "admin", "NowPlayingItem": {"Id": "10000000000000000000000000000a01", "Type": "Movie"}, "PlayState": {"MediaSourceId": "10000000000000000000000000000a02", "IsPaused": true}},
+  {"Id": "s2", "UserName": "kid", "NowPlayingItem": {"Id": "10000000-0000-0000-0000-000000000B03", "PrimaryVersionId": "10000000000000000000000000000B01"}, "PlayState": {"IsPaused": false}},
+  {"Id": "s3", "UserName": "idle", "PlayState": {}}
+]

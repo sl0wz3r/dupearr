@@ -1,0 +1,47 @@
+{"Items": [
+  {"Name": "Alpha", "Id": "10000000000000000000000000000a01", "Type": "Movie", "Path": "/media/movies/Alpha (2020) [tmdbid-603]/Alpha (2020) [tmdbid-603] - 2160p.mkv",
+   "ProviderIds": {"Tmdb": "603", "Imdb": "tt0133093", "TmdbCollection": "2344"}, "ProductionYear": 2020, "LocationType": "FileSystem", "VideoType": "VideoFile",
+   "DateCreated": "2026-09-24T12:00:01.1234567Z", "ParentId": "f137a2dd21bbc1b99aa5c0f6bf02a805", "MediaSourceCount": 2,
+   "MediaSources": [
+     {"Protocol": "File", "Id": "10000000000000000000000000000a01", "Path": "/media/movies/Alpha (2020) [tmdbid-603]/Alpha (2020) [tmdbid-603] - 2160p.mkv", "Type": "Default", "Container": "mkv", "Size": 4200000, "Name": "2160p", "IsRemote": false, "RunTimeTicks": 40000000, "Bitrate": 8400000,
+      "MediaStreams": [{"Type": "Video", "Codec": "hevc", "Profile": "Main 10", "Width": 3840, "Height": 2160, "BitDepth": 10, "ColorTransfer": "smpte2084", "ColorPrimaries": "bt2020", "VideoRangeType": "HDR10", "IsDefault": true},
+                       {"Type": "Audio", "Codec": "truehd", "Profile": "Dolby TrueHD + Dolby Atmos", "Channels": 8, "Language": "eng", "IsDefault": true}]},
+     {"Protocol": "File", "Id": "10000000000000000000000000000a02", "Path": "/media/movies/Alpha (2020) [tmdbid-603]/Alpha (2020) [tmdbid-603] - 1080p.mkv", "Type": "Default", "Container": "mkv", "Size": 1500000, "Name": "1080p", "IsRemote": false, "RunTimeTicks": 40000000,
+      "MediaStreams": [{"Type": "Video", "Codec": "h264", "Profile": "High", "Width": 1920, "Height": 1080, "BitDepth": 8, "VideoRangeType": "SDR", "IsDefault": true},
+                       {"Type": "Audio", "Codec": "dts", "Profile": "DTS-HD MA", "Channels": 6, "Language": "eng", "IsDefault": true},
+                       {"Type": "Subtitle", "Codec": "subrip", "Language": "eng", "IsExternal": true}]}
+   ]},
+  {"Name": "Kappa", "Id": "10000000000000000000000000000b01", "Type": "Movie", "Path": "/media/movies/Kappa (2018)/Kappa (2018).mkv",
+   "ProviderIds": {"Tmdb": "620"}, "ProductionYear": 2018, "LocationType": "FileSystem", "VideoType": "VideoFile", "DateCreated": "2026-09-24T12:00:02.0000000Z", "MediaSourceCount": 2,
+   "MediaSources": [
+     {"Protocol": "File", "Id": "10000000000000000000000000000b01", "Path": "/media/movies/Kappa (2018)/Kappa (2018).mkv", "Type": "Default", "Container": "mkv", "Size": 158350, "Name": "Kappa (2018)", "IsRemote": false},
+     {"Protocol": "File", "Id": "10000000000000000000000000000b02", "Path": "/media/movies/Kappa (2018)/Kappa (2018) - 720p-cd1.mkv", "Type": "Default", "Container": "mkv", "Size": 158350, "Name": "720p-cd1", "IsRemote": false}
+   ]},
+  {"Name": "Lambda", "Id": "10000000000000000000000000000c01", "Type": "Movie", "Path": "/media/movies/Lambda (2019)/Lambda (2019) - 2160p.strm",
+   "ProviderIds": {"Tmdb": ""}, "ProductionYear": 2019, "LocationType": "FileSystem", "VideoType": "VideoFile", "DateCreated": "2026-09-24T12:00:03.0000000Z", "MediaSourceCount": 2,
+   "MediaSources": [
+     {"Protocol": "File", "Id": "10000000000000000000000000000c01", "Path": "/media/movies/Lambda (2019)/Lambda (2019) - 2160p.strm", "Type": "Default", "Container": "strm", "Size": 54, "Name": "2160p", "IsRemote": false, "MediaStreams": []},
+     {"Protocol": "File", "Id": "10000000000000000000000000000c02", "Path": "/media/movies/Lambda (2019)/Lambda (2019) - 1080p.mkv", "Type": "Default", "Container": "mkv", "Size": 158000, "Name": "1080p", "IsRemote": false}
+   ]},
+  {"Name": "Gamma", "Id": "10000000000000000000000000000d01", "Type": "Movie", "Path": "/media/movies/Gamma (2019)-cd1.mkv", "PartCount": 2,
+   "ProviderIds": {"Tmdb": "0"}, "LocationType": "FileSystem", "VideoType": "VideoFile", "DateCreated": "2026-09-24T12:00:04.0000000Z",
+   "MediaSources": [
+     {"Protocol": "File", "Id": "10000000000000000000000000000d01", "Path": "/media/movies/Gamma (2019)-cd1.mkv", "Type": "Default", "Container": "mkv", "Size": 90000, "Name": "Gamma (2019)", "IsRemote": false}
+   ]},
+  {"Name": "Zeta", "Id": "10000000000000000000000000000e01", "Type": "Movie", "Path": "/media/movies/Zeta (2017)/Zeta (2017).mkv",
+   "ProviderIds": {"Tmdb": "606"}, "LocationType": "FileSystem", "VideoType": "VideoFile", "DateCreated": "2026-09-24T12:00:05.0000000Z", "MediaSourceCount": 2,
+   "MediaSources": [
+     {"Protocol": "File", "Id": "10000000000000000000000000000e01", "Path": "/media/movies/Zeta (2017)/Zeta (2017).mkv", "Type": "Default", "Container": "mkv", "Size": 150000, "Name": "Zeta (2017)", "IsRemote": false},
+     {"Protocol": "File", "Id": "10000000000000000000000000000e02", "Path": "/media/movies4k/Zeta (2017)/Zeta (2017).mkv", "Type": "Grouping", "Container": "mkv", "Size": 450000, "Name": "Zeta (2017)", "IsRemote": false}
+   ]},
+  {"Name": "Alpha Trailer", "Id": "10000000000000000000000000000f01", "Type": "Movie", "ExtraType": "Trailer", "Path": "/media/movies/Alpha (2020) [tmdbid-603]/trailers/t.mkv", "LocationType": "FileSystem",
+   "MediaSources": [{"Protocol": "File", "Id": "10000000000000000000000000000f01", "Path": "/media/movies/Alpha (2020) [tmdbid-603]/trailers/t.mkv", "Type": "Default", "Size": 10}]},
+  {"Name": "Missing", "Id": "10000000000000000000000000000f02", "Type": "Movie", "LocationType": "Virtual", "MediaSources": []},
+  {"Name": "Remote", "Id": "10000000000000000000000000000f03", "Type": "Movie", "Path": "/media/movies/Remote/Remote.strm", "LocationType": "FileSystem", "MediaSourceCount": 2,
+   "MediaSources": [
+     {"Protocol": "Http", "Id": "10000000000000000000000000000f03", "Path": "https://example.invalid/stream", "Type": "Default", "IsRemote": true},
+     {"Protocol": "File", "Id": "10000000000000000000000000000f04", "Path": "", "Type": "Placeholder"}
+   ]},
+  {"Name": "Omega", "Id": "10000000000000000000000000000f05", "Type": "Movie", "Path": "/media/movies/Omega (2001)", "LocationType": "FileSystem", "VideoType": "BluRay", "ProviderIds": {"TMDB": "999"},
+   "MediaSources": [{"Protocol": "File", "Id": "10000000000000000000000000000f05", "Path": "/media/movies/Omega (2001)", "Type": "Default", "Size": 5000000, "VideoType": "BluRay"}]}
+], "TotalRecordCount": 9, "StartIndex": 0}

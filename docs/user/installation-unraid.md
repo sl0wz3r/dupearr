@@ -16,8 +16,9 @@ This guide is for users; maintainers building and publishing the image should re
 
 - Check the [requirements](requirements.md) (CPU, kernel, Docker engine, Unraid versions, memory).
 - Unraid 6.12 or newer with Docker enabled.
-- Plex Media Server (any install: container, VM or another machine). Radarr/Sonarr are optional
-  but strongly recommended: deleting through them keeps them in sync and prevents re-downloads.
+- Plex Media Server or Jellyfin 12.1+ (any install: container, VM or another machine).
+  Radarr/Sonarr are optional but strongly recommended: deleting through them keeps them in sync and
+  prevents re-downloads.
 - Know where your media lives. The [TRaSH Guides Unraid layout](https://trash-guides.info/File-and-Folder-Structure/How-to-set-up/Unraid/)
   is the reference: one share `data` with `media/`, `torrents/` and `usenet/` inside, mounted as
   `/data` in Radarr/Sonarr and `/data/media` in Plex.
@@ -80,6 +81,11 @@ itself. It is easiest when **every app sees the same path**:
 | linuxserver defaults | `/mnt/user/Movies` → `/movies`, `/mnt/user/TV` → `/tv` | `/mnt/user/Movies` → `/movies` | `/mnt/user` → `/data` | Plex `/movies` → `/data/Movies`, `/tv` → `/data/TV` (same for the \*arrs) |
 | Deleting only through Radarr/Sonarr/Plex | any | any | leave empty | none; remove `filesystem` from *Deletion Methods* |
 
+A **Jellyfin** server always needs `/data` and a mapping for each of its library folders (the
+Jellyfin container's path → Dupearr's, e.g. `/data/media` → `/data/media`), whatever the deletion
+methods: Jellyfin never reports whether a file exists, so Dupearr checks every Jellyfin copy on
+disk.
+
 Mappings are added in Dupearr under *Settings → Media Management → Path Mappings*; details and
 more examples in [configuration → path mappings](configuration.md#path-mappings).
 
@@ -102,7 +108,8 @@ chmod -R a=,a+rX,u+w,g+w /mnt/user/data
 (or use *Tools → Docker Safe New Perms*). Dupearr itself never changes ownership of your media; it
 only fixes the ownership of its own files in `/config` on start.
 
-Your appdata folder holds the Plex owner token, the \*arr API keys and every notification secret.
+Your appdata folder holds the Plex owner token, any Jellyfin API key, the \*arr API keys and every
+notification secret.
 At start Dupearr makes it `rwxr-x---` (no group write, nothing for others) and its secret files
 owner-only, even after *New Permissions* loosened them; do not export `appdata` over SMB/NFS and do
 not mount Dupearr's appdata folder into other containers (most Unraid containers run as the same
@@ -115,7 +122,7 @@ Click **Apply**. Unraid pulls the image and starts the container.
 Open the WebUI (container icon → **WebUI**, or `http://<server-ip>:3873/`) and follow the
 [first-run steps in the README](../../README.md#first-run). Creating the login asks for the
 **setup code** from Dupearr's log: container icon → **Logs**, line *First-run setup is pending …*
-(or `docker logs dupearr` in the terminal). Then: create a login, add Plex, enable
+(or `docker logs dupearr` in the terminal). Then: create a login, add Plex (or Jellyfin), enable
 libraries, add Radarr/Sonarr, add path mappings if needed, review the profile, scan, review and
 approve. **Dry run is on by default**, so the first approvals are simulations; check
 *Activity → History* before you turn it off.

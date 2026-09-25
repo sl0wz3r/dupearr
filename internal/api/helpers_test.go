@@ -29,6 +29,7 @@ import (
 	"github.com/sl0wz3r/dupearr/internal/executor"
 	"github.com/sl0wz3r/dupearr/internal/health"
 	"github.com/sl0wz3r/dupearr/internal/integrations/arr"
+	"github.com/sl0wz3r/dupearr/internal/integrations/jellyfin"
 	"github.com/sl0wz3r/dupearr/internal/integrations/plex"
 	"github.com/sl0wz3r/dupearr/internal/integrations/tautulli"
 	"github.com/sl0wz3r/dupearr/internal/models"
@@ -151,6 +152,9 @@ func newTestServer(t *testing.T, opts ...func(*serverOpts)) *testServer {
 			Timeout: 5 * time.Second, PlexTVURL: ts.plexTV.URL, ClientsPlexTVURL: ts.plexTV.URL},
 		PlexFactory: func(s models.MediaServer) *plex.Client {
 			return plex.New(s.URL, s.Token, plex.Options{ClientIdentifier: "dupearr-test", Timeout: 5 * time.Second})
+		},
+		JellyfinFactory: func(s models.MediaServer) *jellyfin.Client {
+			return jellyfin.New(s.URL, s.Token, jellyfin.Options{DeviceID: "dupearr-test", VerifyTLS: s.VerifyTLS, Timeout: 5 * time.Second})
 		},
 		ArrFactory: func(a models.ArrInstance) *arr.Client {
 			return arr.New(a, arr.Options{Timeout: 5 * time.Second})

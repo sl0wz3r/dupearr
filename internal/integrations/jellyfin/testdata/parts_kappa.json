@@ -1,0 +1,3 @@
+{"Items": [{"Name": "Kappa (2018) - 720p-cd2", "Id": "10000000000000000000000000000b03", "Type": "Movie", "Path": "/media/movies/Kappa (2018)/Kappa (2018) - 720p-cd2.mkv", "LocationType": "FileSystem",
+  "MediaSources": [{"Protocol": "File", "Id": "10000000000000000000000000000b03", "Path": "/media/movies/Kappa (2018)/Kappa (2018) - 720p-cd2.mkv", "Type": "Default", "Container": "mkv", "Size": 158360}]}],
+ "TotalRecordCount": 1, "StartIndex": 0}

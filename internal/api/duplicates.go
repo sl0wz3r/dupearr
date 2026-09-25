@@ -348,6 +348,10 @@ func (s *Server) approveGroup(ctx context.Context, id int64, expectedSignature s
 		// looked at it on its own page.
 		return nil, errConflict("This duplicate removes a full-disc backup: open it and approve it on its own")
 	}
+	if bulk && executor.ReadOnlyGroup(g) {
+		// docs/DECISIONS.md D12: Jellyfin copies are only removed by a person's single approval.
+		return nil, errConflict("This duplicate is on a Jellyfin server: open it and approve it on its own")
+	}
 	switch g.Status {
 	case models.GroupIgnored:
 		return nil, errConflict("This duplicate is ignored; un-ignore it first")

@@ -551,6 +551,102 @@ no health issue, no settings field.
   unavailable until its own scan); the report-only "also on server B" title index
   (`MediaVersion.Elsewhere`); the engine's `sameNamesAndSizes` rule-out across devices
   (hash-based-detection §2.2, a Phase 2 prerequisite that would change one-server decisions).
+- **Jellyfin servers (D12)** take part like Plex servers: `multi` counts enabled media servers of
+  any kind, their items are listed and compared, and every rule above applies to them. Jellyfin has
+  no `scannedAt`/`contentChangedAt`, so each of its libraries records `fingerprint` (SHA-256 of its
+  complete listing: item ids, version ids, part paths and sizes) and the executor re-lists the
+  library before a removal: a different fingerprint sends the group to review, a failed listing
+  defers it. Its versions are matched by version key (`jellyfin:<server>:<source id>`), the session
+  check covers source ids and stack-part item ids, and a Jellyfin group keeping a file refuses
+  another server's removal of it. A kind the executor cannot re-read this way fails closed. Only
+  Jellyfin's movie and TV libraries are listed: a library of another kind that may list video files
+  (mixed content, home videos, music videos, or a kind Dupearr does not know;
+  `mediaserver.Section.OtherVideo`) makes its server unread for the groups it may list files of,
+  and the executor refuses a removal such a library may concern (also one added after the scan).
+  Right before another Jellyfin server's libraries, sessions and items are trusted, its removal gate
+  (D12.2) is re-read: a problem sends the group to review, an unreadable gate defers it. A version
+  of another server that is report-only (D12.3) never counts as that item's remaining copy.
+
+## D12. Jellyfin as a read-only media server (issue #4 Phase 1, jellyfin-emby)
+Research: `docs/research/jellyfin-emby.md` (§3, §4 hazards S1–S29, §5.1, §5.3). Jellyfin **12.1 or
+later** (`kind: "jellyfin"`) is a read-only source plus a change notification. Emby is not
+supported (`kind: "emby"` is refused with "Emby is not supported yet"). Plex behaviour is unchanged.
+1. **Nothing is ever removed, merged, unlinked or edited through Jellyfin** (P1). Its item delete
+   removes a movie's whole folder (every version, sometimes another movie) and other items'
+   sidecars by name prefix, and it cannot delete one version. The client (`internal/integrations/
+   jellyfin`) sends only an allowlist of method + path templates with a fixed set of query keys:
+   `GET /System/Info/Public` (no credential), `/System/Info`, `/System/Configuration`,
+   `/Library/VirtualFolders`, `/Items`, `/Videos/{id}/AdditionalParts`, `/Sessions`,
+   `/ScheduledTasks`, and `POST /Library/Media/Updated` (never retried). Anything else fails before
+   a connection is opened. The key travels only in `Authorization: MediaBrowser Token="…"` (never a
+   URL, never a legacy `X-Emby-*` header); redirects are refused; the client implements no
+   `VersionDeleter`, `ItemRefresher` or `FolderScanner`, so the `plex` method cannot apply.
+2. **Credential and gate.** The connection must be an API key or an administrator: only then does
+   `/Sessions` show every session. The proof is a `200` from `GET /Library/VirtualFolders`
+   (`401`/`403` = not an administrator). With that proof missing, or with **path substitutions**
+   set in `/System/Configuration` (S12), removals from that server are disabled
+   (`mediaserver.RemovalGate`): the scan makes its versions report-only with the reason, the
+   executor re-checks the gate before a run, and the health check reports it. With path
+   substitutions Jellyfin reports rewritten paths for every item, source and part, but not for its
+   library folders (live on 12.1), so the client refuses to list or re-read that server at all
+   (`ErrPathSubstitutions`): its libraries count as failed listings, its groups are left as they
+   were (never resolved), and a row whose own file lies outside its library's folders fails a
+   listing too. The connection test refuses another product, a version below 12.1, a wrong key, and
+   a user token; a newer minor version is a health notice. The key is only ever sent after
+   `/System/Info/Public` (no credential) identified Jellyfin 12.1 or later, once per client — also
+   by the library sync that follows a forced save.
+3. **Versions.** Listing per library (`ParentId`, `Recursive`, 200 per page, `Fields=MediaSources,…`)
+   is accepted only when complete (distinct ids = a stable `TotalRecordCount`, no short page, every
+   row's `MediaSourceCount` = its sources, no row's own `Default` source under two rows, a size for
+   every file version); anything else is an incomplete read, never a partial result. Each row is one
+   item, except that rows of one library linked by `Grouping` sources (a title merged from two
+   copies of one library and a primary in another is listed as two rows, each with the others as
+   `Grouping`, live on 12.1) are one item led by the smallest row id; its versions are its `Default`/
+   `Grouping` file sources inside the library's folders (hidden and merged alternates included),
+   keyed `jellyfin:<serverId>:<sourceId>` (`MediaID` 0, `SourceID` = the source id, `RatingKey` = the
+   row id; the item's stable key is its smallest source id, so it survives a new primary). Parts are
+   the source's own file plus `GET /Videos/{sourceId}/AdditionalParts` for **every** version whose
+   group is built (S4); a failed read, a missing size, a disc folder or image (S20) or a `.strm`
+   shortcut in the title (S19) make the version **report-only** (`MediaVersion.ReportOnly`,
+   `report_only` flag, group protected with the reasons). A `.strm` is never a version; the file it
+   points to records the shortcut (`MediaPart.ShortcutOf`) and is protected with its own reason (not
+   as a multi-episode file). `EpisodeEnd` comes from `IndexNumberEnd` only for the source whose path
+   is the row's path (S21), next to the file-name and Sonarr signals; for a Jellyfin version the
+   file-name signal also takes Jellyfin's own multi-episode forms (`S01E03x04`, `S01E03-x04`,
+   `1x03x04`, …), because a hidden alternate has no other signal: a multi-episode file is never
+   removed. Only what Jellyfin groups into one item, and scope groups across libraries with one
+   item per library, is detected (§5.1): copies in separate folders of one library are not, and
+   when two items of one library share an external id no scope group is formed across them (S22).
+4. **Files are confirmed on disk only.** Jellyfin never reports whether a file exists, and keeps
+   listing a removed file for a while ("ghost", S6/S28). Every part of every version of a Jellyfin
+   group needs a `server` path mapping, or the version is report-only. A mapped file missing from an
+   existing folder is missing (`exists: false`), so a group is resolved by the local files. The
+   keeper check stats every part of the keeper.
+5. **Removals: manual, one group at a time, into a recycle bin.** A group with a Jellyfin version
+   carries `manual_only` (auto-blocking): auto mode never approves it and a bulk approval refuses it
+   (409 per group: "open it and approve it on its own"). An approval is refused while any version is
+   report-only or any part of any copy is unmapped. The executor picks the *arr (only when it has a
+   recycle bin configured; a permanent *arr delete is refused, not replaced by another method) or
+   the filesystem method into Dupearr's recycle bin (none configured = refused). Before a run it
+   confirms the server's identity (S23; a server stored without one is never acted on), the gate
+   (2.) and that nothing plays: a session's `NowPlayingItem.Id` or `PlayState.MediaSourceId` matching
+   any row id, source id or stack-part item id of the group's versions defers it (S13).
+6. **After a removal** Dupearr posts the exact removed paths (`UpdateType: "Deleted"`) to
+   `/Library/Media/Updated`, once per server and library, after re-confirming the server's
+   identity; a restore posts `"Created"`. A failed notification is only noted on the action. The
+   recycle bin gets an empty **`.ignore`** next to `.plexignore` (Jellyfin skips such a folder,
+   S25); when the bin lies inside a Jellyfin library folder and not below a hidden folder (Jellyfin
+   never indexes those, live on 12.1), the recycle-bin health check requires it, and asks for a
+   library scan until Jellyfin reports one completed after the `.ignore` appeared (`/ScheduledTasks`,
+   research Q12).
+7. **Health** (`JellyfinServerCheck`): version (error below 12.1, notice when newer than tested),
+   credential (warning when not an administrator), path substitutions (error), and a notice when no
+   recycle bin exists anywhere (no Jellyfin copy can then be removed). `PathMappingCheck` requires a
+   mapping for every Jellyfin library folder whatever the deletion methods. The Plex-only checks
+   (media deletion, owner token, disc detection folders) skip Jellyfin.
+- **Not in Phase 1**: Emby; grouping by external id within one library; webhooks from Jellyfin;
+  poster images; auto approval of Jellyfin groups; deleting a stale entry in Jellyfin after a
+  removal (it drops the file after its library monitor or the next scan).
 
 ## Post-implementation notes (v1 implementation and review)
 Decisions the implementation made on top of D1–D8 (append-only; the code comments carry details).

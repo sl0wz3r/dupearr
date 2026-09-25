@@ -1,0 +1,3 @@
+{"Items": [{"Name": "Gamma (2019)-cd2", "Id": "10000000000000000000000000000d02", "Type": "Movie", "Path": "/media/movies/Gamma (2019)-cd2.mkv", "LocationType": "FileSystem",
+  "MediaSources": [{"Protocol": "File", "Id": "10000000000000000000000000000d02", "Path": "/media/movies/Gamma (2019)-cd2.mkv", "Type": "Default", "Container": "mkv", "Size": 90010}]}],
+ "TotalRecordCount": 1, "StartIndex": 0}

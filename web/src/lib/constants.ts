@@ -360,6 +360,8 @@ export const GROUP_FLAG_LABELS: Record<GroupFlag, string> = {
   other_server_keeps: 'Kept by another server',
   other_server_possible: 'Maybe on another server',
   other_server_unread: 'Media server not read',
+  manual_only: 'Manual approval only',
+  report_only: 'Report only',
 };
 
 export const GROUP_FLAG_DESCRIPTIONS: Record<GroupFlag, string> = {
@@ -372,8 +374,8 @@ export const GROUP_FLAG_DESCRIPTIONS: Record<GroupFlag, string> = {
   missing_keeper_file: 'Plex reports a kept version as not accessible — needs review',
   edition_split: 'Editions are treated as distinct; this group is one edition',
   arr_untracked_keeper: 'The keeper is not tracked by the *arr that tracks a removed copy',
-  unanalyzed: 'Plex has not analyzed a version (no codec/resolution/bitrate) — needs review',
-  unavailable_version: 'Plex reports a version’s file as missing; it is not counted as a copy',
+  unanalyzed: 'The media server has not analyzed a version (no codec/resolution/bitrate) — needs review',
+  unavailable_version: 'A version’s file is missing (reported by Plex, or not found on disk for Jellyfin); it is not counted as a copy',
   suspect_merge: 'Versions may be different titles merged by Plex (folders/years/durations/*arr ids differ) — never auto-removed',
   variant_3d: '2D and 3D versions are treated as distinct',
   language_variant: 'Versions have different audio languages and are treated as distinct',
@@ -399,6 +401,10 @@ export const GROUP_FLAG_DESCRIPTIONS: Record<GroupFlag, string> = {
     'Another media server lists a file with the same name and size; if it is the same file, removing it would take that server’s copy — needs review',
   other_server_unread:
     'A media server that may list these files could not be read during the last scan: nothing is removed until a new scan has read it (or runs after it was disabled or declared separate storage)',
+  manual_only:
+    'The copies are on a Jellyfin server: Dupearr never deletes through Jellyfin, so they are only removed when a person approves this duplicate on its own (never in bulk or in auto mode), through Radarr/Sonarr or into the recycle bin',
+  report_only:
+    'This duplicate is only reported: something Dupearr cannot confirm (a .strm shortcut, stack parts Jellyfin could not list, a disc, a copy without a path mapping, or removals disabled on the server) protects every copy. The reasons are shown on the duplicate',
 };
 
 export const GROUP_FLAG_KIND: Record<GroupFlag, StatusKind> = {
@@ -430,6 +436,8 @@ export const GROUP_FLAG_KIND: Record<GroupFlag, StatusKind> = {
   other_server_keeps: 'warning',
   other_server_possible: 'warning',
   other_server_unread: 'danger',
+  manual_only: 'info',
+  report_only: 'warning',
 };
 
 export const DECISION_LABELS: Record<Decision, string> = {
@@ -519,6 +527,7 @@ export const KEEP_PER_LABELS: Record<KeepPer, string> = {
 
 export const MEDIA_SERVER_KIND_LABELS: Record<MediaServerKind, string> = {
   plex: 'Plex',
+  jellyfin: 'Jellyfin',
 };
 
 export const ARR_KIND_LABELS: Record<ArrKind, string> = {
@@ -572,7 +581,7 @@ export const DELETION_METHOD_LABELS: Record<DeletionMethod, string> = {
 
 export const DELETION_METHOD_DESCRIPTIONS: Record<DeletionMethod, string> = {
   arr: "Delete through the owning *arr (uses the *arr's recycle bin when configured)",
-  plex: 'Delete through Plex (requires "Allow media deletion" in Plex)',
+  plex: 'Delete through Plex (requires "Allow media deletion" in Plex; never used for Jellyfin, which Dupearr never deletes through)',
   filesystem: 'Delete or move to the recycle bin directly on disk (requires path mappings)',
 };
 

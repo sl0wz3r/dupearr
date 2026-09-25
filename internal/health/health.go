@@ -15,13 +15,21 @@
 //   - ArrRecycleBinCheck (notice, per instance; only when "arr" is in deletionMethods): the *arr
 //     has no recycling bin, so deletes through it are permanent.
 //   - PathMappingCheck (warning; only when "filesystem" is in deletionMethods): an enabled
-//     library folder has no server path mapping, or its mapped local folder does not exist.
+//     library folder has no server path mapping, or its mapped local folder does not exist. For a
+//     Jellyfin server whatever the deletion methods: its groups are report-only without one.
+//   - JellyfinServerCheck (per enabled Jellyfin server, docs/DECISIONS.md D12): a version before
+//     12.1 (error), an untested newer version (notice), a credential that is not an API key or an
+//     administrator (warning: removals disabled), path substitutions (error: removals disabled);
+//     and a notice when no recycle bin is set (Dupearr's, or an enabled *arr's): Jellyfin copies are
+//     only removed into one.
 //   - RecycleBinCheck (error when the configured recycle bin is not usable: not absolute, not a
 //     folder, not writable, missing with a missing or unwritable parent folder, or it is/contains
 //     a mapped media folder, which the executor refuses; a bin that does not exist yet but whose
 //     parent is a writable folder is fine — it is created on first use; warning when it lies
 //     inside a mapped Plex library folder without a .plexignore that excludes everything, i.e.
-//     has a "*" line).
+//     has a "*" line, or inside a mapped Jellyfin library folder without an empty .ignore; notice
+//     when that .ignore was added to an existing bin and the Jellyfin server reports no completed
+//     library scan since, research S25).
 //   - Probes of individual servers/instances that panic are reported as warnings for them.
 //   - DiscDetectionUnavailable (notice): full-disc detection (settings.DetectDiscs) is on, but no
 //     folder of an enabled movie library on an enabled server maps to a local path, so the scan
@@ -361,6 +369,7 @@ func (c *Checker) checks() []check {
 		{SourcePathMapping, c.checkPathMapping},
 		{SourceDiscDetection, c.checkDiscDetection},
 		{SourceRecycleBin, c.checkRecycleBin},
+		{SourceJellyfinServer, c.checkJellyfinServers},
 		{SourceDryRun, c.checkDryRun},
 		{SourceAuthentication, c.checkAuthentication},
 		{SourceExternalAuth, c.checkExternalAuth},

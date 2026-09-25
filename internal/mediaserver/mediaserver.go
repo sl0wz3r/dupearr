@@ -8,7 +8,9 @@
 // changes a server (deleting one version, refreshing an item, scanning a folder, reporting changed
 // paths) is an optional capability found by a type assertion where it is used. A client that does
 // not implement a capability makes the feature that needs it structurally unavailable (for
-// VersionDeleter: the "plex" deletion method), never a fallback to another call.
+// VersionDeleter: the "plex" deletion method), never a fallback to another call. Plex implements
+// VersionDeleter, ItemRefresher and FolderScanner; Jellyfin (a read-only source,
+// docs/DECISIONS.md D12) implements only ChangeNotifier and RemovalGate.
 //
 // The types carry the Plex-era names (RatingKey, Sections, AllItems) because the Plex client was the
 // first implementation and existing fakes and stored data use them; their meaning is neutral and
@@ -20,8 +22,12 @@ package mediaserver
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sl0wz3r/dupearr/internal/models"
@@ -43,13 +49,20 @@ type Section struct {
 	// Refreshing reports a library scan in progress; ScannedAt and ContentChangedAt are Unix
 	// seconds of the last scan and of the last change of the library's content. All three are 0 or
 	// false when the server does not report them. With several media servers the executor compares
-	// them with the scan's record right before a removal (docs/DECISIONS.md D11), and a library
-	// that reports 0 refuses every removal of a group another server's library could list ("a
-	// change since the scan cannot be ruled out"). A kind without these times therefore needs
-	// another change signal before it is Supported, or it blocks the removals of every other server.
+	// them with the scan's record right before a removal (docs/DECISIONS.md D11). A library that
+	// reports 0 needs another change signal: for a non-Plex kind the scan records the
+	// ListingFingerprint of the library's listing and the executor lists the library again; without
+	// one every removal of a group the library could list is refused ("a change since the scan
+	// cannot be ruled out").
 	Refreshing       bool
 	ScannedAt        int64
 	ContentChangedAt int64
+	// OtherVideo reports a library whose Type is not synced but which may list video files
+	// (Jellyfin: mixed content, home videos, music videos, or a kind the client does not know).
+	// Dupearr never lists such a library, so with several media servers it cannot know which files
+	// it lists: the server counts as unread for the groups it may list files of, and a removal it
+	// may list is refused (docs/DECISIONS.md D11, D12). Plex never sets it.
+	OtherVideo bool
 }
 
 // ItemRef is a lightweight listing row of one movie or episode with every version and part.
@@ -68,6 +81,10 @@ type ItemRef struct {
 	MediaCount  int // number of NON-optimized media
 	Media       []MediaRef
 	AddedAt     time.Time
+	// Shortcuts are local .strm files the item lists (Jellyfin lists a .strm to a local path as an
+	// ordinary file source). They are never versions: the scanner reads their targets into the
+	// shared-file index, so the file a shortcut points to is never removed.
+	Shortcuts []PartRef
 }
 
 // MediaRef is one version of a listing row.
@@ -88,6 +105,9 @@ type PartRef struct {
 	ID   int64
 	File string // path as the server sees it
 	Size int64
+	// ItemID is the server's item id of the part when it has one (Jellyfin: a stack part's own
+	// item, named by a session while that part plays); "" for Plex.
+	ItemID string
 }
 
 // VersionIDOf returns the server's id of a listed version: VersionID, else the Plex media id
@@ -146,11 +166,57 @@ type FolderScanner interface {
 	ScanPath(ctx context.Context, sectionKey, dir string) error
 }
 
-// ChangeNotifier is the capability to report removed or restored paths to the server
-// (Jellyfin/Emby: POST /Library/Media/Updated). Defined for the next kind; no client implements it
-// yet and nothing calls it.
+// ChangeNotifier is the capability to report removed paths to the server (Jellyfin:
+// POST /Library/Media/Updated). The executor calls it once per group after the removals, with the
+// removed paths as the server sees them, after confirming the server's identity; a restore reports
+// the restored paths (a client may offer a "created" variant, see the jellyfin package). It is the
+// only way a server that never deletes through Dupearr drops the removed copy's entry.
 type ChangeNotifier interface {
 	NotifyChanged(ctx context.Context, libraryKey string, paths []string) error
+}
+
+// RemovalGate is the capability to say whether files this server lists may be removed at all
+// (Jellyfin: no path substitutions set, the credential proven an API key or an administrator).
+// RemovalProblem returns "" when they may, a non-empty reason when they may not (the groups are
+// report-only), and an error when that cannot be told: unknown is never "no problem".
+type RemovalGate interface {
+	RemovalProblem(ctx context.Context) (string, error)
+}
+
+// ListingFingerprint identifies a library listing by what decides which files it lists: every
+// row's id and every version's id, part paths, sizes and part item ids (SHA-256 over the sorted
+// lines, hex). Equal listings give the same fingerprint whatever their order. It is the change
+// signal of a library whose server reports no scan times (docs/DECISIONS.md D11): the scan records
+// it and the executor lists the library again right before a removal.
+func ListingFingerprint(refs []ItemRef) string {
+	lines := make([]string, 0, len(refs))
+	for i := range refs {
+		r := &refs[i]
+		row := strings.TrimSpace(r.RatingKey)
+		for j := range r.Media {
+			m := &r.Media[j]
+			vid := VersionIDOf(m)
+			for _, p := range m.Parts {
+				lines = append(lines, strings.Join([]string{row, vid, p.File, strconv.FormatInt(p.Size, 10), p.ItemID}, "\x00"))
+			}
+			if len(m.Parts) == 0 {
+				lines = append(lines, row+"\x00"+vid)
+			}
+		}
+		for _, p := range r.Shortcuts {
+			lines = append(lines, strings.Join([]string{row, "strm", p.File, strconv.FormatInt(p.Size, 10), p.ItemID}, "\x00"))
+		}
+		if len(r.Media) == 0 && len(r.Shortcuts) == 0 {
+			lines = append(lines, row)
+		}
+	}
+	sort.Strings(lines)
+	h := sha256.New()
+	for _, l := range lines {
+		h.Write([]byte(l))
+		h.Write([]byte{'\n'})
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // ErrNotFound is matched (errors.Is) by every client's "the server no longer has it" error.

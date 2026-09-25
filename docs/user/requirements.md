@@ -14,7 +14,7 @@ are covered too. Install guides: [Unraid](installation-unraid.md) ·
 - [Network](#network)
 - [Storage and paths](#storage-and-paths)
 - [Permissions](#permissions)
-- [Plex, Radarr, Sonarr and Tautulli](#plex-radarr-sonarr-and-tautulli)
+- [Plex, Jellyfin, Radarr, Sonarr and Tautulli](#plex-jellyfin-radarr-sonarr-and-tautulli)
 - [Browser](#browser)
 - [Time](#time)
 - [Sources](#sources)
@@ -32,12 +32,12 @@ are covered too. Install guides: [Unraid](installation-unraid.md) ·
 | 7 | Docker Compose (optional) | Compose v2 (`docker compose`) | `docker compose version` |
 | 8 | Unraid (optional) | 6.12.x or 7.x | *Tools → Update OS* or `cat /etc/unraid-version` |
 | 9 | Inbound port | 3873/tcp free on the host (9873/tcp only for built-in HTTPS) | `ss -ltn \| grep 3873` |
-| 10 | Outbound | Plex (usually 32400/tcp), each Radarr (7878) and Sonarr (8989); plex.tv optional | *Test* buttons in Dupearr |
+| 10 | Outbound | Plex (usually 32400/tcp) or Jellyfin (8096/tcp), each Radarr (7878) and Sonarr (8989); plex.tv optional | *Test* buttons in Dupearr |
 | 11 | `/config` | Local disk or pool, never NFS/SMB | *Settings → Docker*, appdata share |
 | 12 | `/data` (optional) | The same host path and container path as Plex and the \*arrs | compare the container mappings |
 | 13 | Recycle bin (optional) | On the same share/filesystem as the media | *Settings → Media Management* |
 | 14 | PUID/PGID | Ids that may delete your media (Unraid: 99/100) | `ls -ln /mnt/user/data/media` |
-| 15 | Plex | A current Plex Media Server; owner token and *Allow media deletion* only for the Plex method | *Test* in *Settings → Media Servers* |
+| 15 | Plex or Jellyfin | A current Plex Media Server (owner token and *Allow media deletion* only for the Plex method), or Jellyfin 12.1+ with an API key | *Test* in *Settings → Media Servers* |
 | 16 | Radarr / Sonarr (optional) | Radarr v5 or v6, Sonarr v4 | *System → Status* in the \*arr |
 | 16b | Tautulli (optional) | 2.18.0 or later, only for the *Played* / *Last played* criteria | *Settings → Help → About* in Tautulli |
 | 17 | Browser | Chrome/Edge 111, Safari 16.4 (iOS 16.4), Firefox 128 | the browser's *About* page |
@@ -261,20 +261,21 @@ therefore use a normal LAN, loopback or public address.
   example TrueNAS 568:568) also works when `/config` is writable for that user
   ([Docker install](installation-docker.md#running-without-root---user-kubernetes)).
 
-## Plex, Radarr, Sonarr and Tautulli
+## Plex, Jellyfin, Radarr, Sonarr and Tautulli
 
 | App | Supported | Needed for | Notes |
 |---|---|---|---|
 | **Plex Media Server** | A current release. The research and tests target PMS 1.43.x; no minimum is enforced. | Always (the source of duplicates) | A token with access to the libraries. PMS older than 1.25.6 reports less HDR detail, which weakens HDR ranking. Plex Pass only for Plex webhooks. |
 | Plex **owner** token | | The Plex deletion method | Shared users' tokens can scan but not delete. *Sign in with Plex* with the owner account, or the owner's `X-Plex-Token`. |
 | Plex **Allow media deletion** | | The Plex deletion method | Plex Web → *Settings → (server) → Library → Allow media deletion* (advanced). Dupearr never changes it. |
+| **Jellyfin** | 12.1 or later (the research and tests target 12.1; a newer version works and Health shows a notice until it is confirmed). Older versions are refused. Emby is not supported yet. | Instead of or next to Plex | An **API key** (*Dashboard → API Keys*): an administrator key, which Dupearr needs to see every playback session and only reads with. A path mapping for every library folder, and a recycle bin (the \*arr's or Dupearr's): Dupearr never deletes through Jellyfin ([configuration](configuration.md#jellyfin)). |
 | **Radarr** | v5 or v6 (API v3). The research covers v5.0 to v6.4.4. | Optional, recommended | API key from *Settings → General*. Set the *Recycling Bin* (*Settings → Media Management*) to make \*arr deletions restorable. |
 | **Sonarr** | v4 (API v3). The research covers v4.0.0 to v4.0.20. Sonarr v3 is not tested. | Optional, recommended | Same as Radarr. |
 | **Tautulli** | 2.18.0 or later (released 2026-08-25). Older versions only accept the API key in the URL, which Dupearr never sends: **Test** says so. | Optional: the *Played* / *Last played* criteria | API enabled (*Settings → Web Interface → API*); *Keep History* on for the libraries and users that should count ([configuration](configuration.md#tautulli-watch-history)). |
 
 Details and the version-specific behaviour Dupearr copes with:
 [plex-api research](../research/plex-api.md), [arr-api research](../research/arr-api.md),
-[watch-history research](../research/watch-history.md).
+[watch-history research](../research/watch-history.md), [Jellyfin research](../research/jellyfin-emby.md).
 
 **Full-disc backups** (BDMV, VIDEO_TS, ISO) need no Plex or \*arr version. Plex's default scanners
 skip disc folders, and the \*arrs track at most one file of a disc. Dupearr finds discs on disk

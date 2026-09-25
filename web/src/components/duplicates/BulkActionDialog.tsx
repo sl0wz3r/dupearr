@@ -245,6 +245,13 @@ export function BulkActionDialog({
                 {summary.clipSkipped === 1 ? 'it' : 'them'} to show the clips as one copy.
               </>
             )}
+            {summary.manualSkipped > 0 && (
+              <>
+                {' '}
+                {plural(summary.manualSkipped, 'group')} {summary.manualSkipped === 1 ? 'has' : 'have'} a copy on a
+                Jellyfin server and must be approved one at a time from the detail page.
+              </>
+            )}
           </p>
         )}
 

@@ -10,16 +10,18 @@ import (
 
 // TestRestoreSummaryCountsSupportedKinds: the restore summary shows confirmed *arr links only with
 // two or more enabled servers of a supported kind (models.SupportedMediaServerKinds): kinds "plex"
-// and "" count, as before; a stored row of another kind does not.
+// and "" count, as before, and "jellyfin" since issue #4 Phase 1; a stored row of another kind
+// (emby) does not.
 func TestRestoreSummaryCountsSupportedKinds(t *testing.T) {
-	if got := supportedKindsSQL(); got != "'plex', ''" {
-		t.Fatalf("supportedKindsSQL = %q, want the legacy list", got)
+	if got := supportedKindsSQL(); got != "'plex', '', 'jellyfin'" {
+		t.Fatalf("supportedKindsSQL = %q, want the legacy list plus jellyfin", got)
 	}
 	for _, tc := range []struct {
 		second    models.MediaServerKind
 		wantLinks bool
 	}{
-		{"jellyfin", false},
+		{"jellyfin", true},
+		{"emby", false},
 		{"", true},
 		{models.MediaServerPlex, true},
 	} {

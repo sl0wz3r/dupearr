@@ -165,6 +165,12 @@ func (p *pipeline) runTargeted(body models.TargetedScanBody) error {
 			switch {
 			case p.ctx.Err() != nil:
 				return canceled(p.ctx.Err())
+			case errors.Is(err, mediaserver.ErrNotFound) && srv.Kind.ReadOnly():
+				// A Jellyfin row id also disappears when only its primary version left (the row is
+				// re-keyed to the next version, research S9): never "gone", the next full scan
+				// rebuilds the groups (docs/DECISIONS.md D12).
+				p.itemFailed(k, fmt.Errorf("item %s: %w", rk, err))
+				continue
 			case errors.Is(err, mediaserver.ErrNotFound):
 				gone[k] = true // deleted from the server: its groups may be resolved
 				continue

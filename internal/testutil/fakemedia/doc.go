@@ -132,6 +132,26 @@
 // ([RuleDeleteOtherServerLastCopy]: an item that had a file has none now) and [TitlesWithoutFile]
 // ([RuleDeleteLastCopyAnywhere]: a title has no file on any server).
 //
+// # Jellyfin
+//
+// [Scenario].Jellyfin (see [Scenario.WithJellyfin] and [JellyfinAppendixA], the sample tree of
+// docs/research/jellyfin-emby.md Appendix A) adds a fake Jellyfin 12.1 over the same tree
+// ([Env].Jellyfin, [ServerJellyfin]). Unlike the fake Plex it does not list declared items: it
+// resolves them from the files on disk with a port of Jellyfin's rules (version folders, stacks,
+// mixed folders, episode versions, .strm files, .ignore files; jellyfinstate.go), with ids derived
+// from type and path like Jellyfin's. It serves the requests Dupearr's allowlist permits
+// (/System/Info[/Public], /System/Configuration, /Library/VirtualFolders, /Items with its filters,
+// /Videos/{id}/AdditionalParts, /Sessions, /ScheduledTasks, POST /Library/Media/Updated),
+// authenticates the Authorization header's MediaBrowser Token (the API key acts as an
+// administrator, [Env].JellyfinUserToken as a plain user), and keeps listing a removed file
+// ("ghost") until a change notification and the library monitor's delay, or a library scan
+// ([Env.JellyfinScan]). Its destructive endpoints (item and bulk
+// delete, merge/unlink versions) behave like Jellyfin's — a delete removes the whole folder — and
+// each records a Violation (RuleJellyfin*), as does a credential in the URL, a legacy header or any
+// request outside the allowlist. Controls: [Env.SetJellyfinSessions], [Env.SetJellyfinServerID],
+// [Env.SetJellyfinVersion], [Env.SetJellyfinPathSubstitutions], [Env.JellyfinNotifications], and
+// the id lookups [Env.JellyfinSourceID], [Env.JellyfinRowID] and [Env.JellyfinPartID].
+//
 // # Usage
 //
 //	env := fakemedia.Start(t, fakemedia.Default())

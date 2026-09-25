@@ -6,6 +6,54 @@ All notable changes to Dupearr are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Jellyfin 12.1+ as a read-only media server** (#4). Add it under *Settings → Media Servers → +
+  → Jellyfin* with an API key (an administrator key: Dupearr needs it to see every playback
+  session, sends it only in a request header and never deletes with it). Dupearr detects the copies
+  Jellyfin groups into one movie or episode (also a title merged in Jellyfin from several copies),
+  and copies in libraries that share a scope group (one movie or episode per library), and
+  **never deletes, merges or edits anything through Jellyfin** (its delete removes a movie's whole
+  folder): the client can only send a fixed list of reads plus the notification of removed and
+  restored files. A Jellyfin copy is removed only through Radarr/Sonarr with a recycle bin or into
+  Dupearr's recycle bin, only when a person approves that one duplicate on its page (never in bulk,
+  never by auto mode; flag *Manual approval only*), and only while every copy has a path mapping,
+  because Jellyfin never reports whether a file exists; the kept copy, every part of it, is checked
+  on disk. A title with a `.strm` shortcut, a stacked copy whose parts could not be read, a disc, an
+  unmapped copy and every duplicate of a server with a non-administrator key are only reported (flag
+  *Report only*, with the reasons); a file a `.strm` shortcut points to is never removed. While path
+  substitutions are set in Jellyfin (it then reports rewritten paths), Dupearr does not read that
+  server's libraries at all. Stack parts and alternate versions count for the playing check,
+  multi-episode files (also Jellyfin's `S01E03x04` naming) are never removed, and a re-pointed URL
+  (another server id) is never acted on; the key is only sent to a server that identified itself as
+  Jellyfin 12.1+ without it. Plex and Jellyfin over the same files protect each other's copies like
+  several Plex servers do; a Jellyfin library's change is detected by a fingerprint of its listing,
+  and a Jellyfin library Dupearr does not read (mixed content, home videos, music videos) sends the
+  other servers' duplicates it may concern to review.
+  New health check *JellyfinServerCheck* (version, credential, path substitutions, no recycle bin);
+  API `kind: "jellyfin"`, test result `product` / `administrator` / `removalsDisabled`, version
+  fields `sourceId` / `episodeEnd` / `reportOnly` / `parts[].itemId` / `parts[].shortcutOf`
+  (additive).
+- `tools/fakemedia -jellyfin-port` serves a fake Jellyfin 12.1 over the demo tree (#4).
+
+### Changed
+
+- Dupearr's recycle bin also gets an empty `.ignore` file next to `.plexignore`, so Jellyfin does not
+  index recycled files; when the bin lies inside a Jellyfin library folder (not below a hidden
+  folder, which Jellyfin never indexes), *RecycleBinCheck* asks for one library scan after the file
+  appears (#4).
+- A Jellyfin library folder always needs a path mapping, whatever the deletion methods
+  (*PathMappingCheck*); the several-servers checks and messages say "media servers" (#4).
+- **Adding a Jellyfin server next to Plex** (or any second media server) counts as several servers:
+  the server links of every Radarr/Sonarr instance become unconfirmed, and the duplicates they may
+  track go to review until you choose the servers each one feeds and confirm them in *Settings →
+  Applications → (instance) → Media servers it feeds* (renamed from *Plex servers it feeds*) (#4).
+- Tautulli can only be connected to a Plex server; the Tautulli dialog lists Plex servers only
+  (#4).
+- The *Add media server* dialog asks for the kind (Plex or Jellyfin) first, and server cards,
+  duplicate pages and approval dialogs name the server kind (#4).
+- Log redaction also covers `Authorization: MediaBrowser Token="…"` headers (#4).
+
 ## [0.2.0] - 2026-09-25
 
 ### Added

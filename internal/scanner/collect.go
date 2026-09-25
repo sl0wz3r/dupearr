@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -84,6 +85,9 @@ type itemIndex struct {
 	byLibrary map[int64][]refKey
 	paths     map[int64]map[string][]string // server → shared path key → rating keys
 	comp      map[refKey]int                // item → component id (scoped items with ids)
+	// shortcuts maps, per server, a file (sharedKey) to the names of the .strm shortcuts that point
+	// to it (read-only servers, readonly.go).
+	shortcuts map[int64]map[string][]string
 	members   map[int][]refKey
 	compLibs  map[int]map[int64]bool
 }
@@ -230,6 +234,35 @@ func (idx *itemIndex) sharedWith(server int64, p, ownRK string) []string {
 	return out
 }
 
+// addShortcut records that the .strm shortcut name points to file p on server.
+func (idx *itemIndex) addShortcut(server int64, p, name string) {
+	key := sharedKey(p)
+	if key == "" {
+		return
+	}
+	if idx.shortcuts == nil {
+		idx.shortcuts = map[int64]map[string][]string{}
+	}
+	m := idx.shortcuts[server]
+	if m == nil {
+		m = map[string][]string{}
+		idx.shortcuts[server] = m
+	}
+	if !slices.Contains(m[key], name) {
+		m[key] = append(m[key], name)
+	}
+}
+
+// shortcutsOf returns the sorted names of the .strm shortcuts that point to file p on server.
+func (idx *itemIndex) shortcutsOf(server int64, p string) []string {
+	if idx == nil {
+		return nil
+	}
+	out := slices.Clone(idx.shortcuts[server][sharedKey(p)])
+	sort.Strings(out)
+	return out
+}
+
 // unionFind is a minimal disjoint-set forest.
 type unionFind struct{ parent []int }
 
@@ -335,6 +368,14 @@ func (p *pipeline) listLibraries(libs []models.Library, indexOnly map[int64]mode
 		}
 	}
 	p.index = buildIndex(listings)
+	p.indexShortcuts(listings)
+	for _, l := range listings {
+		if !l.server.Kind.IsPlex() {
+			// A server without library scan times (Jellyfin): the listing itself is the change
+			// signal the executor re-checks before a removal (docs/DECISIONS.md D11).
+			p.fingerprints[l.lib.ID] = mediaserver.ListingFingerprint(l.refs)
+		}
+	}
 	if p.cfg.multi {
 		p.buildCrossIndex()
 	}
@@ -564,10 +605,16 @@ func (p *pipeline) decorate(item *models.MediaItem, ir *indexedRef) {
 		for j := range v.Parts {
 			part := &v.Parts[j]
 			part.SharedWith = p.index.sharedWith(srv.ID, part.Path, v.RatingKey)
+			part.ShortcutOf = p.index.shortcutsOf(srv.ID, part.Path)
 			part.LocalPath, part.LinkCount, part.Inode = "", 0, ""
 			missing := part.Exists != nil && !*part.Exists
 			deleted := false
-			if local, ok := p.cfg.mapper.ToLocal(models.PathSourceServer, srv.ID, part.Path); ok {
+			local, mapped := p.cfg.mapper.ToLocal(models.PathSourceServer, srv.ID, part.Path)
+			if srv.Kind.ReadOnly() && decorateReadOnly(srv, v, part, local, mapped) {
+				// The server still lists a file that is gone on disk (readonly.go).
+				missing = true
+			}
+			if mapped {
 				part.LocalPath = local
 				st := statLocal(local)
 				part.LinkCount, part.Inode = st.links, st.inode
@@ -581,6 +628,11 @@ func (p *pipeline) decorate(item *models.MediaItem, ir *indexedRef) {
 				deleted = missing && !st.exists && dirExists(filepath.Dir(local))
 			}
 			unavailable = unavailable || (missing && !deleted)
+		}
+		if srv.Kind.ReadOnly() {
+			if reason := p.gateReason(srv); reason != "" {
+				v.ReportOnly = appendOnce(v.ReportOnly, reason)
+			}
 		}
 		if v.Key != "" && (!placed.IsZero() || unavailable) {
 			p.mu.Lock()

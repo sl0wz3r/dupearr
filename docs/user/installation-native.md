@@ -124,7 +124,8 @@ logged on or not" tasks **cannot see mapped drive letters** (`Z:\`); use UNC pat
 Plex on the same Windows machine reports paths like `D:\Media\Movies\…`, which Dupearr can open
 directly; for the filesystem method and the recycle bin add a Plex mapping from the folder to
 itself (`D:\Media` → `D:\Media`). If Plex runs elsewhere, map its paths (for example Plex
-`/data/media` → `\\nas\data\media`).
+`/data/media` → `\\nas\data\media`). A Jellyfin server needs such a mapping for each of its
+library folders whatever the deletion methods (Dupearr checks every Jellyfin copy on disk).
 
 On Windows the final move into and out of the recycle bin is done by path (Windows has no
 `renameat`); Dupearr still opens and checks every folder first, but a local user who can replace a

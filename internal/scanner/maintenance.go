@@ -158,8 +158,8 @@ func (s *Service) adoptIdentity(ctx context.Context, srv models.MediaServer, mid
 			continue
 		}
 		if strings.EqualFold(strings.TrimSpace(o.MachineIdentifier), mid) {
-			return fmt.Errorf("the server at %s's URL is the Plex server already configured as %q; remove one of the two media servers",
-				srv.Name, o.Name)
+			return fmt.Errorf("the server at %s's URL is the %s server already configured as %q; remove one of the two media servers",
+				srv.Name, srv.Kind.Label(), o.Name)
 		}
 	}
 	switch {

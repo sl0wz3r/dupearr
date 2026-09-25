@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -138,6 +139,12 @@ func (r *run) otherServerProblem(g *models.DuplicateGroup, targets []*target, vr
 					out.wait, out.problem, out.failure = w, p, failed
 					return out
 				}
+				// A credential that lost its administrator proof since the scan sees only its own
+				// sessions (S14): "nothing plays" would be blind.
+				if w, p, failed := r.otherGate(srv, c); w != "" || p != "" {
+					out.wait, out.problem, out.failure = w, p, failed
+					return out
+				}
 				sessions, err := c.ActiveSessions(r.ctx)
 				if err != nil {
 					out.wait, out.failure = fmt.Sprintf("could not check whether %s is playing it (%v)", srv.Name, err), true
@@ -202,9 +209,29 @@ func (r *run) otherIdentity(srv models.MediaServer, c MediaServerClient) (wait, 
 	return "", "", false
 }
 
+// otherGate re-reads the removal gate of another read-only server (mediaserver.RemovalGate:
+// Jellyfin's path substitutions and administrator proof, research S12/S14) before its libraries,
+// sessions and items are trusted: a reported problem sends the group to review, an unreadable gate
+// defers it. Other kinds have no gate.
+func (r *run) otherGate(srv models.MediaServer, c MediaServerClient) (wait, problem string, failure bool) {
+	gate, ok := c.(mediaserver.RemovalGate)
+	if !srv.Kind.ReadOnly() || !ok {
+		return "", "", false
+	}
+	switch why, err := gate.RemovalProblem(r.ctx); {
+	case err != nil:
+		return fmt.Sprintf("could not read whether the answers of %s can be trusted (%v)", srv.Name, err), "", true
+	case why != "":
+		return "", fmt.Sprintf("%s may list these files, but %s", srv.Name, why), false
+	}
+	return "", "", false
+}
+
 // sectionsProblem (M14) re-reads the libraries of every other enabled server that may list the
 // group's files (every server that is not separate, and every separate one with a mapped folder)
-// and compares them with the scan's record.
+// and compares them with the scan's record. A read-only server's removal gate is read first
+// (otherGate), and a library Dupearr never lists that may list video files (Section.OtherVideo)
+// is always a problem.
 func (r *run) sectionsProblem(g *models.DuplicateGroup, targets []*target) crossCheck {
 	var out crossCheck
 	rec := g.CrossServer
@@ -238,6 +265,10 @@ func (r *run) sectionsProblem(g *models.DuplicateGroup, targets []*target) cross
 			out.wait, out.problem, out.failure = w, p, failed
 			return out
 		}
+		if w, p, failed := r.otherGate(srv, c); w != "" || p != "" {
+			out.wait, out.problem, out.failure = w, p, failed
+			return out
+		}
 		secs, err := c.Sections(r.ctx)
 		if err != nil {
 			out.wait, out.failure = fmt.Sprintf("could not read the libraries of %s (%v)", srv.Name, err), true
@@ -245,11 +276,17 @@ func (r *run) sectionsProblem(g *models.DuplicateGroup, targets []*target) cross
 		}
 		for _, sec := range secs {
 			typ := strings.ToLower(strings.TrimSpace(sec.Type))
-			if typ != "movie" && typ != "show" {
+			if typ != "movie" && typ != "show" && !sec.OtherVideo {
 				continue
 			}
 			if sep && !r.localOverlap(id, sec.Locations, targetLocals) {
 				continue
+			}
+			if typ != "movie" && typ != "show" {
+				// Never listed (Jellyfin mixed content, home videos, music videos): it may list the
+				// files, and Dupearr cannot tell (docs/DECISIONS.md D12).
+				out.problem = fmt.Sprintf("the library %q on %s may list these files, but Dupearr only reads movie and TV libraries", sec.Title, srv.Name)
+				return out
 			}
 			key := strings.TrimSpace(sec.Key)
 			i := slices.IndexFunc(rec.Libraries, func(l models.CrossServerLibrary) bool { return l.ServerID == id && l.SectionKey == key })
@@ -259,10 +296,20 @@ func (r *run) sectionsProblem(g *models.DuplicateGroup, targets []*target) cross
 				out.problem = fmt.Sprintf("the library %s is new since the scan; it may list these files", name)
 			case !sameLocations(rec.Libraries[i].Locations, sec.Locations):
 				out.problem = fmt.Sprintf("the folders of the library %s changed since the scan", name)
-			case sec.Refreshing || rec.Libraries[i].Refreshing:
+			case (sec.Refreshing || rec.Libraries[i].Refreshing) && srv.Kind.IsPlex():
 				out.problem = fmt.Sprintf("the library %s is (or was, during the scan) being scanned by Plex", name)
+			case sec.Refreshing || rec.Libraries[i].Refreshing:
+				out.problem = fmt.Sprintf("the library %s is (or was, during the scan) being scanned by %s", name, srv.Kind.Label())
 			case sec.ScannedAt == 0 || sec.ContentChangedAt == 0:
-				out.problem = fmt.Sprintf("%s does not report when the library %q was last scanned, so a change since the scan cannot be ruled out", srv.Name, sec.Title)
+				// No scan times (Jellyfin): the scan's listing fingerprint is the change signal. Without
+				// one (or a client that cannot list) a change cannot be ruled out.
+				lc := r.listingChange(srv, c, rec.Libraries[i], sec.Title)
+				if lc.problem == "" && lc.wait == "" && rec.Libraries[i].Fingerprint == "" {
+					lc.problem = fmt.Sprintf("%s does not report when the library %q was last scanned, so a change since the scan cannot be ruled out", srv.Name, sec.Title)
+				}
+				if lc.problem != "" || lc.wait != "" {
+					return lc
+				}
 			case sec.ScannedAt > rec.Libraries[i].ScannedAt || sec.ContentChangedAt > rec.Libraries[i].ContentChangedAt:
 				out.problem = fmt.Sprintf("%s scanned the library %q since the scan; it may list these files now", srv.Name, sec.Title)
 			}
@@ -270,6 +317,40 @@ func (r *run) sectionsProblem(g *models.DuplicateGroup, targets []*target) cross
 				return out
 			}
 		}
+	}
+	return out
+}
+
+// listingLister is a media server client that can list a library again (every client can; the
+// executor's MediaServerClient does not need it otherwise).
+type listingLister interface {
+	AllItems(ctx context.Context, sectionKey string, mt models.MediaType) ([]mediaserver.ItemRef, error)
+}
+
+// listingChange re-lists a library of srv whose scan recorded a listing fingerprint (a server
+// without scan times, Jellyfin; docs/DECISIONS.md D11) and compares it with the record: a changed
+// listing may list the files now (a problem: review and re-scan), an unreadable one defers. Without
+// a recorded fingerprint it reports nothing (the caller refuses the removal).
+func (r *run) listingChange(srv models.MediaServer, c MediaServerClient, lib models.CrossServerLibrary, title string) crossCheck {
+	var out crossCheck
+	if lib.Fingerprint == "" {
+		return out
+	}
+	lister, ok := c.(listingLister)
+	if !ok {
+		out.problem = fmt.Sprintf("the library %q of %s cannot be listed again to rule out a change since the scan", title, srv.Name)
+		return out
+	}
+	mt := models.MediaTypeMovie
+	if strings.EqualFold(strings.TrimSpace(lib.Type), "show") {
+		mt = models.MediaTypeEpisode
+	}
+	refs, err := lister.AllItems(r.ctx, lib.SectionKey, mt)
+	switch {
+	case err != nil:
+		out.wait, out.failure = fmt.Sprintf("could not list the library %q of %s again (%v)", title, srv.Name, err), true
+	case mediaserver.ListingFingerprint(refs) != lib.Fingerprint:
+		out.problem = fmt.Sprintf("the library %q of %s changed since the scan; it may list these files now", title, srv.Name)
 	}
 	return out
 }
@@ -322,7 +403,7 @@ func (r *run) listingProblem(srv models.MediaServer, e *models.OtherListing, it 
 	where := fmt.Sprintf("%s's item %q (%s)", srv.Name, e.ItemTitle, e.LibraryTitle)
 	var listed *models.MediaVersion
 	for i := range it.Versions {
-		if it.Versions[i].MediaID == e.MediaID {
+		if listingVersion(srv, e, &it.Versions[i]) {
 			listed = &it.Versions[i]
 		}
 	}
@@ -334,7 +415,13 @@ func (r *run) listingProblem(srv models.MediaServer, e *models.OtherListing, it 
 	why := "it keeps no other version"
 	for i := range it.Versions {
 		o := &it.Versions[i]
-		if o.MediaID == e.MediaID || isOptimized(o) || len(o.Parts) == 0 {
+		if listingVersion(srv, e, o) || isOptimized(o) || len(o.Parts) == 0 {
+			continue
+		}
+		if len(o.ReportOnly) > 0 {
+			// Its file or parts cannot be trusted (a stack whose parts could not be read would
+			// otherwise count as its first part alone): never the item's remaining copy.
+			why = fmt.Sprintf("its other version %s cannot count as a copy (%s)", o.Parts[0].Path, strings.Join(o.ReportOnly, "; "))
 			continue
 		}
 		reason := r.survivorProblem(srv, o, losers)
@@ -344,6 +431,17 @@ func (r *run) listingProblem(srv models.MediaServer, e *models.OtherListing, it 
 		why = reason
 	}
 	return fmt.Sprintf("%s lists the file to remove and %s; nothing was removed", where, why)
+}
+
+// listingVersion reports whether version v of srv's fresh item is the version listing e names: by
+// the Plex media id for a Plex server (as always), by the version key for another kind (a Jellyfin
+// listing has no media id, docs/research/jellyfin-emby.md §5.2 prerequisite 1).
+func listingVersion(srv models.MediaServer, e *models.OtherListing, v *models.MediaVersion) bool {
+	if srv.Kind.IsPlex() {
+		return v.MediaID == e.MediaID
+	}
+	id := v.ServerVersionID()
+	return id != "" && models.VersionKey(srv.Kind, srv.ID, id) == e.VersionKey
 }
 
 // survivorProblem explains why media o of another server cannot count as that item's remaining

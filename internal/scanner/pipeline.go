@@ -482,6 +482,17 @@ type pipeline struct {
 	arrUnknown map[string]string
 	// crossGroups are the ids of groups this run stored whose versions other servers list.
 	crossGroups []int64
+	// fingerprints: the listing fingerprint of each listed library of a server that reports no
+	// scan times (Jellyfin), the D11 change signal recorded with the groups (recordFor).
+	fingerprints map[int64]string
+
+	// Read-only media servers (Jellyfin, docs/DECISIONS.md D12; readonly.go).
+	// shortcutProblems: libraries whose .strm shortcuts could not all be read → why (the files they
+	// point to cannot be protected: the shared-file index is incomplete).
+	shortcutProblems map[int64]string
+	// gates: each read-only server's removal gate, read once per run (removalGate).
+	gates   map[int64]*gateResult
+	gatesMu sync.Mutex
 
 	mu            sync.Mutex // guards run.Stats, failedRKs, the maps written by workers and clients
 	progMu        sync.Mutex // serializes progress callbacks
@@ -523,6 +534,10 @@ func newPipeline(ctx context.Context, s *Service, run *models.ScanRun, progress 
 		unreadServers: map[int64]string{},
 		identities:    map[int64]string{},
 		arrUnknown:    map[string]string{},
+		fingerprints:  map[int64]string{},
+
+		shortcutProblems: map[int64]string{},
+		gates:            map[int64]*gateResult{},
 	}
 }
 

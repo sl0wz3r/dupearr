@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -279,10 +280,15 @@ func (ev *evaluation) protectionReasons(i int) []string {
 	if isOptimized(v) {
 		out = append(out, "Plex optimized version (never touched)")
 	}
-	if isUnavailable(v) {
+	switch {
+	case isUnavailable(v) && readOnlyVersion(v):
+		// Jellyfin never reports a missing file: Dupearr found it gone from its folder on disk.
+		out = append(out, "the file is missing on disk (not acted on)")
+	case isUnavailable(v):
 		out = append(out, "the media server reports the file as missing (not acted on)")
 	}
 	out = append(out, multiEpisodeReasons(v)...)
+	out = append(out, shortcutReasons(v)...)
 	out = append(out, discProtectionReasons(ev.g.MediaType, v, ev.env)...)
 	if p := discMemberPath(v); p != "" {
 		out = append(out, "its file "+p+" lies inside a full-disc backup (a disc is only ever removed as a whole)")
@@ -366,9 +372,18 @@ func (ev *evaluation) decide() {
 			}
 		}
 	}
+	// A report-only reason of any version protects every version: nothing of such a group is ever
+	// decided "remove", and overrides cannot change that (docs/DECISIONS.md D12).
+	reportOnly := ""
+	if ro := reportOnlyReasons(ev.vs); len(ro) > 0 {
+		reportOnly = "report only: " + strings.Join(ro, "; ")
+	}
 	for i := range ev.vs {
 		for _, r := range ev.protectionReasons(i) {
 			ev.addProtection(i, r)
+		}
+		if reportOnly != "" {
+			ev.addProtection(i, reportOnly)
 		}
 		ev.engineKeep[i] = ev.rankKeep[i] || ev.protected[i]
 	}
@@ -972,7 +987,13 @@ func (ev *evaluation) status(removals int) (status models.GroupStatus, reason st
 			}
 		}
 		if plexUnanalyzed || !discUnknown {
-			review = append(review, "some versions are not analyzed by the media server (analyze them in Plex)")
+			if slices.ContainsFunc(ev.vs, func(v *models.MediaVersion) bool {
+				return v.Disc == nil && readOnlyVersion(v) && len(unanalyzedProblems(v)) > 0
+			}) {
+				review = append(review, "some versions are not analyzed by the media server (refresh their metadata in Jellyfin)")
+			} else {
+				review = append(review, "some versions are not analyzed by the media server (analyze them in Plex)")
+			}
 		}
 		if discUnknown {
 			review = append(review, "the quality of a full-disc backup is unknown (a disc image, or disc metadata that could not be read)")
@@ -1015,6 +1036,15 @@ func (ev *evaluation) status(removals int) (status models.GroupStatus, reason st
 			cause, strings.Join(ev.watchLabels, " / "), source))
 	}
 	review = append(review, ev.crossServerReview()...)
+	if ro := reportOnlyReasons(ev.vs); len(ro) > 0 {
+		// Nothing of the group can be removed (every version is protected): it is shown, with the
+		// reasons and anything else a person should know, and never approved (docs/DECISIONS.md D12).
+		reason := "Report only: " + strings.Join(ro, "; ")
+		if len(review) > 0 {
+			reason += "; " + strings.Join(review, "; ")
+		}
+		return models.GroupProtected, reason, false
+	}
 	switch {
 	case len(review) > 0:
 		return models.GroupReview, titleCase(strings.Join(review, "; ")), false

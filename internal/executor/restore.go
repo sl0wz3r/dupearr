@@ -382,6 +382,9 @@ func (s *Service) notifyPlexRestored(ctx context.Context, serverID int64, sectio
 	if c == nil {
 		return "Plex was not notified"
 	}
+	if !srv.Kind.IsPlex() {
+		return s.notifyRestored(ctx, *srv, c, sectionKey, paths)
+	}
 	fsc, canScan := c.(mediaserver.FolderScanner)
 	ir, canRefresh := c.(mediaserver.ItemRefresher)
 	if sectionKey == "" && len(paths) > 0 {
@@ -411,6 +414,40 @@ func (s *Service) notifyPlexRestored(ctx context.Context, serverID int64, sectio
 		}
 	}
 	return "Plex could not be asked to scan the restored file; scan the library to show it again"
+}
+
+// createdNotifier is a change notifier that can report files as created (Jellyfin: UpdateType
+// "Created", for the server's log; it re-reads the path either way).
+type createdNotifier interface {
+	NotifyCreated(ctx context.Context, libraryKey string, paths []string) error
+}
+
+// notifyRestored reports restored files to a server of another kind than Plex through its change
+// notification (mediaserver.ChangeNotifier): the restored file comes back under its old id,
+// because Jellyfin derives ids from paths (research §3.10). The server must still be the one
+// Dupearr stored (its identity, S23); a server stored without one is not told. Failures are only
+// noted.
+func (s *Service) notifyRestored(ctx context.Context, srv models.MediaServer, c MediaServerClient, sectionKey string, paths []string) string {
+	label := srv.Kind.Label()
+	notifier, ok := c.(mediaserver.ChangeNotifier)
+	if !ok || len(paths) == 0 {
+		return fmt.Sprintf("%s was not notified; scan the library to show the file again", label)
+	}
+	want := strings.TrimSpace(srv.MachineIdentifier)
+	id, err := c.Identity(ctx)
+	if want == "" || err != nil || id == nil || !strings.EqualFold(strings.TrimSpace(id.MachineIdentifier), want) {
+		return fmt.Sprintf("%s was not notified (its identity could not be confirmed); scan the library to show the file again", label)
+	}
+	if cn, ok := c.(createdNotifier); ok {
+		err = cn.NotifyCreated(ctx, sectionKey, paths)
+	} else {
+		err = notifier.NotifyChanged(ctx, sectionKey, paths)
+	}
+	if err != nil {
+		s.d.Log.Warn("Could not notify the media server of a restored file", "server", srv.Name, "error", err)
+		return fmt.Sprintf("%s could not be notified of the restored file (%v); scan the library to show it again", label, err)
+	}
+	return ""
 }
 
 // sectionFor returns the key of the server's library whose locations contain the server path p

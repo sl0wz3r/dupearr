@@ -422,7 +422,7 @@ export default function DuplicatesPage() {
       <EmptyState
         icon={ServerOff}
         title="No media servers configured"
-        description="Add your Plex server so Dupearr can scan its libraries for duplicate movies and episodes."
+        description="Add your Plex or Jellyfin server so Dupearr can scan its libraries for duplicate movies and episodes."
         action={
           <LinkButton to="/settings/mediaservers" variant="primary">
             Add Media Server

@@ -33,7 +33,7 @@ import {
 import { bestForCriterion, decidingCriteria } from './comparison';
 import { clipCountOf, discMemberBlocker, discRelativePath, isClipName, isClipSet, mainClipName } from './disc';
 import { DiscBadge } from './DiscBadge';
-import { bestAudioTrack, isHardlinked, maxLinkCount, subtitleLanguages, versionSize } from './duplicateUtils';
+import { bestAudioTrack, isHardlinked, isJellyfinVersion, maxLinkCount, subtitleLanguages, versionSize } from './duplicateUtils';
 import { OverrideControl, type OverrideValue } from './OverrideControl';
 
 // ---------------------------------------------------------------------------
@@ -488,7 +488,15 @@ const ROWS: RowSpec[] = [
               <PathLine path={p.path} localPath={p.localPath} />
               <div className="mt-0.5 flex flex-wrap gap-1">
                 {p.exists === false && (
-                  <Badge kind="danger" icon={TriangleAlert} title="Plex reports this file as missing">
+                  <Badge
+                    kind="danger"
+                    icon={TriangleAlert}
+                    title={
+                      isJellyfinVersion(f.version)
+                        ? 'This file is missing on disk (Jellyfin still lists it until it scans the library)'
+                        : 'Plex reports this file as missing'
+                    }
+                  >
                     Missing
                   </Badge>
                 )}
@@ -573,7 +581,9 @@ function PlaysCell({ version, sameItem }: { version: MediaVersion; sameItem: boo
   const day = (d: string) => formatUtcDate(d, preferences);
   const w = version.watch;
   const unknown = <span className="text-muted">Unknown</span>;
-  const note = sameItem ? 'Same Plex item: plays are shared by its versions' : '';
+  const note = sameItem
+    ? `Same ${isJellyfinVersion(version) ? 'Jellyfin' : 'Plex'} item: plays are shared by its versions`
+    : '';
   const join = (...parts: string[]) => parts.filter(Boolean).join(' · ') || undefined;
   if (!w) return <Value primary={unknown} secondary="No watch-history source" />;
   if (w.status === 'failed') {

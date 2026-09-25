@@ -32,6 +32,7 @@ import (
 	"github.com/sl0wz3r/dupearr/internal/executor"
 	"github.com/sl0wz3r/dupearr/internal/health"
 	"github.com/sl0wz3r/dupearr/internal/integrations/arr"
+	"github.com/sl0wz3r/dupearr/internal/integrations/jellyfin"
 	"github.com/sl0wz3r/dupearr/internal/integrations/plex"
 	"github.com/sl0wz3r/dupearr/internal/integrations/tautulli"
 	"github.com/sl0wz3r/dupearr/internal/logging"
@@ -57,7 +58,10 @@ type Deps struct {
 	Notifier    *notifications.Service
 	PlexOpts    plex.Options
 	PlexFactory func(s models.MediaServer) *plex.Client
-	ArrFactory  func(a models.ArrInstance) *arr.Client
+	// JellyfinFactory returns the client of a Jellyfin server (connection tests and the forced
+	// save's identity probe; docs/DECISIONS.md D12). nil: Jellyfin servers cannot be tested.
+	JellyfinFactory func(s models.MediaServer) *jellyfin.Client
+	ArrFactory      func(a models.ArrInstance) *arr.Client
 	// TautulliFactory returns the client of a Tautulli connection (connection tests;
 	// docs/DECISIONS.md D10). nil: tests answer 503.
 	TautulliFactory func(t models.TautulliInstance) *tautulli.Client

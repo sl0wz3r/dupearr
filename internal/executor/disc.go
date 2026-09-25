@@ -988,7 +988,7 @@ func (r *run) discSharedWithOtherMedia(g *models.DuplicateGroup, targets []*targ
 			}
 			for i := range it.Versions {
 				other := &it.Versions[i]
-				if other.MediaID > 0 && queued[mediaRef{ref.serverID, other.MediaID}] {
+				if id := other.ServerVersionID(); id != "" && queued[mediaRef{ref.serverID, id}] {
 					continue
 				}
 				for _, p := range other.Parts {

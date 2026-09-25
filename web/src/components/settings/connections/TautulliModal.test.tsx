@@ -155,6 +155,20 @@ describe('TautulliModal', () => {
     expect(mocks.calls.delete).toEqual([5]);
   });
 
+  it('offers Plex servers only (Tautulli monitors Plex) and preselects the only one', async () => {
+    const jellyfin = { id: 3, name: 'Jelly', kind: 'jellyfin', url: 'http://jellyfin:8096', token: MASKED_SECRET, machineIdentifier: 'j1', verifyTls: true, enabled: true } as MediaServer;
+    const { unmount } = render(<TautulliModal instance={null} servers={[jellyfin, SERVERS[0]!]} onClose={vi.fn()} />);
+    await settle();
+    const select = screen.getByLabelText('Plex Server');
+    expect(select).toHaveValue('1');
+    expect(within(select).queryByRole('option', { name: 'Jelly' })).not.toBeInTheDocument();
+    unmount();
+    render(<TautulliModal instance={null} servers={[jellyfin]} onClose={vi.fn()} />);
+    await settle();
+    expect(screen.getByLabelText('Plex Server')).toHaveValue('');
+    expect(screen.getByText('Add a Plex server first')).toBeInTheDocument();
+  });
+
   it('shows a failed test without saving', async () => {
     const user = userEvent.setup();
     render(<TautulliModal instance={null} servers={SERVERS.slice(0, 1)} onClose={vi.fn()} />);

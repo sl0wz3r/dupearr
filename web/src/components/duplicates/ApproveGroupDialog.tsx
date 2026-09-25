@@ -19,8 +19,11 @@ import {
   DRY_RUN_NOTE,
   filesFingerprint,
   groupTitle,
+  hasJellyfinCopy,
   hasMissingPart,
   isHardlinked,
+  isJellyfinVersion,
+  reportOnlyReasons,
   versionPaths,
   versionSize,
 } from './duplicateUtils';
@@ -44,6 +47,19 @@ export function expectedMethodNote(file: GroupFile, methods: readonly DeletionMe
       : `${note} Filesystem is not one of your deletion methods, so the removal may be refused.`;
   }
   const hasLocal = (v.parts ?? []).some((p) => !!p.localPath);
+  if (isJellyfinVersion(v)) {
+    // docs/DECISIONS.md D12: never through Jellyfin, and only into a recycle bin.
+    for (const m of order) {
+      if (m === 'arr' && v.arr) {
+        const who = v.arr.instanceName || 'the *arr';
+        return `Expected via ${who} — only when ${who} has a recycle bin configured (a Jellyfin copy is never deleted permanently).`;
+      }
+      if (m === 'filesystem' && hasLocal) {
+        return 'Expected via the filesystem — moved to Dupearr’s recycle bin (refused when none is configured).';
+      }
+    }
+    return 'No configured method looks applicable — Dupearr never deletes through Jellyfin, so the action may fail.';
+  }
   for (const m of order) {
     if (m === 'arr' && v.arr) {
       const who = v.arr.instanceName || 'the *arr';
@@ -111,11 +127,22 @@ export function approvalBlocker(
   if (removals.some((f) => f.protected)) {
     return 'A protected copy is marked for removal. Re-scan the group before approving.';
   }
+  const reportOnly = reportOnlyReasons(files);
+  if (reportOnly.length > 0) return `This duplicate is only reported: ${reportOnly.join('; ')}.`;
   if (removals.some((f) => f.version?.optimizedVersion)) {
     return 'An optimized version (Plex Versions) is marked for removal. Re-scan the group before approving.';
   }
   if (keepers.every((f) => hasMissingPart(f.version))) {
-    return 'Plex reports every kept copy as missing. Re-scan the group before approving.';
+    return hasJellyfinCopy(keepers)
+      ? 'Every kept copy is missing. Re-scan the group before approving.'
+      : 'Plex reports every kept copy as missing. Re-scan the group before approving.';
+  }
+  if (hasJellyfinCopy(files)) {
+    // Jellyfin never reports whether a file exists: every copy's files must be visible to Dupearr.
+    const unmapped = files.flatMap((f) => (f.version?.parts ?? []).filter((p) => !p.localPath)).at(0);
+    if (unmapped) {
+      return `No path mapping covers ${unmapped.path}: every copy of a Jellyfin duplicate needs one (Settings → Media Management).`;
+    }
   }
   const keeperPaths = new Set(keepers.flatMap((f) => versionPaths(f.version)));
   if (removals.some((f) => versionPaths(f.version).some((p) => keeperPaths.has(p)))) {
@@ -240,6 +267,12 @@ export function ApproveGroupDialog({
         <Alert kind={dryRun ? 'info' : 'warning'} title={dryRun ? 'Dry run' : 'Files will be deleted'}>
           {dryRun && <p className="m-0 mb-1">{DRY_RUN_NOTE}</p>}
           <p className="m-0">{deletionCaveat(deletionMethods)}</p>
+          {hasJellyfinCopy(files) && (
+            <p className="m-0 mt-1" data-testid="jellyfin-note">
+              Dupearr never deletes through Jellyfin: Jellyfin copies are only moved to a recycle bin (Radarr/Sonarr’s
+              or Dupearr’s), and Jellyfin is told about each removed file.
+            </p>
+          )}
         </Alert>
 
         <div>

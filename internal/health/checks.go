@@ -272,7 +272,7 @@ func (c *Checker) checkNoMediaServer(_ context.Context, s *snapshot) []result {
 	}
 	if len(s.servers) == 0 {
 		return []result{*issue(SourceNoMediaServer, "", models.HealthWarning,
-			"No media server is configured. Add your Plex server in Settings → Media Servers so Dupearr can look for duplicates.")}
+			"No media server is configured. Add your Plex or Jellyfin server in Settings → Media Servers so Dupearr can look for duplicates.")}
 	}
 	for _, srv := range s.servers {
 		if srv.Enabled {
@@ -299,6 +299,11 @@ func (c *Checker) checkMediaServerConnectivity(ctx context.Context, s *snapshot)
 		}
 		want := strings.TrimSpace(srv.MachineIdentifier)
 		if id != nil && want != "" && id.MachineIdentifier != "" && !strings.EqualFold(id.MachineIdentifier, want) {
+			if !srv.Kind.IsPlex() {
+				return issue(SourceMediaServerConnectivity, serverSubject(srv.ID), models.HealthError,
+					fmt.Sprintf("Media server %s answers as a different %s server (server id %s, expected %s). "+
+						"Check its URL in Settings → Media Servers.", srv.Name, srv.Kind.Label(), id.MachineIdentifier, want))
+			}
 			return issue(SourceMediaServerConnectivity, serverSubject(srv.ID), models.HealthError,
 				fmt.Sprintf("Media server %s answers as a different Plex server (machine identifier %s, expected %s). "+
 					"Check its URL in Settings → Media Servers.", srv.Name, id.MachineIdentifier, want))
@@ -598,12 +603,21 @@ func quoteList(names []string) string {
 }
 
 func (c *Checker) checkPathMapping(_ context.Context, s *snapshot) []result {
-	if !s.methodEnabled(models.MethodFilesystem) || !s.serversOK || !s.libsOK || !s.mapsOK {
+	if !s.serversOK || !s.libsOK || !s.mapsOK {
 		return nil
 	}
 	mapper := pathmap.New(s.mappings)
+	// Jellyfin folders need a mapping whatever the deletion methods (jellyfin.go).
+	out := jellyfinPathMappingIssues(s, mapper)
+	if !s.methodEnabled(models.MethodFilesystem) {
+		return out
+	}
+	kinds := s.serverKinds()
 	var unmapped, missing []string
 	for _, f := range s.enabledLibraryFolders() {
+		if kinds[f.lib.ServerID].ReadOnly() {
+			continue // reported above
+		}
 		local, ok := mapper.ToLocal(models.PathSourceServer, f.lib.ServerID, f.location)
 		if !ok {
 			unmapped = append(unmapped, fmt.Sprintf("%s (%s on %s)", f.location, f.lib.Title, f.server))
@@ -613,7 +627,6 @@ func (c *Checker) checkPathMapping(_ context.Context, s *snapshot) []result {
 			missing = append(missing, fmt.Sprintf("%s (mapped from %s)", local, f.location))
 		}
 	}
-	var out []result
 	if len(unmapped) > 0 {
 		out = append(out, *issue(SourcePathMapping, "unmapped", models.HealthWarning,
 			"Filesystem deletion is enabled, but no path mapping covers these library folders: "+listText(unmapped)+
@@ -636,9 +649,11 @@ func (c *Checker) checkDiscDetection(_ context.Context, s *snapshot) []result {
 		return nil
 	}
 	mapper := pathmap.New(s.mappings)
+	kinds := s.serverKinds()
 	movies := 0
 	for _, f := range s.enabledLibraryFolders() {
-		if !strings.EqualFold(strings.TrimSpace(f.lib.Type), "movie") {
+		// Discs are looked for next to Plex movies only (a disc on Jellyfin is only reported).
+		if !strings.EqualFold(strings.TrimSpace(f.lib.Type), "movie") || kinds[f.lib.ServerID].ReadOnly() {
 			continue
 		}
 		movies++
@@ -655,7 +670,7 @@ func (c *Checker) checkDiscDetection(_ context.Context, s *snapshot) []result {
 			"mapping in Settings → Media Management, or turn \"Detect Full-Disc Backups\" off.")}
 }
 
-func (c *Checker) checkRecycleBin(_ context.Context, s *snapshot) []result {
+func (c *Checker) checkRecycleBin(ctx context.Context, s *snapshot) []result {
 	if s.settings == nil {
 		return nil
 	}
@@ -672,12 +687,17 @@ func (c *Checker) checkRecycleBin(_ context.Context, s *snapshot) []result {
 	bin = filepath.Clean(bin)
 
 	var mapper *pathmap.Mapper
-	var libRoots []string // local folders of the library locations (mapped)
+	var libRoots []string  // local folders of the library locations (mapped)
+	var plexRoots []string // … of Plex servers (the .plexignore check)
 	if s.serversOK && s.libsOK && s.mapsOK {
 		mapper = pathmap.New(s.mappings)
+		kinds := s.serverKinds()
 		for _, f := range s.enabledLibraryFolders() {
 			if root, ok := mapper.ToLocal(models.PathSourceServer, f.lib.ServerID, f.location); ok {
 				libRoots = append(libRoots, root)
+				if kinds[f.lib.ServerID].IsPlex() {
+					plexRoots = append(plexRoots, root)
+				}
 			}
 		}
 	}
@@ -730,28 +750,32 @@ func (c *Checker) checkRecycleBin(_ context.Context, s *snapshot) []result {
 		return fail(fmt.Sprintf("Dupearr cannot write to the recycle bin folder %s: %s", bin, errText(err)))
 	}
 
-	for _, root := range libRoots {
+	var out []result
+	if mapper != nil {
+		out = c.jellyfinBinIssues(ctx, s, bin, mapper)
+	}
+	for _, root := range plexRoots {
 		if !within(bin, root) {
 			continue
 		}
 		ignoreFile := filepath.Join(bin, plexIgnoreName)
 		switch all, err := ignoresEverything(ignoreFile); {
 		case all:
-			return nil
+			return out
 		case err == nil:
 			// A .plexignore exists (e.g. created by the user) but does not exclude everything, and
 			// the executor never overwrites an existing one.
-			return []result{*issue(SourceRecycleBin, "plexignore", models.HealthWarning,
+			return append(out, *issue(SourceRecycleBin, "plexignore", models.HealthWarning,
 				fmt.Sprintf("The recycle bin folder %s is inside the Plex library folder %s, but its %s does not "+
 					"exclude everything, so Plex may add recycled files back to the library. Add a line \"*\" to %s.",
-					bin, root, plexIgnoreName, ignoreFile))}
+					bin, root, plexIgnoreName, ignoreFile)))
 		}
-		return []result{*issue(SourceRecycleBin, "plexignore", models.HealthWarning,
+		return append(out, *issue(SourceRecycleBin, "plexignore", models.HealthWarning,
 			fmt.Sprintf("The recycle bin folder %s is inside the Plex library folder %s and has no %s, so Plex may "+
 				"add recycled files back to the library. Create %s containing a single line \"*\".",
-				bin, root, plexIgnoreName, filepath.Join(bin, plexIgnoreName)))}
+				bin, root, plexIgnoreName, filepath.Join(bin, plexIgnoreName))))
 	}
-	return nil
+	return out
 }
 
 // maxPlexIgnoreSize caps how much of a .plexignore is read.

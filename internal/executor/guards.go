@@ -37,9 +37,14 @@ func (r *run) serverIdentityProblem(ctx context.Context, sid int64, c MediaServe
 	if id == nil {
 		return "", errors.New("the server did not report its identity")
 	}
-	if got := strings.TrimSpace(id.MachineIdentifier); !strings.EqualFold(got, want) {
+	switch got := strings.TrimSpace(id.MachineIdentifier); {
+	case strings.EqualFold(got, want):
+	case srv.Kind.IsPlex():
 		return fmt.Sprintf("server identity changed: %s now answers as Plex server %q but Dupearr knows it as %q (was its URL changed to another server?); nothing was removed — check the media server's settings, then scan again",
 			srv.Name, got, want), nil
+	default:
+		return fmt.Sprintf("server identity changed: %s now answers as %s server %q but Dupearr knows it as %q (was its URL changed to another server?); nothing was removed — check the media server's settings, then scan again",
+			srv.Name, srv.Kind.Label(), got, want), nil
 	}
 	return "", nil
 }

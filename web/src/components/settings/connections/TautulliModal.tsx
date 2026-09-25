@@ -22,6 +22,7 @@ import {
   validateHttpUrl,
   type FieldErrors,
 } from './connectionUtils';
+import { isPlexServer } from './mediaServerShared';
 import { SecretInput } from './SecretInput';
 
 export interface TautulliFormValues {
@@ -39,9 +40,11 @@ const FIELDS = ['name', 'serverId', 'url', 'apiKey', 'verifyTls', 'enabled'] as 
 export const TAUTULLI_MIN_VERSION = '2.18.0';
 
 export function tautulliFormValues(instance: TautulliInstance | null, servers: readonly MediaServer[]): TautulliFormValues {
+  // Tautulli monitors Plex only: a Jellyfin server is never offered (the API refuses it).
+  const plex = servers.filter(isPlexServer);
   return {
     name: instance?.name ?? 'Tautulli',
-    serverId: instance?.serverId ?? (servers.length === 1 ? servers[0]!.id : null),
+    serverId: instance?.serverId ?? (plex.length === 1 ? plex[0]!.id : null),
     url: instance?.url ?? '',
     apiKey: instance?.apiKey ?? '',
     verifyTls: instance?.verifyTls ?? true,
@@ -89,12 +92,13 @@ export function tautulliPayload(values: TautulliFormValues, id?: Id): TautulliIn
 export interface TautulliModalProps {
   /** Connection to edit; null = add. */
   instance: TautulliInstance | null;
-  /** Configured media servers (the one Tautulli monitors is chosen from them). */
+  /** Configured media servers (the Plex server Tautulli monitors is chosen from them). */
   servers: readonly MediaServer[];
   onClose: () => void;
 }
 
-export function TautulliModal({ instance, servers, onClose }: TautulliModalProps) {
+export function TautulliModal({ instance, servers: allServers, onClose }: TautulliModalProps) {
+  const servers = allServers.filter(isPlexServer);
   const idPrefix = useId();
   const toast = useToast();
   const [values, setValues] = useState<TautulliFormValues>(() => tautulliFormValues(instance, servers));
@@ -200,7 +204,7 @@ export function TautulliModal({ instance, servers, onClose }: TautulliModalProps
       >
         <Select
           id={id('serverId')}
-          placeholder={servers.length === 0 ? 'Add a media server first' : 'Choose a Plex server…'}
+          placeholder={servers.length === 0 ? 'Add a Plex server first' : 'Choose a Plex server…'}
           options={servers.map((s) => ({ value: String(s.id), label: s.name }))}
           value={values.serverId ? String(values.serverId) : ''}
           onChange={(v) => set('serverId', v ? Number(v) : null)}

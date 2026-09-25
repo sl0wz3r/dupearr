@@ -64,7 +64,7 @@ export interface ArrFormValues {
   verifyTls: boolean;
   enabled: boolean;
   tags: string[];
-  /** The Plex servers the instance feeds (docs/DECISIONS.md D11); shown with two or more servers. */
+  /** The media servers the instance feeds (docs/DECISIONS.md D11); shown with two or more servers. */
   serverIds?: Id[];
   /**
    * The person confirmed the list (an explicit tick, never implied by saving another field): the
@@ -75,7 +75,7 @@ export interface ArrFormValues {
 
 const FIELDS = ['name', 'url', 'apiKey', 'verifyTls', 'enabled', 'tags', 'serverIds', 'linksConfirmed'] as const;
 
-/** The "Plex servers it feeds" field only matters with two or more media servers. */
+/** The "Media servers it feeds" field only matters with two or more media servers. */
 export function showServerLinks(servers: readonly MediaServer[] | undefined): boolean {
   return (servers ?? []).length >= 2;
 }
@@ -349,7 +349,7 @@ function ArrInstanceForm({
 
       {withLinks && (
         <FormGroup
-          label="Plex servers it feeds"
+          label="Media servers it feeds"
           errors={errors.serverIds}
           helpText={
             <>
@@ -357,8 +357,8 @@ function ArrInstanceForm({
               size, only to versions of the servers chosen here (never to a server declared separate storage), and only once
               you confirmed this choice; files that map to local paths are always compared by those. Choose only servers that
               see the same files as {kindLabel}: if neither side has a path mapping, a server on another host chosen here by
-              mistake can make Dupearr attribute its copy to {kindLabel}&apos;s file. Check the list again after adding or
-              enabling a media server.
+              mistake can make Dupearr attribute its copy to {kindLabel}&apos;s file. Plex and Jellyfin servers count alike.
+              Adding or enabling a media server (Plex or Jellyfin) unconfirms this choice: check the list again then.
               {instance && !linksConfirmedFor(instance) && (
                 <>
                   {' '}
@@ -368,7 +368,7 @@ function ArrInstanceForm({
             </>
           }
         >
-          <div className="flex flex-col gap-1.5" role="group" aria-label="Plex servers it feeds">
+          <div className="flex flex-col gap-1.5" role="group" aria-label="Media servers it feeds">
             {(servers.data ?? []).map((srv) => {
               const checked = (values.serverIds ?? []).includes(srv.id);
               return (

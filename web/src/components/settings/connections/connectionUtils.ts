@@ -58,6 +58,14 @@ export function plexUrlCheck(url: URL): string | null {
   return null;
 }
 
+/** Jellyfin: the web client's address (…/web, …/web/index.html) is not the server address. */
+export function jellyfinUrlCheck(url: URL): string | null {
+  if (/(^|\/)web(\/(index\.html)?)?$/i.test(url.pathname)) {
+    return 'Use the server address without "/web", e.g. http://jellyfin:8096 (with its base URL, if it has one)';
+  }
+  return null;
+}
+
 /** Radarr/Sonarr: the URL is the base address (incl. URL base), never the API path. */
 export function arrUrlCheck(url: URL): string | null {
   if (/\/api(\/v\d+)?\/?$/i.test(url.pathname)) {

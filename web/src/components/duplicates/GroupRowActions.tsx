@@ -19,13 +19,13 @@ export interface GroupRowActionsProps extends GroupRowActionHandlers {
 }
 
 /**
- * Approve / Ignore / Unignore icon buttons, shown according to the group's status. `review` groups
- * and groups that remove a full disc get no Approve button here: they are approved from their
- * detail page after comparing the copies.
+ * Approve / Ignore / Unignore icon buttons, shown according to the group's status. `review` groups,
+ * groups that remove a full disc and groups with a copy on Jellyfin get no Approve button here: they
+ * are approved from their detail page after comparing the copies.
  */
 export function GroupRowActions({ group, onApprove, onIgnore, onUnignore, busyId, className }: GroupRowActionsProps) {
   const busy = busyId === group.id;
-  const approvable = canApproveFromList(group.status, group.removeCount, group.files);
+  const approvable = canApproveFromList(group.status, group.removeCount, group.files, group.flags);
   return (
     <div className={clsx('flex items-center justify-end gap-0.5', className)}>
       {approvable && (

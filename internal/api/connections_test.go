@@ -40,7 +40,7 @@ func TestMediaServerCRUD(t *testing.T) {
 		{map[string]any{"name": "x", "url": "http://user:pw@plex", "token": fakePlexToken}, "url"},
 		{map[string]any{"name": "x", "url": ts.plex.srv.URL}, "token"},
 		{map[string]any{"name": "x", "url": ts.plex.srv.URL, "token": maskedSecret}, "token"},
-		{map[string]any{"name": "x", "url": ts.plex.srv.URL, "token": "t", "kind": "jellyfin"}, "kind"},
+		{map[string]any{"name": "x", "url": ts.plex.srv.URL, "token": "t", "kind": "emby"}, "kind"},
 	}
 	for _, tt := range tests {
 		if props := validationProps(t, ts.do(http.MethodPost, "/api/v1/mediaserver", tt.body)); !hasProp(props, tt.prop) {

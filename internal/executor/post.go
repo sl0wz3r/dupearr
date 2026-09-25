@@ -46,6 +46,9 @@ func (r *run) postActions(g *models.DuplicateGroup, done []*outcome, vr *verific
 	defer cancel()
 	r.arrPostActions(ctx, g, removed, vr)
 	r.plexPostActions(ctx, g, removed, vr)
+	// Independent of RefreshPlexAfterDelete: for a server Dupearr never deletes through (Jellyfin)
+	// the notification is the only way it drops the removed copy (readonly.go).
+	r.notifyServers(ctx, g, removed)
 }
 
 // postGrace bounds post-processing when the run was cancelled right after a removal.
