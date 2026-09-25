@@ -6,6 +6,8 @@ All notable changes to Dupearr are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-25
+
 ### Added
 
 - Trusted proxies and allowed host names in *Settings → General* and `config.xml`
@@ -53,12 +55,18 @@ All notable changes to Dupearr are documented here. The format follows
   *SeparateServerCheck* and *MediaServerIdentityCheck* (#8). API (additive): `MediaServer.storage`,
   `ArrInstance.serverIds` / `linksConfirmed`, `MediaVersion.otherServers`,
   `DuplicateGroup.crossServer`, `ScanRun.stats.separateNameMatches`.
+- Research and design notes for the next roadmap items, with sources and what is still
+  UNVERIFIED: [Jellyfin and Emby](docs/research/jellyfin-emby.md) (#4),
+  [Lidarr and music](docs/research/lidarr-music.md) (#6),
+  [hash-based detection](docs/research/hash-based-detection.md) (#7),
+  [several Plex servers](docs/research/multi-server.md) (#8),
+  [disc images and TV season discs](docs/research/disc-images-and-tv-discs.md) (#9) and
+  [translations](docs/research/i18n.md) (#10).
 
 ### Changed
 
 - `GET /api/v1/duplicate/stats` is documented as a stable contract for dashboards: fields may be
   added, never renamed, removed or retyped; a test pins every field (#3).
-
 - `dupearr reset-auth` also clears the trusted proxies and allowed hosts in `config.xml` (values
   from environment variables stay and are reported), so it recovers from a wrong list too (#1).
   It keeps them where clearing them would trust more clients: both while `DUPEARR__AUTH__METHOD`
@@ -295,6 +303,7 @@ First public version.
 - Security review report and deployment hardening guide: [docs/SECURITY.md](docs/SECURITY.md);
   vulnerability reporting: [SECURITY.md](SECURITY.md).
 
-[Unreleased]: https://github.com/sl0wz3r/dupearr/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/sl0wz3r/dupearr/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/sl0wz3r/dupearr/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/sl0wz3r/dupearr/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/sl0wz3r/dupearr/releases/tag/v0.1.0
