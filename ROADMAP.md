@@ -130,11 +130,22 @@ still needs a design.
 ## Several Plex servers
 
 - **Today:** each server is scanned and grouped on its own. The same title on two servers is not a
-  duplicate. If two servers index one share, they produce two separate sets of groups (each keeper
-  is confirmed right before a removal, so one server's removals cannot take the other's last
-  copy).
-- **Goal:** cross-server groups ("keep one copy across all my servers").
+  duplicate. Removals do **not** check the other servers yet: server A can remove a file that is
+  the only copy server B lists (when B indexes fewer folders), and a remote server without path
+  mappings whose paths equal local ones can have its copy matched to the local Radarr/Sonarr file.
+  Until this is fixed, map every server's folders, keep the recycle bins on and review other
+  servers' groups carefully.
+- **Goal:** cross-server protection first, then cross-server groups ("keep one copy across all my
+  servers").
 - **Care:** keeper verification then has to span servers. This is a `safety` item.
+- **Research and design:** [docs/research/multi-server.md](docs/research/multi-server.md), with
+  the four cases that happen today (§2.7). Recommendation: a first slice that adds no new way to
+  remove anything. A cross-server index of the files every server lists protects a file whose
+  removal would leave another server's item without a copy that can be proven distinct, never
+  removes a file another server's group keeps, refuses raw-path \*arr matching between a mapped
+  \*arr and an unmapped server, and shows "also on server B" in review. Cross-server groups come
+  later, after live checks of device and inode numbers across the mounts people use; copies on a
+  server whose storage Dupearr cannot see stay out of scope.
 
 ## Full-disc backups: disc images and TV season discs
 

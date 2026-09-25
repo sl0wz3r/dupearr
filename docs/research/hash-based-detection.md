@@ -113,7 +113,7 @@ today they are UNVERIFIED.
 * `likelySameFilePairs` / `sameNamesAndSizes` flag the same file name and size in different
   folders as `same_file` (review). The comment's example is one file reached through two paths.
   Known, **differing** inodes rule a pair out (`helpers.go:686–724`; the comparison of the whole
-  `"<device>:<inode>"` string is at 718). **Side finding for the main session:** differing
+  `"<device>:<inode>"` string is at 718). **Side finding:** differing
   `device:inode` values prove two different files only when the **devices are equal**. When only
   the devices differ, the pair may be one file seen through two mounts of different filesystem
   types: an Unraid user share and a disk share (§3.4), a mergerfs or other FUSE union and its
@@ -814,7 +814,7 @@ func Full(ctx context.Context, root *os.Root, rel string, lim Limiter) ([32]byte
 func Equal(ctx context.Context, a, b *os.File, lim Limiter) (equal bool, before, after [2]FileID, err error)
 ```
 
-Proposed **D11** (for the main session to adapt):
+Proposed **D11** (for the maintainers to adapt):
 
 > Hash-based detection (issue #7, `docs/research/hash-based-detection.md`). Opt-in `HashScan`, off
 > by default, report only in its first release. It reads only files whose exact size equals that
