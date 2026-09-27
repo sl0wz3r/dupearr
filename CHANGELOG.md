@@ -6,7 +6,7 @@ All notable changes to Dupearr are documented here. The format follows
 
 ## [Unreleased]
 
-## [0.4.1] - 2026-09-27
+## [0.4.2] - 2026-09-27
 
 ### Added
 
@@ -27,6 +27,19 @@ All notable changes to Dupearr are documented here. The format follows
   prints a report of outdated and vulnerable dependencies (Go modules, npm packages, the Go and
   Node.js release lines, base image digests, govulncheck, npm audit). CONTRIBUTING.md,
   *Dependency updates*, explains both.
+
+### Fixed
+
+- A duplicate could stay stuck as "Approved: 1 removal(s) queued" after its removal had
+  succeeded, when a background re-evaluation (after saving settings or a profile) ran at the same
+  moment and wrote back the status it had read before the removal. Nothing extra was removed; only
+  the status was wrong until the next scan. Status writes of a removal run now wait for the
+  re-evaluation, like approvals already did.
+
+## [0.4.1] - 2026-09-27 [YANKED]
+
+Tagged but never released: its release build failed an end-to-end test (a race in the test
+harness, not in Dupearr). Its changes ship in 0.4.2.
 
 ## [0.4.0] - 2026-09-25
 
@@ -410,7 +423,8 @@ First public version.
 - Security review report and deployment hardening guide: [docs/SECURITY.md](docs/SECURITY.md);
   vulnerability reporting: [SECURITY.md](SECURITY.md).
 
-[Unreleased]: https://github.com/sl0wz3r/dupearr/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/sl0wz3r/dupearr/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/sl0wz3r/dupearr/compare/v0.4.0...v0.4.2
 [0.4.1]: https://github.com/sl0wz3r/dupearr/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/sl0wz3r/dupearr/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/sl0wz3r/dupearr/compare/v0.2.0...v0.3.0
