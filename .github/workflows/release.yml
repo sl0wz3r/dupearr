@@ -25,10 +25,20 @@
 # Renovate, .github/renovate.json, bumps both); the Dockerfile pins its base images by digest; the
 # test job gates on govulncheck and npm audit; the image is tested before it is pushed; the pushed
 # image carries BuildKit SBOM and SLSA provenance (mode=max) attestations; and GitHub artifact
-# attestations (Sigstore) cover the image digest and every release archive:
+# attestations (Sigstore) cover the image digest and every release asset:
 #   gh attestation verify oci://ghcr.io/<owner>/dupearr:X.Y.Z --owner <owner>
 #   gh attestation verify dupearr_X.Y.Z_linux_amd64.tar.gz --owner <owner>
 # The release notes name the image digest, so users can pin exactly this image (IMAGE:X.Y.Z@sha256:...).
+#
+# SBOMs: the release also carries software bills of materials, SPDX 2.3 and CycloneDX 1.6 JSON, made
+# by Syft (the sbom job): dupearr_X.Y.Z_source.{spdx,cdx}.json for the tagged source (Go modules
+# from go.mod/go.sum, the web UI's runtime npm packages from web/package-lock.json, the workflows'
+# actions) and dupearr_X.Y.Z_image_linux_{amd64,arm64}.{spdx,cdx}.json for each platform of the
+# pushed image, by digest (the alpine packages and the Go modules compiled into the binary). They
+# are listed in checksums.txt, so the archives' attestation covers them as well
+# (gh attestation verify dupearr_X.Y.Z_source.spdx.json --owner <owner>). No separate SBOM
+# attestation on the image: BuildKit's SBOM attestation is part of the image index, whose digest the
+# image's provenance attestation already covers.
 name: release
 
 on:
@@ -286,10 +296,125 @@ jobs:
           DIGEST: ${{ steps.push.outputs.digest }}
         run: cosign sign --yes "${IMAGE}@${DIGEST}"
 
+  sbom:
+    name: SBOMs
+    # After the image: the image SBOMs describe the digest that was pushed.
+    needs: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      # Read the image just pushed (its package may still be private). Nothing is written here: the
+      # binaries job publishes the files with the release.
+      packages: read
+    steps:
+      # The version ends up in file names and command lines below: validate it here too.
+      - name: Check the tag
+        run: |
+          set -eu
+          if ! printf '%s\n' "${GITHUB_REF_NAME}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "Tag '${GITHUB_REF_NAME}' is not a release version (vX.Y.Z or vX.Y.Z-pre.N)" >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Syft, the generator behind BuildKit's in-image SBOM as well. The action installs the Syft
+      # release its own commit pins, through Syft's installer, which checks the download against the
+      # release's checksums; Renovate bumps the action (and with it Syft).
+      - name: Install Syft
+        id: syft
+        uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+
+      # On the fresh checkout, before anything is installed or built: the Go modules of go.mod/go.sum,
+      # the web UI's runtime npm packages from web/package-lock.json (what the embedded UI bundles;
+      # its build tooling is left out, as in the npm audit --omit=dev gate) and the actions the
+      # workflows use. Explicit format versions, so a Syft update cannot change them unannounced.
+      - name: Source SBOMs
+        env:
+          SYFT: ${{ steps.syft.outputs.cmd }}
+        run: |
+          set -eu
+          version="${GITHUB_REF_NAME#v}"
+          out="${RUNNER_TEMP}/sbom"
+          mkdir -p "$out"
+          "$SYFT" scan dir:. --source-name dupearr --source-version "$version" \
+            -o "spdx-json@2.3=${out}/dupearr_${version}_source.spdx.json" \
+            -o "cyclonedx-json@1.6=${out}/dupearr_${version}_source.cdx.json"
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # One SBOM per platform of the pushed index, read from the registry by digest (nothing is run):
+      # the alpine packages and the Go modules compiled into /app/dupearr (from its build info). The
+      # web UI's npm packages are inside the binary, where no scanner can see them: the source SBOM
+      # lists them.
+      - name: Image SBOMs
+        env:
+          SYFT: ${{ steps.syft.outputs.cmd }}
+          IMAGE: ${{ needs.image.outputs.image }}
+          DIGEST: ${{ needs.image.outputs.digest }}
+        run: |
+          set -eu
+          case "$DIGEST" in
+            sha256:*) ;;
+            *) echo "The image job reported no image digest ('$DIGEST')" >&2; exit 1 ;;
+          esac
+          version="${GITHUB_REF_NAME#v}"
+          out="${RUNNER_TEMP}/sbom"
+          for platform in linux/amd64 linux/arm64; do
+            name="dupearr_${version}_image_$(printf '%s' "$platform" | tr / _)"
+            "$SYFT" scan "registry:${IMAGE}@${DIGEST}" --platform "$platform" --source-version "$version" \
+              -o "spdx-json@2.3=${out}/${name}.spdx.json" \
+              -o "cyclonedx-json@1.6=${out}/${name}.cdx.json"
+          done
+
+      # Refuse an empty or partial SBOM (a cataloger that silently found nothing): each file must list
+      # a Go module, an npm package (source) or an alpine package (image) that the release contains.
+      - name: Check the SBOMs
+        run: |
+          set -eu
+          cd "${RUNNER_TEMP}/sbom"
+          lists() {
+            file=$1
+            shift
+            case "$file" in
+              *.spdx.json) items=.packages ;;
+              *) items=.components ;;
+            esac
+            for name in "$@"; do
+              if ! jq -e --arg n "$name" "any(${items}[]?; .name == \$n)" "$file" > /dev/null; then
+                echo "$file does not list $name" >&2
+                exit 1
+              fi
+            done
+          }
+          version="${GITHUB_REF_NAME#v}"
+          for format in spdx cdx; do
+            lists "dupearr_${version}_source.${format}.json" modernc.org/sqlite golang.org/x/crypto react
+            for arch in amd64 arm64; do
+              lists "dupearr_${version}_image_linux_${arch}.${format}.json" modernc.org/sqlite stdlib tini
+            done
+          done
+          ls -l
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom
+          path: ${{ runner.temp }}/sbom/
+          if-no-files-found: error
+          # Only a hand-over to the binaries job (and its re-runs): the release keeps the files.
+          retention-days: 7
+
   binaries:
     name: release binaries
-    # After the image: the release notes name its digest.
-    needs: [test, image]
+    # After the image (the release notes name its digest) and the SBOMs (release assets).
+    needs: [test, image, sbom]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -341,7 +466,32 @@ jobs:
           make release VERSION="${GITHUB_REF_NAME#v}" COMMIT="$(git rev-parse --short HEAD)"
           cat dist/checksums.txt
 
-      - name: Attest the archives
+      # The sbom job's files, from this run (the download checks the artifact's digest), next to the
+      # archives. make release starts from an empty dist/, so this comes after it.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: sbom
+          path: dist
+
+      # checksums.txt lists the SBOMs as well, so the attestation below covers them.
+      - name: Add the SBOMs to checksums.txt
+        run: |
+          set -eu
+          version="${GITHUB_REF_NAME#v}"
+          cd dist
+          for f in "dupearr_${version}_source" "dupearr_${version}_image_linux_amd64" "dupearr_${version}_image_linux_arm64"; do
+            for ext in spdx.json cdx.json; do
+              if [ ! -s "${f}.${ext}" ]; then
+                echo "Missing SBOM ${f}.${ext}" >&2
+                exit 1
+              fi
+            done
+          done
+          # The same command as make release, over the archives and the SBOMs.
+          sha256sum dupearr_* > checksums.txt
+          cat checksums.txt
+
+      - name: Attest the archives and SBOMs
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-checksums: dist/checksums.txt
@@ -368,12 +518,14 @@ jobs:
             echo
             echo "Pin exactly this image (Docker verifies every byte it pulls): \`${IMAGE}:${VERSION}@${DIGEST}\`"
             echo
-            echo "Verify the build provenance: \`gh attestation verify oci://${IMAGE}:${VERSION} --owner ${OWNER}\` (image) and \`gh attestation verify <archive> --owner ${OWNER}\` (binaries). SHA-256 sums: \`checksums.txt\`."
+            echo "Verify the build provenance: \`gh attestation verify oci://${IMAGE}:${VERSION} --owner ${OWNER}\` (image) and \`gh attestation verify <file> --owner ${OWNER}\` (archives and SBOMs). SHA-256 sums: \`checksums.txt\`."
+            echo
+            echo "SBOMs (SPDX 2.3 and CycloneDX 1.6 JSON): \`dupearr_${tag#v}_source.*.json\` (Go modules, the web UI's npm packages) and \`dupearr_${tag#v}_image_linux_{amd64,arm64}.*.json\` (each platform of the image above)."
             echo
             if [ -s changes.md ]; then cat changes.md; else echo "See [CHANGELOG.md](CHANGELOG.md)."; fi
           } > notes.md
           set --
-          for f in dist/*.tar.gz dist/*.zip dist/checksums.txt; do
+          for f in dist/*.tar.gz dist/*.zip dist/*.spdx.json dist/*.cdx.json dist/checksums.txt; do
             if [ -f "$f" ]; then set -- "$@" "$f"; fi
           done
           if gh release view "$tag" >/dev/null 2>&1; then

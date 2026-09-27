@@ -140,6 +140,40 @@ Dupearr container mappings) and the relevant part of the log at `debug` level. D
 secrets in its log, but not file paths or host names: check them before you post. Never post API
 keys, tokens or passwords. [SUPPORT.md](SUPPORT.md#sharing-logs-safely) has the details.
 
+## Dependency updates
+
+Every dependency is pinned: Go modules by `go.sum`, the web UI's npm packages by
+`web/package-lock.json`, base images by digest and CI actions by commit SHA (with the release as a
+`# vX.Y.Z` comment; `go test ./deploy/` enforces the digests and SHAs).
+[Renovate](https://docs.renovatebot.com/) keeps them current with the rules in
+[`.github/renovate.json`](.github/renovate.json):
+
+- grouped pull requests, at most weekly: CI actions, base image digests, Go modules, the web UI's
+  runtime packages, and its build and test tooling; `web/package-lock.json` is refreshed monthly;
+- a new release waits 3 days before it is proposed (a compromised or retracted release is usually
+  caught by then); base image digests and fixes for known vulnerabilities do not wait;
+- major updates, and a CI action whose release tag was moved to another commit (how a hijacked tag
+  shows up; the 3-day wait cannot catch it), wait on the *Dependency Dashboard* issue until they
+  are ticked there;
+- nothing is merged automatically: every update goes through CI like any other change;
+- the Go and Node.js release lines move only by hand, all places together: go.mod's `go`
+  directive (the minimum Go version; there is no `toolchain` line), the `golang`/`node` image tags
+  in the Dockerfiles, the workflows' `go-version`/`node-version` and `@types/node`.
+
+Renovate runs weekly in the maintainer's development repository, which this repository mirrors:
+updates are merged there and arrive here with the next sync, and a pull request merged here would be
+overwritten by it. So please do not open pull requests that only bump a dependency. If an update
+is urgent (a security fix), open an issue, or report a vulnerability privately
+([SECURITY.md](SECURITY.md)).
+
+The dependency report the maintainer's CI writes every week (outdated Go modules and npm packages,
+the Go and Node.js release lines, base image digests, govulncheck, npm audit) also runs by hand; it
+needs Go, npm, jq and curl, and no token:
+
+```sh
+(cd web && npm ci) && sh scripts/dependency-report.sh > dependency-report.md
+```
+
 ## Releasing (maintainers)
 
 1. Move the *Unreleased* changelog entries under the new version and date. Add the same version

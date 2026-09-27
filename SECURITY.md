@@ -73,6 +73,32 @@ Out of scope (see the accepted risks in [docs/SECURITY.md](docs/SECURITY.md#resi
 - denial of service by flooding the network or the host;
 - vulnerabilities in Plex, Radarr, Sonarr or other third-party software (report those upstream).
 
+## Verifying a release
+
+Every [GitHub release](https://github.com/sl0wz3r/dupearr/releases) names the image digest in its notes and
+carries, next to the binaries:
+
+- `checksums.txt`, the SHA-256 of every file (`sha256sum -c checksums.txt --ignore-missing`);
+- SBOMs (software bills of materials) in SPDX 2.3 and CycloneDX 1.6 JSON:
+  `dupearr_<version>_source.spdx.json` and `.cdx.json` list the Go modules and the web UI's npm
+  packages of the tagged source; `dupearr_<version>_image_linux_amd64.spdx.json` and `.cdx.json`
+  (and `_linux_arm64`) list the alpine packages and the Go modules in that platform of the image.
+  Give them to a scanner such as Grype, Trivy or Dependency-Track to check the version you run
+  against advisories published after its release.
+
+GitHub artifact attestations (signed with Sigstore) prove that the image and every file of the
+release, SBOMs included, were built by this repository's release workflow from the tagged commit:
+
+```sh
+gh attestation verify oci://ghcr.io/sl0wz3r/dupearr:<version> --owner sl0wz3r
+gh attestation verify dupearr_<version>_source.spdx.json --owner sl0wz3r
+gh attestation verify dupearr_<version>_linux_amd64.tar.gz --owner sl0wz3r
+```
+
+The image also carries BuildKit's own SBOM and provenance, part of the image index that the
+attestation covers:
+`docker buildx imagetools inspect ghcr.io/sl0wz3r/dupearr:<version> --format '{{ json .SBOM }}'`.
+
 ## Safe harbour
 
 We will not pursue anyone who reports in good faith, tests only against their **own**

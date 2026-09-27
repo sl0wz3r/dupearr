@@ -1,30 +1,118 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "Keeps the digest-pinned base images (Dockerfile, docker/fakemedia.Dockerfile) and the SHA-pinned actions (the workflow directories) current. Renovate reads this file wherever it runs; on GitHub, install the Renovate app for the repository (it only opens pull requests: nothing is merged automatically). Go modules and npm packages are updated by hand (go get, npm update) and gated in CI by govulncheck and npm audit; on GitHub, Dependabot security updates (a repository setting, no dependabot.yml) cover them, so the two bots never propose the same update.",
+  "description": [
+    "Dependency updates for Dupearr: the SHA-pinned actions (workflow directories), the digest-pinned base images (Dockerfile, docker/fakemedia.Dockerfile), the Go modules (go.mod) and the web UI's npm packages (web/package.json). Renovate only opens pull requests; nothing is merged automatically, and every update goes through CI (tests, govulncheck, npm audit) first.",
+    "Renovate runs self-hosted once a week in the private development repository, where updates are merged; they reach the public GitHub repository with the next sync. It is deliberately not installed on GitHub: that repository is a mirror, and a pull request merged there would be overwritten by the next sync. GitHub's Dependabot alerts stay on as a second signal; their fixes are applied in the development repository as well.",
+    "Pinning conventions (enforced by go test ./deploy/): actions by full commit SHA with a '# vX.Y.Z' comment (helpers:pinGitHubActionDigestsToSemver), base images as tag@sha256 digest (docker:pinDigests), Go modules and npm packages by go.sum and package-lock.json."
+  ],
   "extends": [
     "config:recommended",
     "docker:pinDigests",
     "helpers:pinGitHubActionDigestsToSemver"
   ],
-  "enabledManagers": ["dockerfile", "github-actions"],
+  "enabledManagers": ["dockerfile", "github-actions", "gomod", "npm"],
+  "timezone": "UTC",
+  "dependencyDashboard": true,
+  "dependencyDashboardOSVVulnerabilitySummary": "unresolved",
+  "osvVulnerabilityAlerts": true,
+  "automerge": false,
+  "platformAutomerge": false,
+  "prHourlyLimit": 0,
+  "prConcurrentLimit": 10,
+  "postUpdateOptions": ["gomodTidy"],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "description": "Once a month (the weekly run in the first seven days of the month): refresh web/package-lock.json, so fixes in transitive npm packages arrive without waiting for a direct dependency's release.",
+    "schedule": ["* * 1-7 * *"]
+  },
   "packageRules": [
     {
-      "description": "Go and Node: stay on the minor and major lines the project targets (go.mod, the CI workflows); only patch releases and digests are proposed.",
+      "description": "Major updates can change behaviour (and a new action major may need a newer runner): list them on the Dependency Dashboard and open the pull request only once it is ticked there.",
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Go and Node.js base images: stay on the minor and major lines the project targets (go.mod, the CI workflows); only patch releases and digests are proposed.",
       "matchDatasources": ["docker"],
       "matchPackageNames": ["golang", "node"],
       "matchUpdateTypes": ["major", "minor"],
       "enabled": false
     },
     {
-      "description": "New base image digests carry security fixes: group them in one pull request.",
+      "description": "The workflows' setup-go/setup-node versions name a release line (\"1.27\", 24) that the actions resolve to its latest patch release (check-latest): moving to a new line is a deliberate change together with go.mod and the Dockerfile.",
+      "matchManagers": ["github-actions"],
+      "matchDepTypes": ["uses-with"],
+      "matchDepNames": ["go", "node"],
+      "enabled": false
+    },
+    {
+      "description": "go.mod's go directive is the minimum Go version the module needs, not the toolchain the binaries are built with (CI and the Dockerfile use the latest patch release of that line), and there is no toolchain directive: never raise either automatically.",
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["golang", "toolchain"],
+      "enabled": false
+    },
+    {
+      "description": "@types/node follows the Node.js major the project targets (24, like the CI workflows and the node base image).",
+      "matchPackageNames": ["@types/node"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    },
+    {
+      "description": "New base image digests carry security fixes: group them in one pull request, without a waiting period.",
       "matchDatasources": ["docker"],
       "matchUpdateTypes": ["digest", "patch", "pinDigest"],
       "groupName": "base image digests"
     },
     {
-      "description": "Supply chain: propose a new action release only once it has been public for 3 days, so a compromised or retracted tag is usually caught before it is pinned here.",
+      "description": "Supply chain: propose a new action release only once it has been public for 3 days, so a compromised or retracted release is usually caught before it is pinned here. This wait does not cover a tag moved to a new commit: its age comes from the release and commit dates, which whoever moves the tag can backdate (see the next rule). Minor and patch releases share one pull request.",
       "matchManagers": ["github-actions"],
       "minimumReleaseAge": "3 days"
+    },
+    {
+      "description": "A new commit behind an unchanged action tag (update type digest) is how a hijacked tag shows up, and a release tag should never move: list it on the Dependency Dashboard and open the pull request only once it is ticked there, after checking why the tag moved.",
+      "matchManagers": ["github-actions"],
+      "matchDatasources": ["github-tags", "github-releases", "github-digest"],
+      "matchUpdateTypes": ["digest"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "matchDatasources": ["github-tags", "github-releases"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "CI actions"
+    },
+    {
+      "description": "Go modules (direct requirements; indirect ones follow through go get and go mod tidy). npm allows unpublishing for 72 hours, the Go proxy caches whatever it once served: wait 3 days before proposing a release either way. Only releases from the two registries: the monthly package-lock.json refresh has no release date, and would otherwise carry a renovate/stability-days status that stays pending for good.",
+      "matchManagers": ["gomod", "npm"],
+      "matchDatasources": ["go", "npm"],
+      "minimumReleaseAge": "3 days"
+    },
+    {
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Go modules"
+    },
+    {
+      "description": "The web UI's runtime packages end up in the embedded bundle; its build and test tooling does not. One pull request each, so a tooling update never holds back a runtime fix.",
+      "matchManagers": ["npm"],
+      "matchDepTypes": ["dependencies"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "web UI runtime packages"
+    },
+    {
+      "matchManagers": ["npm"],
+      "matchDepTypes": ["devDependencies"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "web UI build and test tooling"
+    },
+    {
+      "description": "The Renovate image that runs these updates (a container step, pinned by digest) is released several times a day: take it once a month (the weekly run in the first seven days of the month). ghcr.io publishes no release dates, so the 3-day wait cannot apply to this image: without timestamp-optional every release would stay pending and the image would never be updated. The wait takes effect by itself should Renovate learn ghcr.io's dates.",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["ghcr.io/renovatebot/renovate"],
+      "groupName": "Renovate",
+      "minimumReleaseAge": "3 days",
+      "minimumReleaseAgeBehaviour": "timestamp-optional",
+      "schedule": ["* * 1-7 * *"]
     }
   ]
 }

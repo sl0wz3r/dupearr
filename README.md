@@ -239,7 +239,9 @@ The image is published on the GitHub Container Registry as `ghcr.io/sl0wz3r/dupe
 `X.Y.Z` and `X.Y`; linux/amd64 and linux/arm64). Every release lists the image digest: pin a
 version **and its digest** (`…/dupearr:0.2.0@sha256:<digest>`) to pull exactly the image that was
 tested, and check where it was built with
-`gh attestation verify oci://ghcr.io/sl0wz3r/dupearr:<version> --owner sl0wz3r`.
+`gh attestation verify oci://ghcr.io/sl0wz3r/dupearr:<version> --owner sl0wz3r`. Each release
+also has SBOMs (SPDX and CycloneDX) of the source and of each image platform:
+[verifying a release](SECURITY.md#verifying-a-release).
 
 ### Unraid
 
@@ -305,6 +307,10 @@ Then open <http://localhost:3873/>. A systemd unit following the Servarr convent
 Linux archives and in [`deploy/systemd/`](deploy/systemd/). Guide:
 [docs/user/installation-native.md](docs/user/installation-native.md) (Linux, macOS, Windows,
 Synology, TrueNAS).
+
+Every release also has SBOMs (SPDX and CycloneDX: `dupearr_<version>_source.*.json` for the
+source, one pair per image platform) and attests each file, archives and SBOMs alike:
+[verifying a release](SECURITY.md#verifying-a-release).
 
 ## First run
 
