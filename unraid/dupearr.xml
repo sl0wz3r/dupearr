@@ -31,8 +31,11 @@ Arr-style web UI and API on port 3873: login, API key, scheduled scans, backups,
   <License>GPL-3.0-or-later</License>
   <Beta>true</Beta>
   <MinVer>6.12</MinVer>
-  <Date>2026-09-25</Date>
-  <Changes>### 0.4.0 (2026-09-25)&#xD;
+  <Date>2026-09-27</Date>
+  <Changes>### 0.4.1 (2026-09-27)&#xD;
+- No changes to the app itself. Each release now includes software bills of materials (SPDX and CycloneDX) for the source and the container image, checksummed and attested.&#xD;
+&#xD;
+### 0.4.0 (2026-09-25)&#xD;
 - Open in Radarr / Open in Sonarr links on each tracked copy, straight to the movie or series page. An optional External URL per instance is used when your browser reaches the app at another address.&#xD;
 - A duplicate held back by the Radarr/Sonarr download queue now shows the queue entry, its state and the app's own message, with a link to its queue.&#xD;
 &#xD;
