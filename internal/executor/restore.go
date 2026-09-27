@@ -355,7 +355,9 @@ func (s *Service) restoreDir(m restoreMove) (*pinnedDir, error) {
 func (s *Service) ignoreRestored(ctx context.Context, g *models.DuplicateGroup, a *models.Action) bool {
 	from := []models.GroupStatus{models.GroupPending, models.GroupReview, models.GroupDeferred,
 		models.GroupProtected, models.GroupQueued, models.GroupResolved, models.GroupFailed}
+	unlockGroup := s.lockGroup()
 	ok, err := s.d.Store.Groups().UpdateStatusIf(ctx, g.ID, from, models.GroupIgnored, restoredIgnoreReason)
+	unlockGroup()
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		s.d.Log.Warn("The group of a restored removal no longer exists, so it could not be ignored", "action", a.ID, "group", g.ID)

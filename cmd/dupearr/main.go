@@ -510,6 +510,8 @@ func (a *app) listen(c config.Config, base context.Context) ([]*http.Server, <-c
 	srv := newServer(addr)
 	start(srv, ln, false)
 	servers := []*http.Server{srv}
+	// The e2e harness (internal/e2e launch) waits for this exact message and address attribute
+	// before it trusts /ping on the port: keep them in step when changing it.
 	a.log.Info("Listening for HTTP", "address", addr, "urlBase", c.UrlBase)
 
 	if c.EnableSsl {

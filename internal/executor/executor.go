@@ -110,11 +110,13 @@ type Deps struct {
 	// DataDir is Dupearr's data folder (config.xml, the database, backups): the recycle bin must
 	// never be, contain or lie inside it (validateRecycleBin). Empty skips that check (tests).
 	DataDir string
-	// GroupLock, when set, is held while an approval reads, checks and queues a group.
-	// cmd/dupearr passes scanner.Service.GroupLock, the lock of the scanner's read → evaluate →
-	// upsert cycle: a scan or re-evaluation that read the group before the approval would
-	// otherwise store the status it read ("pending") over the approval afterwards, which cancels
-	// the approved removals although the approval succeeded. nil = no such lock (tests).
+	// GroupLock, when set, is held while an approval reads, checks and queues a group, and around
+	// every other write of a group's status or flags (lockGroup). cmd/dupearr passes
+	// scanner.Service.GroupLock, the lock of the scanner's read → evaluate → upsert cycle: a scan
+	// or re-evaluation that read the group before such a write would otherwise store the status it
+	// read over it afterwards — "pending" over an approval (which cancels the approved removals
+	// although the approval succeeded), "queued" over the "resolved" of a queue run (the group then
+	// waits for removals that are already done). nil = no such lock (tests).
 	GroupLock sync.Locker
 	// FileIdentity proves, with two or more media servers, that another server's remaining copy is
 	// a different file from the one being removed (docs/DECISIONS.md D11). nil = fileid.Default()
@@ -202,6 +204,20 @@ func (s *Service) lock(ctx context.Context) error {
 }
 
 func (s *Service) unlock() { <-s.runSem }
+
+// lockGroup takes the scanner's group lock (Deps.GroupLock) for a write of a group's status or
+// flags and returns its unlock. A scan or re-evaluation stores the whole group it read — status
+// and flags included — under that lock, and re-evaluations run beside the command queue (a
+// settings save starts one in the background): a write between its read and its store would be
+// overwritten with what it read. Never call it with the lock held (ApproveReviewed holds it
+// throughout): sync.Locker is not reentrant.
+func (s *Service) lockGroup() (unlock func()) {
+	if s.d.GroupLock == nil {
+		return func() {}
+	}
+	s.d.GroupLock.Lock()
+	return s.d.GroupLock.Unlock
+}
 
 // ---------------------------------------------------------------------------
 // Approve
@@ -535,6 +551,9 @@ func (s *Service) CancelGroup(ctx context.Context, groupID int64) error {
 	}
 	s.approveMu.Lock()
 	defer s.approveMu.Unlock()
+	// Cancelling the last queued removal reopens the group in the store; a re-evaluation that read
+	// it as "queued" must not store that over the reopened status (lockGroup).
+	defer s.lockGroup()()
 	g, err := s.d.Store.Groups().Get(ctx, groupID)
 	if err != nil {
 		return fmt.Errorf("cancel group %d: %w", groupID, err)

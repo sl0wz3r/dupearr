@@ -101,6 +101,7 @@ func newJFStack(t *testing.T, o jfOptions) *jfStack {
 		if sid == 0 {
 			continue
 		}
+		d.waitLibrarySync(sid)
 		var libs []models.Library
 		d.expect(http.MethodGet, fmt.Sprintf("/api/v1/mediaserver/%d/library", sid), nil, http.StatusOK, &libs)
 		if len(libs) != 3 {

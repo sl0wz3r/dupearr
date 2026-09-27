@@ -243,6 +243,11 @@ func launch(t testing.TB, dataDir string, o startOptions) (*dupearr, error) {
 		d.waitErr = cmd.Wait()
 		close(d.exited)
 	}()
+	// The port is only free until freePort closed its listener: a fake server of a parallel test
+	// can bind it first, and a fake *arr answers /ping like the real one (the test then talks to
+	// that fake). So /ping counts only once this process logged that it listens on the port; if
+	// it could not bind, it exits with "address already in use" and the start is retried.
+	listening := fmt.Sprintf("Listening for HTTP address=127.0.0.1:%d ", port)
 	deadline := time.Now().Add(startTimeout)
 	for {
 		select {
@@ -256,7 +261,15 @@ func launch(t testing.TB, dataDir string, o startOptions) (*dupearr, error) {
 		}
 		if time.Now().After(deadline) {
 			d.stop()
-			return nil, fmt.Errorf("/ping did not answer within %s:\n%s", startTimeout, tail(out.String(), 80))
+			o := out.String()
+			if !strings.Contains(o, listening) {
+				return nil, fmt.Errorf("dupearr did not log %q within %s (cmd/dupearr listen):\n%s", strings.TrimSpace(listening), startTimeout, tail(o, 80))
+			}
+			return nil, fmt.Errorf("/ping did not answer within %s:\n%s", startTimeout, tail(o, 80))
+		}
+		if !strings.Contains(out.String(), listening) {
+			time.Sleep(pollInterval)
+			continue
 		}
 		resp, err := d.client.Get(d.base + "/ping")
 		if err == nil {
@@ -526,6 +539,32 @@ func (d *dupearr) waitIdle() {
 		idle++
 		return idle >= 2, ""
 	})
+}
+
+// waitLibrarySync waits for the SyncLibraries command that saving media server serverID queued
+// and fails the test unless it completed. The sync is asynchronous by design (POST
+// /api/v1/mediaserver answers 201 once the command is queued, docs/API.md), and every command
+// runs in the one exclusive lane: the sync waits behind whatever runs there, such as the startup
+// CheckHealth, which a slow runner with a race-built binary can still be running when the
+// server's libraries are read. Reading them without waiting then finds no library.
+func (d *dupearr) waitLibrarySync(serverID int64) {
+	d.t.Helper()
+	var id int64
+	for _, c := range d.commands() { // newest first: the sync this server's latest save queued
+		var body struct {
+			ServerID int64 `json:"serverId"`
+		}
+		if c.Name == models.CmdSyncLibraries && json.Unmarshal(c.Body, &body) == nil && body.ServerID == serverID {
+			id = c.ID
+			break
+		}
+	}
+	if id == 0 {
+		d.t.Fatalf("saving media server %d queued no %s command", serverID, models.CmdSyncLibraries)
+	}
+	if c := d.waitCommand(id); c.Status != models.CommandCompleted {
+		d.t.Fatalf("%s of media server %d %s: %s", models.CmdSyncLibraries, serverID, c.Status, c.Message)
+	}
 }
 
 // commandsNamed returns the finished commands called name, oldest first.
@@ -844,6 +883,7 @@ func (s *stack) configure() {
 		}
 		d.expect(http.MethodPost, "/api/v1/pathmapping", pm, http.StatusCreated, nil)
 	}
+	d.waitLibrarySync(s.serverID)
 	var libs []models.Library
 	d.expect(http.MethodGet, fmt.Sprintf("/api/v1/mediaserver/%d/library", s.serverID), nil, http.StatusOK, &libs)
 	if len(libs) != 3 {

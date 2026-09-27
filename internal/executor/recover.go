@@ -87,7 +87,9 @@ func (s *Service) recoverInterrupted(ctx context.Context) (int, error) {
 	for _, gid := range groups {
 		// The group is marked failed before its other removals are cancelled: cancelling the last
 		// queued removal of a "queued" group makes the store reopen it as "pending".
+		unlockGroup := s.lockGroup()
 		ok, err := s.d.Store.Groups().UpdateStatusIf(bg, gid, recoverFrom, models.GroupFailed, interruptedMessage)
+		unlockGroup()
 		switch {
 		case errors.Is(err, store.ErrNotFound):
 			continue

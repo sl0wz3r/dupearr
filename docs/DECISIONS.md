@@ -708,7 +708,10 @@ Decisions the implementation made on top of D1–D8 (append-only; the code comme
   deferred only because something is playing); otherwise the new status replaces it, which
   cancels the queued removals. An approval holds the scanner's group lock
   (`scanner.Service.GroupLock` → `executor.Deps.GroupLock`), so a scan or re-evaluation that read
-  a group before the approval never stores its stale "pending" over "queued" afterwards.
+  a group before the approval never stores its stale "pending" over "queued" afterwards. The
+  executor's other writes of a group's status or flags (a queue run's result, recovery, a
+  restore) hold it too, so a re-evaluation that read a group as "queued" never stores that over
+  the "resolved" the queue run wrote meanwhile.
 - **Patterns match more, never less.** Relative `path_glob` protections and `path_prefix`
   exclusions match at any depth and cover everything below a matched folder.
 - **Variants.** 3D detection is one function (`mediainfo.Is3D`, also used by the engine's `#3d`

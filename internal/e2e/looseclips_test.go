@@ -107,8 +107,13 @@ func newStackWithoutMappings(t *testing.T, sc *fakemedia.Scenario, settings map[
 		}, http.StatusCreated, &a)
 		s.arrIDs[name] = a.ID
 	}
+	d.waitLibrarySync(s.serverID)
 	var libs []models.Library
 	d.expect(http.MethodGet, fmt.Sprintf("/api/v1/mediaserver/%d/library", s.serverID), nil, http.StatusOK, &libs)
+	// Without every library the stack silently lacks the Movies scope group (or a library).
+	if len(libs) == 0 || len(libs) != len(sc.Libraries) {
+		t.Fatalf("libraries = %+v, want the scenario's %d", libs, len(sc.Libraries))
+	}
 	for _, l := range libs {
 		patch := map[string]any{"enabled": true}
 		if l.Type == fakemedia.LibraryMovie {

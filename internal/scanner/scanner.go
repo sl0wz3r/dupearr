@@ -200,8 +200,9 @@ type Service struct {
 	// scanMu serializes whole scans (full and targeted).
 	scanMu sync.Mutex
 	// groupMu serializes the read → evaluate → upsert cycle of a group between scans and
-	// re-evaluations, so neither overwrites the other with stale data. Approvals take it too
-	// (GroupLock). Held only around one group's cycle, never while calling Deps.AutoApprove.
+	// re-evaluations, so neither overwrites the other with stale data. The executor's approvals
+	// and status writes take it too (GroupLock). Held only around one group's cycle, never while
+	// calling Deps.AutoApprove.
 	groupMu sync.Mutex
 
 	// arrRetryDelay is the pause before an *arr read that failed is tried once more.
@@ -231,11 +232,12 @@ func New(d Deps) *Service {
 
 // GroupLock returns the lock of the read → evaluate → upsert cycle of a group (scans and
 // re-evaluations). cmd/dupearr hands it to the executor (executor.Deps.GroupLock), which holds it
-// while it approves a group: a scan or re-evaluation that read the group before an approval can
-// then never store the status it read over the approval (a lost update that reopened the group
-// as "pending" and cancelled the approved removals). The lock is only ever held around one
-// group's cycle, and never while the scanner calls Deps.AutoApprove, so an approval waits at
-// most for one group to be stored.
+// while it approves a group and while it otherwise writes a group's status or flags (a queue
+// run's result): a scan or re-evaluation that read the group before such a write can then never
+// store what it read over it (lost updates that reopened an approved group as "pending" and
+// cancelled its removals, or left a group the queue run had resolved "queued" with nothing left to
+// remove). The lock is only ever held around one group's cycle, and never while the scanner calls
+// Deps.AutoApprove, so the executor waits at most for one group to be stored.
 func (s *Service) GroupLock() sync.Locker { return &s.groupMu }
 
 // now returns the current time in UTC.

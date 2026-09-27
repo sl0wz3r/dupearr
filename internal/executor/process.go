@@ -265,9 +265,12 @@ func gbToBytes(gb int) int64 {
 // while the run was verifying or removing (the user ignored or cancelled it, a scan resolved it or
 // sent it to review): such later decisions win, so the status is only written while the group is
 // still "queued", or already has the decided status — one atomic compare-and-set in the store.
+// It is written under the scanner's group lock (lockGroup): a re-evaluation that read the group
+// as "queued" before the run finished must not store that over "resolved" afterwards.
 // Reports whether it was written.
 func (s *Service) setRunStatus(ctx context.Context, groupID int64, status models.GroupStatus, reason string) bool {
 	ctx = context.WithoutCancel(ctx)
+	defer s.lockGroup()()
 	ok, err := s.d.Store.Groups().UpdateStatusIf(ctx, groupID, []models.GroupStatus{models.GroupQueued, status}, status, reason)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
@@ -279,6 +282,13 @@ func (s *Service) setRunStatus(ctx context.Context, groupID int64, status models
 		s.d.Log.Info("The group changed while the queue ran; keeping its new status", "group", groupID, "runStatus", status)
 	}
 	return ok
+}
+
+// setPlaying sets or clears a group's playing flag under the scanner's group lock (lockGroup):
+// a re-evaluation stores the flags it read, and would otherwise undo the change.
+func (s *Service) setPlaying(ctx context.Context, groupID int64, on bool) error {
+	defer s.lockGroup()()
+	return s.d.Store.Groups().SetFlag(ctx, groupID, models.FlagPlaying, on)
 }
 
 type groupBatch struct {
@@ -893,7 +903,7 @@ func (r *run) deferGroup(g *models.DuplicateGroup, reason string, failure, playi
 	r.sum.Deferred++
 	msg := "Waiting: " + reason + "; the removals stay queued for the next run"
 	if playing {
-		if err := r.s.d.Store.Groups().SetFlag(ctx, g.ID, models.FlagPlaying, true); err != nil && !errors.Is(err, store.ErrNotFound) {
+		if err := r.s.setPlaying(ctx, g.ID, true); err != nil && !errors.Is(err, store.ErrNotFound) {
 			r.s.d.Log.Error("Could not flag a deferred group as playing", "group", g.ID, "error", err)
 		}
 	}
@@ -970,7 +980,7 @@ func (r *run) finalizeGroup(g *models.DuplicateGroup, stamps map[time.Time]bool)
 		reason = fmt.Sprintf("Partially simulated: %d file(s) removed, %d only in a dry run", n[models.ActionSucceeded], n[models.ActionDryRun])
 	}
 	if g.HasFlag(models.FlagPlaying) {
-		if err := r.s.d.Store.Groups().SetFlag(ctx, g.ID, models.FlagPlaying, false); err != nil && !errors.Is(err, store.ErrNotFound) {
+		if err := r.s.setPlaying(ctx, g.ID, false); err != nil && !errors.Is(err, store.ErrNotFound) {
 			r.s.d.Log.Error("Could not clear the playing flag", "group", g.ID, "error", err)
 		}
 	}
